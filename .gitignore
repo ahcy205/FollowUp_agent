@@ -1,0 +1,26 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite3
+
+# Node / frontend
+node_modules/
+frontend/dist/
+backend/static/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
