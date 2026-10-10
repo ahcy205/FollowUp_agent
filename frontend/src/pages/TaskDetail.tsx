@@ -15,17 +15,21 @@ export default function TaskDetailPage() {
   const [retrying, setRetrying] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  const load = useCallback(async () => {
-    clearTimeout(timer.current)
-    try {
-      const d = await api.get<TaskDetail>(`/tasks/${id}`)
-      setData(d)
-      setError('')
-      timer.current = setTimeout(load, d.active_run?.status === 'RUNNING' ? 1200 : 4000)
-    } catch (e) {
-      setError((e as Error).message)
-      timer.current = setTimeout(load, 6000)
+  const load = useCallback(() => {
+    // Named so the polling reschedule can reference itself without capturing `load` mid-initialization.
+    async function poll() {
+      clearTimeout(timer.current)
+      try {
+        const d = await api.get<TaskDetail>(`/tasks/${id}`)
+        setData(d)
+        setError('')
+        timer.current = setTimeout(poll, d.active_run?.status === 'RUNNING' ? 1200 : 4000)
+      } catch (e) {
+        setError((e as Error).message)
+        timer.current = setTimeout(poll, 6000)
+      }
     }
+    return poll()
   }, [id])
 
   useEffect(() => {

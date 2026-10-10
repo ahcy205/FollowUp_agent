@@ -116,9 +116,15 @@ def build_event_message(db: Session, task: Task, trigger: str, event: dict) -> s
 def start_run(db: Session, user: User, task: Task, trigger: str, event: dict | None = None) -> AgentRun:
     if not task.agent_enabled:
         raise AgentBusyError("이 업무는 사용자가 직접 처리하는 후속 업무입니다.")
-    if active_run(db, task):
-        raise AgentBusyError("이 업무에서 Agent가 이미 실행 중이거나 승인을 기다리고 있습니다.")
-    event = event or {}
+    # The "is a run active?" check and the insert happen under the task lock so two concurrent
+    # requests (double-click, reply event racing a retry) cannot both start a run.
+    with _task_lock(task.id):
+        if active_run(db, task):
+            raise AgentBusyError("이 업무에서 Agent가 이미 실행 중이거나 승인을 기다리고 있습니다.")
+        return _create_run(db, user, task, trigger, event or {})
+
+
+def _create_run(db: Session, user: User, task: Task, trigger: str, event: dict) -> AgentRun:
     run = AgentRun(user_id=user.id, task_id=task.id, trigger=trigger, status=RunStatus.RUNNING,
                    messages=[{"role": "user", "content": build_event_message(db, task, trigger, event)}])
     db.add(run)
@@ -137,8 +143,16 @@ def start_run(db: Session, user: User, task: Task, trigger: str, event: dict | N
 # ------------------------------------------------------------------ approval decisions
 
 def decide_approval(db: Session, user: User, approval: ApprovalRequest, approved: bool, comment: str = "") -> AgentRun:
+    with _task_lock(approval.task_id):
+        return _decide_approval(db, user, approval, approved, comment)
+
+
+def _decide_approval(db: Session, user: User, approval: ApprovalRequest, approved: bool, comment: str) -> AgentRun:
+    db.refresh(approval)  # another request may have decided it while we waited for the lock
     run = db.get(AgentRun, approval.run_id)
     task = db.get(Task, approval.task_id)
+    if approval.status != ApprovalStatus.PENDING:
+        raise AgentBusyError("이미 처리된 승인 요청입니다.")
     if run is None or task is None or run.user_id != user.id or run.status != RunStatus.AWAITING_APPROVAL:
         raise AgentBusyError("승인 대기 중인 Agent 실행을 찾을 수 없습니다.")
     spec = TOOLS[approval.tool_name]

@@ -13,7 +13,7 @@ from app.api import auth, demo, tasks
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine
 from app.models import User
-from app.security import CSRFMiddleware, SecurityHeadersMiddleware, hash_password
+from app.security import CSRFMiddleware, SecurityHeadersMiddleware, hash_password, verify_password
 from app.seed import seed_user_data
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -28,7 +28,12 @@ def _ensure_demo_user() -> None:
         return
     with SessionLocal() as db:
         email = s.demo_user_email.lower()
-        if db.scalar(select(User).where(func.lower(User.email) == email)):
+        existing = db.scalar(select(User).where(func.lower(User.email) == email))
+        if existing is not None:
+            if not verify_password(s.demo_user_password, existing.password_hash):
+                existing.password_hash = hash_password(s.demo_user_password)
+                db.commit()
+                log.info("demo user password refreshed: %s", email)
             return
         user = User(email=email, password_hash=hash_password(s.demo_user_password))
         db.add(user)
