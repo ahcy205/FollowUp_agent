@@ -1,13 +1,17 @@
+import asyncio
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agent import orchestrator
 from app.agent.audit import log_action
 from app.config import get_settings
-from app.db import get_db
+from app.db import SessionLocal, get_db
 from app.models import (
     AgentActionLog,
     AgentRun,
@@ -77,6 +81,10 @@ def create_task(body: GoalIn, request: Request, user: User = Depends(get_current
 @router.get("/tasks/{task_id}", response_model=TaskDetail)
 def task_detail(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     task = get_owned(db, Task, task_id, user)
+    return build_task_detail(db, task, user)
+
+
+def build_task_detail(db: Session, task: Task, user: User) -> TaskDetail:
     uid = user.id
     emails = db.scalars(select(Email).where(Email.user_id == uid, Email.task_id == task.id).order_by(Email.created_at)).all()
     logs = db.scalars(select(AgentActionLog).where(AgentActionLog.user_id == uid, AgentActionLog.task_id == task.id)
@@ -101,6 +109,57 @@ def task_detail(task_id: int, user: User = Depends(get_current_user), db: Sessio
         active_run=RunOut.model_validate(active) if active else None, max_steps=get_settings().max_agent_steps,
         can_simulate_reply=has_sent and active is None and task.agent_enabled,
     )
+
+
+def task_fingerprint(db: Session, task: Task) -> tuple:
+    """Cheap summary of everything the task view shows; when it is unchanged, nothing needs to be pushed."""
+    db.refresh(task)
+    last_log = db.scalar(select(func.max(AgentActionLog.id)).where(AgentActionLog.task_id == task.id))
+    runs = db.execute(select(AgentRun.id, AgentRun.status, AgentRun.steps, AgentRun.updated_at)
+                      .where(AgentRun.task_id == task.id).order_by(AgentRun.id.desc()).limit(1)).first()
+    return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None)
+
+
+SSE_POLL_SECONDS = 0.4
+SSE_HEARTBEAT_SECONDS = 15.0
+
+
+def _task_snapshot(task_id: int, uid: int, previous: tuple | None) -> tuple[tuple | None, str | None]:
+    """(fingerprint, payload) — payload is None when nothing changed, fingerprint is None when the task is gone."""
+    with SessionLocal() as s:
+        task = s.scalar(select(Task).where(Task.id == task_id, Task.user_id == uid))
+        if task is None:
+            return None, None
+        fp = task_fingerprint(s, task)
+        if fp == previous:
+            return fp, None
+        return fp, build_task_detail(s, task, s.get(User, uid)).model_dump_json()
+
+
+async def task_event_frames(task_id: int, uid: int, is_disconnected):
+    """SSE frames for one task: the current view immediately, then every change, with keep-alive comments."""
+    last: tuple | None = None
+    last_sent = time.monotonic()
+    while not await is_disconnected():
+        last, payload = await run_in_threadpool(_task_snapshot, task_id, uid, last)
+        if last is None:
+            yield "event: gone\ndata: {}\n\n"
+            return
+        if payload is not None:
+            yield f"event: task\ndata: {payload}\n\n"
+            last_sent = time.monotonic()
+        elif time.monotonic() - last_sent > SSE_HEARTBEAT_SECONDS:
+            yield ": ping\n\n"
+            last_sent = time.monotonic()
+        await asyncio.sleep(SSE_POLL_SECONDS)
+
+
+@router.get("/tasks/{task_id}/events", include_in_schema=False)
+async def task_events(task_id: int, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Server-sent events: the full task view, pushed immediately and then whenever it changes."""
+    get_owned(db, Task, task_id, user)  # 404 before the stream starts
+    return StreamingResponse(task_event_frames(task_id, user.id, request.is_disconnected), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 @router.post("/tasks/{task_id}/agent/retry", response_model=RunOut)

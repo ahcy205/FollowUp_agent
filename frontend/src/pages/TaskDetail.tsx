@@ -14,29 +14,54 @@ export default function TaskDetailPage() {
   const [data, setData] = useState<TaskDetail | null>(null)
   const [error, setError] = useState('')
   const [retrying, setRetrying] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  const load = useCallback(() => {
-    // Named so the polling reschedule can reference itself without capturing `load` mid-initialization.
-    async function poll() {
-      clearTimeout(timer.current)
-      try {
-        const d = await api.get<TaskDetail>(`/tasks/${id}`)
-        setData(d)
-        setError('')
-        timer.current = setTimeout(poll, d.active_run?.status === 'RUNNING' ? 1200 : 4000)
-      } catch (e) {
-        setError((e as Error).message)
-        timer.current = setTimeout(poll, 6000)
-      }
+  // One-shot fetch, used right after a user action so the button feels instant and as a fallback when the stream closes.
+  const load = useCallback(async () => {
+    try {
+      const d = await api.get<TaskDetail>(`/tasks/${id}`)
+      setData(d)
+      setError('')
+    } catch (e) {
+      setError((e as Error).message)
     }
-    return poll()
   }, [id])
 
+  // Live updates: the server pushes the whole task view immediately on connect and then whenever it changes (SSE).
   useEffect(() => {
-    load()
-    return () => clearTimeout(timer.current)
-  }, [load])
+    let source: EventSource | null = null
+    let closed = false
+
+    const connect = () => {
+      if (closed) return
+      source = new EventSource(`/api/tasks/${id}/events`)
+      source.addEventListener('task', (ev) => {
+        setData(JSON.parse((ev as MessageEvent<string>).data) as TaskDetail)
+        setError('')
+      })
+      source.addEventListener('gone', () => {
+        source?.close()
+        setError('이 업무를 더 이상 찾을 수 없습니다. 데모 데이터가 초기화되었을 수 있습니다.')
+      })
+      source.onerror = () => {
+        // The browser retries network drops by itself; an HTTP error (session expired, 404) closes the stream,
+        // so surface it via a normal request and try the stream again later.
+        if (source?.readyState === EventSource.CLOSED) {
+          source = null
+          load()
+          clearTimeout(retryTimer.current)
+          retryTimer.current = setTimeout(connect, 5000)
+        }
+      }
+    }
+    connect()
+
+    return () => {
+      closed = true
+      clearTimeout(retryTimer.current)
+      source?.close()
+    }
+  }, [id, load])
 
   const retry = async () => {
     setRetrying(true)

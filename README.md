@@ -23,7 +23,7 @@
 ## 구조
 
 ```
-React (Vite, TS)  ──same-origin cookie──▶  FastAPI
+React (Vite, TS)  ──same-origin cookie──▶  FastAPI   (업무 상세는 SSE `/api/tasks/{id}/events`로 실시간 수신)
                                              ├─ api/        auth · tasks · approvals · demo(reset, 답변 시뮬레이션)
                                              ├─ agent/
                                              │   ├─ orchestrator.py  Agent Loop (pause/resume, 이벤트 재실행, 안전 제한)
@@ -34,6 +34,11 @@ React (Vite, TS)  ──same-origin cookie──▶  FastAPI
                                              │   └─ prompts.py       시스템 프롬프트 (보안 원칙 포함)
                                              └─ models.py  SQLAlchemy → PostgreSQL (로컬: SQLite) · Alembic
 ```
+
+### 실시간 타임라인 (SSE)
+업무 상세 화면은 폴링 대신 `GET /api/tasks/{id}/events`에 EventSource로 붙습니다. 서버는 연결 직후 전체 TaskDetail 스냅샷을 1회 보내고,
+이후 0.4초 간격으로 업무의 변경 지문(업무 updated_at · 마지막 로그 id · 최근 Run의 상태/단계)을 확인해 바뀐 경우에만 `event: task`로 다시 보냅니다.
+변화가 없으면 15초마다 주석 줄로 연결만 유지합니다. 인증은 기존 쿠키, 소유권 검사는 스트림 시작 전에 수행(타인 업무 404)합니다.
 
 ### LLM
 `LLM_PROVIDER`로 Gemini/Claude를 선택합니다. 대화 기록은 공급자 중립 형식(text / tool_use / tool_result)으로 DB에 저장되고, 호출 시 각 공급자 형식으로 변환됩니다. 따라서 승인 대기 후 재개가 두 공급자 모두에서 동일하게 동작합니다.
