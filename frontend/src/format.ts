@@ -55,3 +55,7 @@ export function relative(iso: string) {
   if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`
   return `${Math.floor(diff / 86400)}일 전`
 }
+
+export function tokens(n: number | undefined) {
+  return (n ?? 0).toLocaleString('ko-KR')
+}

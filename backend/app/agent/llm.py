@@ -34,6 +34,39 @@ class LLMResponse:
         return [b for b in self.content if b.get("type") == "tool_use"]
 
 
+def normalize_usage(raw: dict | None) -> dict:
+    """Provider usage → {input, output, cache_read, total}.
+
+    Anthropic: input_tokens excludes cached tokens, so cache reads/creations are added back into `input`.
+    Gemini: prompt_token_count already includes cached tokens; thoughts count as output.
+    """
+    raw = raw or {}
+
+    def n(*keys: str) -> int:
+        return sum(int(raw.get(k) or 0) for k in keys)
+
+    if "prompt_token_count" in raw or "candidates_token_count" in raw:
+        inp = n("prompt_token_count")
+        out = n("candidates_token_count", "thoughts_token_count")
+        cached = n("cached_content_token_count")
+        total = n("total_token_count") or inp + out
+    else:
+        cached = n("cache_read_input_tokens")
+        inp = n("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+        out = n("output_tokens")
+        total = inp + out
+    return {"input": inp, "output": out, "cache_read": cached, "total": total}
+
+
+def add_usage(acc: dict | None, turn: dict) -> dict:
+    """Accumulate one normalized turn into a run's usage record."""
+    acc = dict(acc or {})
+    for k in ("input", "output", "cache_read", "total"):
+        acc[k] = int(acc.get(k) or 0) + int(turn.get(k) or 0)
+    acc["turns"] = int(acc.get("turns") or 0) + 1
+    return acc
+
+
 class LLMClient(Protocol):
     def agent_turn(self, system: str, tools: list[dict], messages: list[dict]) -> LLMResponse: ...
 

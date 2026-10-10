@@ -101,6 +101,7 @@ class RunOut(ORM):
     trigger: str
     status: str
     steps: int
+    usage: dict
     final_message: str
     error: str
     created_at: datetime

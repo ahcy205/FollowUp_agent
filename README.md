@@ -48,7 +48,8 @@ React (Vite, TS)  ──same-origin cookie──▶  FastAPI   (업무 상세는
 2. LLM이 Tool 호출 → 서버가 allowlist·Pydantic 검증·소유권 검사 후 실행 → `tool_result`로 LLM에 반환 → 반복.
 3. `send_email`(승인 필요 Tool)은 실행하지 않고 `ApprovalRequest` 저장 후 **대화 전체를 DB에 저장하고 중단**. 승인/취소 시 결과를 `tool_result`로 붙여 같은 Run을 재개.
 4. 턴 종료 시 상태가 확정되지 않았으면 한 번 상기시키고, 그래도 없으면 `ACTION_REQUIRED`로 표시.
-5. `MAX_AGENT_STEPS`(기본 10) · `AGENT_TIMEOUT_SECONDS` 초과 시 `STOPPED` + Task `BLOCKED` + “⚠️ Agent 실행 중단” 표시. LLM 오류는 `FAILED` + 복구 버튼(Agent 재시도).
+5. 턴마다 LLM usage를 공급자 중립 형태(`input` · `output` · `cache_read` · `total` · `turns`)로 정규화해 `AgentRun.usage`에 누적합니다. 업무 상세의 **토큰 사용량** 카드가 이번/마지막 실행과 업무 누적치를 보여줍니다(Agent 턴 기준, analyze_email 내부 호출은 제외).
+6. `MAX_AGENT_STEPS`(기본 10) · `AGENT_TIMEOUT_SECONDS` 초과 시 `STOPPED` + Task `BLOCKED` + “⚠️ Agent 실행 중단” 표시. LLM 오류는 `FAILED` + 복구 버튼(Agent 재시도).
 
 ### Tool 권한
 
@@ -85,6 +86,9 @@ cd backend && ../.venv/Scripts/uvicorn app.main:app --reload --port 8000
 # Frontend (개발 서버, /api는 8000으로 프록시)
 cd frontend && npm install && npm run dev        # http://localhost:5173
 # 또는 npm run build → backend/static 으로 빌드되어 http://localhost:8000 에서 함께 서빙
+
+# 스키마가 바뀐 뒤 기존 dev.db를 계속 쓰려면 (로컬 SQLite는 create_all이라 컬럼 추가를 반영하지 않음)
+cd backend && ../.venv/Scripts/alembic upgrade head       # 또는 backend/dev.db 삭제 후 재기동
 
 # Tests (LLM은 스크립트된 가짜 클라이언트로 대체)
 cd backend && ../.venv/Scripts/python -m pytest -q

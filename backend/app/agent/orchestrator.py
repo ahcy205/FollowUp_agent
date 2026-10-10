@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent.audit import log_action
-from app.agent.llm import LLMError, get_llm
+from app.agent.llm import LLMError, add_usage, get_llm, normalize_usage
 from app.agent.prompts import REMINDER_SET_STATUS, SYSTEM_PROMPT
 from app.agent.tools import TOOLS, ToolContext, ToolError, serialize_output, tool_definitions
 from app.config import get_settings
@@ -297,9 +297,12 @@ def _loop(db: Session, run_id: int) -> None:
             return
 
         run.messages = [*run.messages, {"role": "assistant", "content": resp.content}]
+        turn_usage = normalize_usage(resp.usage)
+        run.usage = add_usage(run.usage, turn_usage)
         if resp.text and resp.stop_reason != "end_turn":  # the final summary is logged by AGENT_FINISHED
             log_action(db, user_id=user.id, task_id=task.id, run_id=run.id, action_type="AGENT_THOUGHT",
-                       reason=resp.text[:1500], output_data={"stop_reason": resp.stop_reason, "request_id": resp.request_id})
+                       reason=resp.text[:1500],
+                       output_data={"stop_reason": resp.stop_reason, "request_id": resp.request_id, "usage": turn_usage})
         db.commit()
 
         if resp.stop_reason == "tool_use":

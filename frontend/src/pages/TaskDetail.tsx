@@ -6,8 +6,8 @@ import CompleteFollowupCard from '../components/CompleteFollowupCard'
 import ReplySimulator from '../components/ReplySimulator'
 import StatusBadge from '../components/StatusBadge'
 import Timeline from '../components/Timeline'
-import { dateTime, STATUS_META, TOOL_LABELS } from '../format'
-import type { TaskDetail } from '../types'
+import { dateTime, STATUS_META, tokens, TOOL_LABELS } from '../format'
+import type { Run, TaskDetail, TokenUsage } from '../types'
 
 export default function TaskDetailPage() {
   const { id } = useParams()
@@ -90,6 +90,14 @@ export default function TaskDetailPage() {
   const lastRun = data.runs[0]
   const failed = !run && lastRun && (lastRun.status === 'FAILED' || lastRun.status === 'STOPPED')
   const doneCount = task.plan.filter((p) => p.done).length
+  const shownRun: Run | undefined = run ?? lastRun
+  const taskUsage = data.runs.reduce<TokenUsage>(
+    (acc, r) => ({
+      total: (acc.total ?? 0) + (r.usage?.total ?? 0),
+      turns: (acc.turns ?? 0) + (r.usage?.turns ?? 0),
+    }),
+    { total: 0, turns: 0 },
+  )
   const lastLog = data.logs[data.logs.length - 1]
 
   let live: string | undefined
@@ -304,6 +312,28 @@ export default function TaskDetailPage() {
               </div>
             )}
           </section>
+
+          {shownRun && (shownRun.usage?.turns ?? 0) > 0 && (
+            <section className="card usage">
+              <div className="section-head">
+                <h2>토큰 사용량</h2>
+                <span className="muted small">Agent 턴 기준</span>
+              </div>
+              <div className="usage-main">
+                <b>{tokens(shownRun.usage.total)}</b>
+                <span className="muted small">{run ? '이번 실행' : '마지막 실행'} · LLM 호출 {shownRun.usage.turns}회</span>
+              </div>
+              <div className="usage-parts muted small">
+                입력 {tokens(shownRun.usage.input)} · 출력 {tokens(shownRun.usage.output)}
+                {(shownRun.usage.cache_read ?? 0) > 0 && ` · 캐시 ${tokens(shownRun.usage.cache_read)}`}
+              </div>
+              {data.runs.length > 1 && (
+                <div className="usage-total muted small">
+                  이 업무 누적 <b>{tokens(taskUsage.total)}</b> 토큰 · LLM 호출 {taskUsage.turns}회 · 실행 {data.runs.length}회
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="card">
             <div className="section-head">

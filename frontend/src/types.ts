@@ -90,11 +90,20 @@ export interface Approval {
   email: Email | null
 }
 
+export interface TokenUsage {
+  input?: number
+  output?: number
+  cache_read?: number
+  total?: number
+  turns?: number
+}
+
 export interface Run {
   id: number
   trigger: string
   status: 'RUNNING' | 'AWAITING_APPROVAL' | 'FINISHED' | 'STOPPED' | 'FAILED'
   steps: number
+  usage: TokenUsage
   final_message: string
   error: string
   created_at: string

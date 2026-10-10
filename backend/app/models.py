@@ -148,6 +148,8 @@ class AgentRun(Base):
     # Tool results already produced in the paused assistant turn (sent together on resume).
     pending_results: Mapped[list] = mapped_column(JSON, default=list)
     steps: Mapped[int] = mapped_column(Integer, default=0)
+    # Normalized LLM token usage for this run: {"input", "output", "cache_read", "total", "turns"}
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
     final_message: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
