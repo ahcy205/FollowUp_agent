@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import ApprovalCard from '../components/ApprovalCard'
 import CompleteFollowupCard from '../components/CompleteFollowupCard'
+import GoalEditor from '../components/GoalEditor'
+import CancelTaskPanel from '../components/CancelTaskPanel'
 import ReplySimulator from '../components/ReplySimulator'
 import StatusBadge from '../components/StatusBadge'
 import Timeline from '../components/Timeline'
@@ -88,7 +90,8 @@ export default function TaskDetailPage() {
   const { task, active_run: run } = data
   const pending = data.approvals.find((a) => a.status === 'PENDING')
   const lastRun = data.runs[0]
-  const failed = !run && lastRun && (lastRun.status === 'FAILED' || lastRun.status === 'STOPPED')
+  const closed = task.status === 'COMPLETED' || task.status === 'CANCELLED'
+  const failed = !run && lastRun && (lastRun.status === 'FAILED' || lastRun.status === 'STOPPED') && !closed
   const doneCount = task.plan.filter((p) => p.done).length
   const shownRun: Run | undefined = run ?? lastRun
   const taskUsage = data.runs.reduce<TokenUsage>(
@@ -132,7 +135,10 @@ export default function TaskDetailPage() {
                   {task.origin === 'agent' && ' · Agent가 생성한 후속 업무'}
                 </div>
               </div>
-              <StatusBadge status={task.status} large />
+              <div className="detail-title-right">
+                <StatusBadge status={task.status} large />
+                {!closed && <CancelTaskPanel taskId={task.id} onCancelled={load} />}
+              </div>
             </div>
 
             {task.status === 'COMPLETED' && (
@@ -145,7 +151,9 @@ export default function TaskDetailPage() {
             <dl className="facts">
               <div>
                 <dt>목표</dt>
-                <dd>{task.goal}</dd>
+                <dd>
+                  <GoalEditor taskId={task.id} goal={task.goal} editable={!closed && !run} onSaved={load} />
+                </dd>
               </div>
               <div>
                 <dt>현재 상태</dt>
@@ -215,7 +223,7 @@ export default function TaskDetailPage() {
             </section>
           )}
 
-          {(data.can_simulate_reply || task.status === 'WAITING') && task.agent_enabled && task.status !== 'COMPLETED' && (
+          {(data.can_simulate_reply || task.status === 'WAITING') && task.agent_enabled && !closed && (
             <ReplySimulator taskId={task.id} enabled={data.can_simulate_reply} onSent={load} />
           )}
 
@@ -290,12 +298,14 @@ export default function TaskDetailPage() {
             )}
             {!run && (
               <div className="activity-state idle">
-                <span className="big">{task.status === 'COMPLETED' ? '🏁' : task.status === 'WAITING' ? '⏳' : '💤'}</span>
+                <span className="big">{task.status === 'COMPLETED' ? '🏁' : task.status === 'CANCELLED' ? '🚫' : task.status === 'WAITING' ? '⏳' : '💤'}</span>
                 <div>
                   <b>
                     {task.status === 'COMPLETED'
                       ? '목표 달성 — Agent 종료'
-                      : task.status === 'WAITING'
+                      : task.status === 'CANCELLED'
+                        ? '사용자가 취소한 업무'
+                        : task.status === 'WAITING'
                         ? `${task.waiting_for || '이벤트'} 대기 중`
                         : !task.agent_enabled
                           ? '사용자가 처리할 업무'

@@ -20,6 +20,7 @@ class TaskStatus(StrEnum):
     ACTION_REQUIRED = "ACTION_REQUIRED"
     COMPLETED = "COMPLETED"
     BLOCKED = "BLOCKED"
+    CANCELLED = "CANCELLED"  # closed by the user; history is kept, nothing can restart it
 
 
 class EmailDirection(StrEnum):

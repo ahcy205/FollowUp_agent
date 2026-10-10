@@ -38,6 +38,7 @@ from app.models import (
 log = logging.getLogger(__name__)
 
 ACTIVE_RUN_STATUSES = (RunStatus.RUNNING, RunStatus.AWAITING_APPROVAL)
+CLOSED_TASK_STATUSES = (TaskStatus.COMPLETED, TaskStatus.CANCELLED)
 RETRY_BACKOFF_SECONDS = (3.0, 8.0)  # wait before the 1st, 2nd, ... in-run retry of a transient LLM failure
 
 
@@ -103,6 +104,10 @@ def build_event_message(db: Session, task: Task, trigger: str, event: dict) -> s
         event_text = (f"이 업무와 관련된 새 메일이 도착했습니다 (email_id={event.get('email_id')}, "
                       f"보낸사람={event.get('sender')}, 제목={event.get('subject')!r}). "
                       "check_email과 analyze_email을 한 턴에 함께 호출해 내용을 확인·분석한 뒤 다음 행동을 결정하세요.")
+    elif trigger == "goal_updated":
+        event_text = (f"업무 목표가 변경되었습니다. 이전 목표: {event.get('previous_goal', '')!r}. "
+                      "<user_goal>의 새 목표를 기준으로 plan_goal로 계획을 다시 세우고(이미 달성된 하위 목표는 제목이 같으면 유지됩니다), "
+                      "저장된 상태와 이력을 활용해 이어서 진행하세요.")
     else:
         event_text = "사용자가 Agent 재시도를 요청했습니다. 저장된 상태와 이력을 보고 중단된 지점부터 이어가세요."
     return (
@@ -117,6 +122,8 @@ def build_event_message(db: Session, task: Task, trigger: str, event: dict) -> s
 def start_run(db: Session, user: User, task: Task, trigger: str, event: dict | None = None) -> AgentRun:
     if not task.agent_enabled:
         raise AgentBusyError("이 업무는 사용자가 직접 처리하는 후속 업무입니다.")
+    if task.status in CLOSED_TASK_STATUSES:
+        raise AgentBusyError("이미 완료되었거나 취소된 업무입니다.")
     # The "is a run active?" check and the insert happen under the task lock so two concurrent
     # requests (double-click, reply event racing a retry) cannot both start a run.
     with _task_lock(task.id):
@@ -133,12 +140,46 @@ def _create_run(db: Session, user: User, task: Task, trigger: str, event: dict) 
     task.status = TaskStatus.IN_PROGRESS
     task.waiting_for = ""
     label = {"goal_submitted": "업무 목표 접수 — Agent 시작", "email_received": "새 메일 이벤트 — Agent 재실행",
-             "manual_retry": "사용자 요청으로 Agent 재시도"}.get(trigger, trigger)
+             "manual_retry": "사용자 요청으로 Agent 재시도", "goal_updated": "목표 변경 — Agent 재계획"}.get(trigger, trigger)
     log_action(db, user_id=user.id, task_id=task.id, run_id=run.id, action_type="AGENT_STARTED",
                input_data={"trigger": trigger, **event}, reason=label)
     db.commit()
     _dispatch(run.id)
     return run
+
+
+# ------------------------------------------------------------------ user cancellation
+
+def cancel_task(db: Session, user: User, task: Task, reason: str = "") -> None:
+    """Close a task for good: stop any active run, void pending approvals, keep all history."""
+    with _task_lock(task.id):
+        db.refresh(task)
+        if task.status in CLOSED_TASK_STATUSES:
+            raise AgentBusyError("이미 완료되었거나 취소된 업무입니다.")
+        reason = reason.strip()[:500]
+        now = datetime.now(timezone.utc)
+        run = active_run(db, task)
+        if run is not None:
+            # The loop re-reads the run status before every LLM call and after every reply, so this stops it.
+            run.status = RunStatus.STOPPED
+            run.error = "사용자가 업무를 취소해 Agent 실행을 중단했습니다."
+            run.finished_at = now
+        pending = db.scalars(select(ApprovalRequest).where(ApprovalRequest.task_id == task.id,
+                                                           ApprovalRequest.status == ApprovalStatus.PENDING)).all()
+        for approval in pending:
+            approval.status = ApprovalStatus.CANCELLED
+            approval.decided_at = now
+            approval.user_comment = reason
+        before = task.status
+        task.status = TaskStatus.CANCELLED
+        task.waiting_for = ""
+        task.next_action = "사용자가 취소한 업무입니다." + (f" 사유: {reason}" if reason else "")
+        log_action(db, user_id=user.id, task_id=task.id, run_id=run.id if run else None, action_type="TASK_CANCELLED",
+                   input_data={"from": before, "to": TaskStatus.CANCELLED},
+                   output_data={"stopped_run": run.id if run else None, "voided_approvals": len(pending)},
+                   reason="사용자가 업무를 취소했습니다" + (f" — {reason}" if reason else ""),
+                   risk_level=RiskLevel.MEDIUM, status="CANCELLED")
+        db.commit()
 
 
 # ------------------------------------------------------------------ approval decisions
@@ -306,6 +347,9 @@ def _loop(db: Session, run_id: int) -> None:
             _fail(db, run, f"{e} ({retries}회 자동 재시도 후에도 실패)" if retries else str(e))
             return
         retries = 0
+        db.refresh(run)
+        if run.status != RunStatus.RUNNING:  # cancelled while the LLM was thinking: discard this turn entirely
+            return
         run.steps += 1  # counted only for turns the LLM actually answered
 
         run.messages = [*run.messages, {"role": "assistant", "content": resp.content}]

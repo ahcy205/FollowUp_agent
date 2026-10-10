@@ -16,6 +16,7 @@
 → complete_plan_step ×N → update_task_status(COMPLETED)  ※ 하위 목표가 남아 있으면 서버가 거부
 → 🟢 견적 업무 완료 · Agent Timeline에 전 과정 기록
 → 후속 업무 열기 → [완료 처리] + 처리 메모 → 원래 업무 타임라인에 "후속 업무 완료" 기록
+(언제든) 목표 [✎ 수정] → 저장 즉시 Agent가 goal_updated 이벤트로 재계획 · [업무 취소] → Agent 중단 + 승인 무효 + CANCELLED(이력 보존)
 ```
 
 발표 중 문제가 생기면 상단 **↺ Demo Reset** → 내 계정 데이터만 초기화 후 Fixture 재생성.
@@ -63,6 +64,8 @@ React (Vite, TS)  ──same-origin cookie──▶  FastAPI   (업무 상세는
 | send_email | WRITE + **사용자 승인** | 현재 업무의 DRAFT만, 승인 전에는 절대 실행 안 됨. 승인 시 사용자가 제목·본문을 고칠 수 있고(수신자는 불가) 수정 사실과 원문이 로그에 남으며 Agent에게 `edited_by_user`로 전달됨 |
 | create_followup_task | WRITE | 업무당 최대 5개, 중복 제목 거부 |
 | complete_plan_step / update_task_status | WRITE(현재 업무) | **COMPLETED는 모든 하위 목표 달성 + 승인 대기 없음 + 결과 요약이 있을 때만 허용** |
+
+사용자 제어 API: `POST /api/tasks/{id}/goal`(목표 수정 — 활성 Run이 있으면 409, Agent 업무는 저장 즉시 `goal_updated` 트리거로 재실행, 후속 업무는 문구만 변경), `POST /api/tasks/{id}/cancel`(취소 — 활성 Run `STOPPED`, 대기 승인 `CANCELLED`, 업무 `CANCELLED`로 보관, 되돌리기 없음). Agent 루프는 LLM 호출 전후로 Run 상태를 다시 읽으므로 응답 중 취소된 턴의 도구 호출은 실행되지 않습니다.
 
 Agent가 만든 후속 업무(`origin=agent`, `agent_enabled=false`)는 Agent가 아니라 **사용자가** `POST /api/tasks/{id}/complete`로 완료 처리합니다. 처리 메모는 `result_summary`에 저장되고, 부모 업무 타임라인에 `FOLLOWUP_COMPLETED`로 기록됩니다. Agent가 처리 중인 업무에는 409를 돌려줍니다.
 

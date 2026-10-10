@@ -48,7 +48,7 @@ def simulate_reply(task_id: int, body: SimulateReplyIn, user: User = Depends(get
                reason=f"고객 답변 도착: {customer.company_name} — {subject}")
     db.commit()
 
-    if orchestrator.active_run(db, task) is None and task.status != TaskStatus.COMPLETED and task.agent_enabled:
+    if orchestrator.active_run(db, task) is None and task.status not in orchestrator.CLOSED_TASK_STATUSES and task.agent_enabled:
         orchestrator.start_run(db, user, task, "email_received",
                                {"email_id": email.id, "sender": email.sender, "subject": email.subject})
     # Otherwise the email stays unprocessed and the agent picks it up when its current run finishes.

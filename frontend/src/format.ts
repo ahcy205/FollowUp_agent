@@ -7,6 +7,7 @@ export const STATUS_META: Record<TaskStatus, { label: string; tone: string; shor
   ACTION_REQUIRED: { label: '조치 필요', short: '조치 필요', tone: 'red' },
   BLOCKED: { label: '중단됨', short: '중단', tone: 'slate' },
   PENDING: { label: '시작 전', short: '시작 전', tone: 'gray' },
+  CANCELLED: { label: '취소됨', short: '취소', tone: 'gray' },
 }
 
 export const TOOL_LABELS: Record<string, string> = {

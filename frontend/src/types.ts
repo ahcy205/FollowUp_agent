@@ -1,4 +1,4 @@
-export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'WAITING' | 'ACTION_REQUIRED' | 'COMPLETED' | 'BLOCKED'
+export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'WAITING' | 'ACTION_REQUIRED' | 'COMPLETED' | 'BLOCKED' | 'CANCELLED'
 
 export interface User {
   id: number

@@ -28,12 +28,14 @@ from app.models import (
 from app.schemas import (
     ApprovalDecision,
     ApprovalOut,
+    CancelTaskIn,
     CompleteTaskIn,
     CustomerOut,
     DashboardOut,
     DocumentOut,
     EmailOut,
     GoalIn,
+    GoalUpdateIn,
     RunOut,
     TaskBrief,
     TaskDetail,
@@ -107,7 +109,7 @@ def build_task_detail(db: Session, task: Task, user: User) -> TaskDetail:
         task=task, customer=task.customer, parent=parent, followups=followups, emails=emails, logs=logs,
         approvals=approvals_out, runs=[RunOut.model_validate(r) for r in runs[:10]],
         active_run=RunOut.model_validate(active) if active else None, max_steps=get_settings().max_agent_steps,
-        can_simulate_reply=has_sent and active is None and task.agent_enabled,
+        can_simulate_reply=has_sent and active is None and task.agent_enabled and task.status not in orchestrator.CLOSED_TASK_STATUSES,
     )
 
 
@@ -166,12 +168,50 @@ async def task_events(task_id: int, request: Request, user: User = Depends(get_c
 def retry_agent(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     agent_limiter.check(f"agent:{user.id}")
     task = get_owned(db, Task, task_id, user)
-    if task.status == TaskStatus.COMPLETED:
-        raise HTTPException(status.HTTP_409_CONFLICT, "이미 완료된 업무입니다.")
+    if task.status in orchestrator.CLOSED_TASK_STATUSES:
+        raise HTTPException(status.HTTP_409_CONFLICT, "이미 완료되었거나 취소된 업무입니다.")
     try:
         return orchestrator.start_run(db, user, task, "manual_retry")
     except orchestrator.AgentBusyError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=TaskBrief)
+def cancel_task(task_id: int, body: CancelTaskIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Close the task for good. The agent is stopped, pending approvals are voided, history stays."""
+    task = get_owned(db, Task, task_id, user)
+    try:
+        orchestrator.cancel_task(db, user, task, body.reason)
+    except orchestrator.AgentBusyError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    db.refresh(task)
+    return task
+
+
+@router.post("/tasks/{task_id}/goal", response_model=TaskBrief)
+def update_goal(task_id: int, body: GoalUpdateIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Rewrite the goal. An agent-driven task is re-planned right away; a follow-up task just gets the new text."""
+    task = get_owned(db, Task, task_id, user)
+    if task.status in orchestrator.CLOSED_TASK_STATUSES:
+        raise HTTPException(status.HTTP_409_CONFLICT, "이미 완료되었거나 취소된 업무의 목표는 수정할 수 없습니다.")
+    if orchestrator.active_run(db, task) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Agent가 실행 중이거나 승인을 기다리고 있습니다. 실행이 끝난 뒤 수정하세요.")
+    new_goal = body.goal.strip()
+    if new_goal == task.goal:
+        return task
+    previous = task.goal
+    task.goal = new_goal
+    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="GOAL_UPDATED",
+               input_data={"from": previous, "to": new_goal}, reason="사용자가 업무 목표를 수정했습니다.")
+    db.commit()
+    if task.agent_enabled:
+        agent_limiter.check(f"agent:{user.id}")
+        try:
+            orchestrator.start_run(db, user, task, "goal_updated", {"previous_goal": previous})
+        except orchestrator.AgentBusyError as e:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    db.refresh(task)
+    return task
 
 
 @router.post("/tasks/{task_id}/complete", response_model=TaskBrief)

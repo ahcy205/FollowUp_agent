@@ -127,6 +127,14 @@ class GoalIn(BaseModel):
     title: str | None = Field(default=None, max_length=120)
 
 
+class CancelTaskIn(BaseModel):
+    reason: str = Field(default="", max_length=500)
+
+
+class GoalUpdateIn(BaseModel):
+    goal: str = Field(min_length=5, max_length=1000)
+
+
 class CompleteTaskIn(BaseModel):
     note: str = Field(default="", max_length=1500)
 

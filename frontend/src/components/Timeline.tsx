@@ -31,6 +31,10 @@ function view(log: ActionLog): ItemView {
       const from = STATUS_META[log.input_data.from as TaskStatus]?.label ?? String(log.input_data.from)
       return { icon: '⇄', title: `업무 상태 ${from} → ${to}`, tone: 'violet', detail: log.reason }
     }
+    case 'TASK_CANCELLED':
+      return { icon: '🚫', title: '사용자가 업무를 취소함', tone: 'gray', detail: log.reason }
+    case 'GOAL_UPDATED':
+      return { icon: '✎', title: '사용자가 목표를 수정함', tone: 'violet', detail: `변경 전: ${String(log.input_data.from ?? '')}\n변경 후: ${String(log.input_data.to ?? '')}` }
     case 'USER_COMPLETED':
       return { icon: '✅', title: '사용자가 완료 처리', tone: 'green', detail: log.reason }
     case 'FOLLOWUP_COMPLETED':
