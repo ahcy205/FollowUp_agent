@@ -49,7 +49,8 @@ React (Vite, TS)  ──same-origin cookie──▶  FastAPI   (업무 상세는
 3. `send_email`(승인 필요 Tool)은 실행하지 않고 `ApprovalRequest` 저장 후 **대화 전체를 DB에 저장하고 중단**. 승인/취소 시 결과를 `tool_result`로 붙여 같은 Run을 재개.
 4. 턴 종료 시 상태가 확정되지 않았으면 한 번 상기시키고, 그래도 없으면 `ACTION_REQUIRED`로 표시.
 5. 턴마다 LLM usage를 공급자 중립 형태(`input` · `output` · `cache_read` · `total` · `turns`)로 정규화해 `AgentRun.usage`에 누적합니다. 업무 상세의 **토큰 사용량** 카드가 이번/마지막 실행과 업무 누적치를 보여줍니다(Agent 턴 기준, analyze_email 내부 호출은 제외).
-6. `MAX_AGENT_STEPS`(기본 10) · `AGENT_TIMEOUT_SECONDS` 초과 시 `STOPPED` + Task `BLOCKED` + “⚠️ Agent 실행 중단” 표시. LLM 오류는 `FAILED` + 복구 버튼(Agent 재시도).
+6. `MAX_AGENT_STEPS`(기본 10) · `AGENT_TIMEOUT_SECONDS` 초과 시 `STOPPED` + Task `BLOCKED` + “⚠️ Agent 실행 중단” 표시.
+7. LLM 일시 오류(5xx · 타임아웃 · 연결 실패 · 분당 한도 · Gemini 도구 호출 형식 실패)는 SDK 재시도가 소진된 뒤에도 Run 안에서 `LLM_TRANSIENT_RETRIES`(기본 2)회까지 3초 → 8초 간격으로 자동 재시도하며 타임라인에 “🔁 자동 재시도”로 남깁니다. 재시도는 단계 수를 소비하지 않고 실행 시간 제한은 그대로 적용됩니다. 인증·권한·모델 없음·크레딧 부족·일일 한도·안전 정책 거절은 즉시 `FAILED` + 복구 버튼(Agent 재시도).
 
 ### Tool 권한
 
@@ -111,6 +112,7 @@ cd backend && ../.venv/Scripts/python -m pytest -q
 | `LLM_MODEL` | 비우면 기본값 (`gemini-3.6-flash` / `claude-opus-5`) |
 | `LLM_RPM_LIMIT` | 분당 LLM 호출 상한. Gemini 무료 등급은 `5` (결제 활성화 시 `0`=해제) |
 | `AGENT_TIMEOUT_SECONDS` | `420` 권장 (무료 등급 대기 시간 포함) |
+| `LLM_TRANSIENT_RETRIES` | Run 내 일시 오류 자동 재시도 횟수 (기본 `2`, `0`이면 끔) |
 | `DEMO_USER_PASSWORD` | 데모 계정 비밀번호 (선택) |
 
 4. Settings → Networking → **Generate Domain**. Railway가 주입하는 `RAILWAY_PUBLIC_DOMAIN`으로 허용 호스트/Origin이 자동 설정됩니다(커스텀 도메인은 `PUBLIC_URL`, `ALLOWED_HOSTS` 추가).

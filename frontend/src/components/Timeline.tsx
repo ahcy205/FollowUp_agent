@@ -46,6 +46,8 @@ function view(log: ActionLog): ItemView {
     case 'STEP_LIMIT':
     case 'TIMEOUT':
       return { icon: '⚠️', title: 'Agent 실행 중단 (안전 제한)', tone: 'red', detail: log.reason }
+    case 'LLM_RETRY':
+      return { icon: '🔁', title: 'LLM 일시 오류 · 자동 재시도', tone: 'amber', detail: log.reason }
     case 'LLM_WAIT':
       return { icon: '⏳', title: 'LLM 사용 한도 대기', tone: 'amber', detail: log.reason }
     case 'AGENT_FAILED':

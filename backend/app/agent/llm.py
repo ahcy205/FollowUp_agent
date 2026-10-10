@@ -15,7 +15,15 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 class LLMError(Exception):
-    """User-presentable LLM failure (message is Korean and includes a recovery hint)."""
+    """User-presentable LLM failure (message is Korean and includes a recovery hint).
+
+    `retryable` marks failures that may clear by waiting (server errors, timeouts, per-minute limits); the
+    orchestrator retries those a few times before asking the user to intervene.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 @dataclass
@@ -123,7 +131,7 @@ class AnthropicLLM:
         except anthropic.NotFoundError:
             raise LLMError(f"LLM 모델 '{self.s.llm_model}'을 찾을 수 없습니다. LLM_MODEL 설정을 확인하세요.")
         except anthropic.RateLimitError:
-            raise LLMError("LLM API 사용량 한도에 도달했습니다. 1분 뒤 'Agent 재시도'를 눌러주세요.")
+            raise LLMError("LLM API 사용량 한도에 도달했습니다. 1분 뒤 'Agent 재시도'를 눌러주세요.", retryable=True)
         except anthropic.BadRequestError as e:
             if "credit balance" in str(e).lower():
                 raise LLMError("Anthropic 계정의 API 크레딧이 부족합니다. console.anthropic.com → Plans & Billing에서 "
@@ -131,11 +139,12 @@ class AnthropicLLM:
             log.exception("LLM bad request")
             raise LLMError(f"LLM 요청 오류: {e.message[:300]}")
         except anthropic.APIStatusError as e:
-            raise LLMError(f"LLM 서버 오류({e.status_code})입니다. 잠시 후 'Agent 재시도'를 눌러주세요.")
+            raise LLMError(f"LLM 서버 오류({e.status_code})입니다. 잠시 후 'Agent 재시도'를 눌러주세요.",
+                           retryable=e.status_code >= 500)
         except anthropic.APITimeoutError:
-            raise LLMError("LLM 응답 시간이 초과되었습니다. 'Agent 재시도'를 눌러주세요.")
+            raise LLMError("LLM 응답 시간이 초과되었습니다. 'Agent 재시도'를 눌러주세요.", retryable=True)
         except anthropic.APIConnectionError:
-            raise LLMError("LLM 서버에 연결할 수 없습니다. 네트워크 상태 확인 후 'Agent 재시도'를 눌러주세요.")
+            raise LLMError("LLM 서버에 연결할 수 없습니다. 네트워크 상태 확인 후 'Agent 재시도'를 눌러주세요.", retryable=True)
 
     def agent_turn(self, system: str, tools: list[dict], messages: list[dict]) -> LLMResponse:
         resp = self._create(

@@ -182,7 +182,7 @@ class GeminiLLM:
                     break
                 log.warning("Gemini 429, waiting %.0fs (attempt %d)", delay, attempt + 1)
                 self._wait(min(delay + 1, MAX_RATE_LIMIT_WAIT), "Gemini 분당 사용 한도 초과 — 자동 재시도 대기")
-        raise LLMError("Gemini API 사용 한도(분당 요청 수)를 계속 초과하고 있습니다. 1분 뒤 'Agent 재시도'를 눌러주세요.")
+        raise LLMError("Gemini API 사용 한도(분당 요청 수)를 계속 초과하고 있습니다. 1분 뒤 'Agent 재시도'를 눌러주세요.", retryable=True)
 
     def _generate_once(self, model: str, contents, config: types.GenerateContentConfig) -> types.GenerateContentResponse:
         try:
@@ -200,11 +200,11 @@ class GeminiLLM:
             log.exception("Gemini client error")
             raise LLMError(f"Gemini 요청 오류({e.code}): {(e.message or '')[:300]}")
         except errors.ServerError as e:
-            raise LLMError(f"Gemini 서버 오류({e.code})입니다. 잠시 후 'Agent 재시도'를 눌러주세요.")
+            raise LLMError(f"Gemini 서버 오류({e.code})입니다. 잠시 후 'Agent 재시도'를 눌러주세요.", retryable=True)
         except httpx.TimeoutException:
-            raise LLMError("Gemini 응답 시간이 초과되었습니다. 'Agent 재시도'를 눌러주세요.")
+            raise LLMError("Gemini 응답 시간이 초과되었습니다. 'Agent 재시도'를 눌러주세요.", retryable=True)
         except httpx.HTTPError:
-            raise LLMError("Gemini 서버에 연결할 수 없습니다. 네트워크 상태 확인 후 'Agent 재시도'를 눌러주세요.")
+            raise LLMError("Gemini 서버에 연결할 수 없습니다. 네트워크 상태 확인 후 'Agent 재시도'를 눌러주세요.", retryable=True)
 
     def agent_turn(self, system: str, tools: list[dict], messages: list[dict]) -> LLMResponse:
         config = types.GenerateContentConfig(
@@ -240,7 +240,7 @@ class GeminiLLM:
                 stop = "end_turn"
             usage = resp.usage_metadata.model_dump(exclude_none=True) if resp.usage_metadata else {}
             return LLMResponse(stop_reason=stop, content=blocks, request_id=resp.response_id or "", usage=usage)
-        raise LLMError("Gemini가 올바른 도구 호출을 만들지 못했습니다. 'Agent 재시도'를 눌러주세요.")
+        raise LLMError("Gemini가 올바른 도구 호출을 만들지 못했습니다. 'Agent 재시도'를 눌러주세요.", retryable=True)
 
     def structured(self, system: str, prompt: str, schema: dict) -> dict:
         config = types.GenerateContentConfig(

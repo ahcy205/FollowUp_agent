@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     llm_rpm_limit: int = Field(default=0, ge=0, le=1000)  # 0 = no client-side pacing (Gemini free tier: 5)
 
     max_agent_steps: int = Field(default=10, ge=1, le=30)
+    llm_transient_retries: int = Field(default=2, ge=0, le=5)  # in-run retries for server errors / timeouts
     agent_timeout_seconds: int = Field(default=240, ge=10, le=900)
 
     public_url: str = "http://localhost:5173"

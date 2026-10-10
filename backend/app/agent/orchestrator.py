@@ -38,6 +38,7 @@ from app.models import (
 log = logging.getLogger(__name__)
 
 ACTIVE_RUN_STATUSES = (RunStatus.RUNNING, RunStatus.AWAITING_APPROVAL)
+RETRY_BACKOFF_SECONDS = (3.0, 8.0)  # wait before the 1st, 2nd, ... in-run retry of a transient LLM failure
 
 
 class AgentBusyError(Exception):
@@ -274,6 +275,7 @@ def _loop(db: Session, run_id: int) -> None:
     tools = tool_definitions()
     deadline = time.monotonic() + s.agent_timeout_seconds
     reminded = False
+    retries = 0  # consecutive transient failures of the current turn
 
     while True:
         db.refresh(run)
@@ -288,13 +290,23 @@ def _loop(db: Session, run_id: int) -> None:
                   f"실행 시간 제한({s.agent_timeout_seconds}초)을 초과해 Agent를 중단했습니다. 사용자의 확인이 필요합니다.")
             return
 
-        run.steps += 1
-        db.commit()
         try:
             resp = llm.agent_turn(SYSTEM_PROMPT, tools, run.messages)
         except LLMError as e:
-            _fail(db, run, str(e))
+            if e.retryable and retries < s.llm_transient_retries:
+                wait = RETRY_BACKOFF_SECONDS[min(retries, len(RETRY_BACKOFF_SECONDS) - 1)]
+                if time.monotonic() + wait < deadline:
+                    retries += 1
+                    log_action(db, user_id=user.id, task_id=task.id, run_id=run.id, action_type="LLM_RETRY",
+                               reason=f"LLM 일시 오류: {e} — {wait:.0f}초 후 자동 재시도 ({retries}/{s.llm_transient_retries})",
+                               output_data={"wait_seconds": wait, "attempt": retries}, risk_level=RiskLevel.MEDIUM, status="RETRY")
+                    db.commit()
+                    time.sleep(wait)
+                    continue
+            _fail(db, run, f"{e} ({retries}회 자동 재시도 후에도 실패)" if retries else str(e))
             return
+        retries = 0
+        run.steps += 1  # counted only for turns the LLM actually answered
 
         run.messages = [*run.messages, {"role": "assistant", "content": resp.content}]
         turn_usage = normalize_usage(resp.usage)
