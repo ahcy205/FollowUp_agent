@@ -142,12 +142,32 @@ def _create_run(db: Session, user: User, task: Task, trigger: str, event: dict) 
 
 # ------------------------------------------------------------------ approval decisions
 
-def decide_approval(db: Session, user: User, approval: ApprovalRequest, approved: bool, comment: str = "") -> AgentRun:
+def decide_approval(db: Session, user: User, approval: ApprovalRequest, approved: bool, comment: str = "",
+                    edit: dict | None = None) -> AgentRun:
+    """`edit` may carry a user-rewritten `subject` / `body` for the draft; it is applied only when approving."""
     with _task_lock(approval.task_id):
-        return _decide_approval(db, user, approval, approved, comment)
+        return _decide_approval(db, user, approval, approved, comment, edit or {})
 
 
-def _decide_approval(db: Session, user: User, approval: ApprovalRequest, approved: bool, comment: str) -> AgentRun:
+def _apply_user_edit(db: Session, approval: ApprovalRequest, edit: dict) -> dict | None:
+    """Rewrite the pending draft with the user's text. Returns the original text when something changed."""
+    if approval.email_id is None:
+        return None
+    email = db.scalar(select(Email).where(Email.id == approval.email_id, Email.user_id == approval.user_id,
+                                          Email.direction == EmailDirection.DRAFT))
+    if email is None:
+        return None
+    original = {"subject": email.subject, "body": email.content}
+    changed = False
+    for field, attr in (("subject", "subject"), ("body", "content")):
+        value = (edit.get(field) or "").strip()
+        if value and value != getattr(email, attr):
+            setattr(email, attr, value)
+            changed = True
+    return original if changed else None
+
+
+def _decide_approval(db: Session, user: User, approval: ApprovalRequest, approved: bool, comment: str, edit: dict) -> AgentRun:
     db.refresh(approval)  # another request may have decided it while we waited for the lock
     run = db.get(AgentRun, approval.run_id)
     task = db.get(Task, approval.task_id)
@@ -160,15 +180,23 @@ def _decide_approval(db: Session, user: User, approval: ApprovalRequest, approve
     approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
     approval.decided_at = now
     approval.user_comment = comment[:500]
+    original = _apply_user_edit(db, approval, edit) if approved else None
+    decision = {"approved": approved, "comment": comment[:500], "edited": original is not None}
+    if original is not None:
+        decision["original"] = original
     log_action(db, user_id=user.id, task_id=task.id, run_id=run.id, action_type="APPROVAL_DECIDED", tool_name=spec.name,
-               input_data={"approval_id": approval.id}, output_data={"approved": approved, "comment": comment[:500]},
-               reason="사용자가 승인했습니다" if approved else "사용자가 취소했습니다", risk_level=RiskLevel.HIGH,
-               status="APPROVED" if approved else "REJECTED")
+               input_data={"approval_id": approval.id}, output_data=decision,
+               reason=("사용자가 내용을 수정한 뒤 승인했습니다" if original is not None else "사용자가 승인했습니다")
+               if approved else "사용자가 취소했습니다",
+               risk_level=RiskLevel.HIGH, status="APPROVED" if approved else "REJECTED")
 
     if approved:
         ctx = ToolContext(db=db, user=user, task=task, run=run, llm=_NoLLM())
         try:
             output = spec.handler(ctx, spec.parse(approval.tool_input))
+            if original is not None:
+                output["edited_by_user"] = True
+                output["note"] = "사용자가 제목/본문을 수정한 뒤 승인해 발송되었습니다. " + output.get("note", "")
             result = {"type": "tool_result", "tool_use_id": approval.tool_use_id, "content": serialize_output(output)}
             status = "SUCCESS"
         except ToolError as e:

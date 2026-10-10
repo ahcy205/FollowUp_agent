@@ -22,9 +22,10 @@ function view(log: ActionLog): ItemView {
     case 'APPROVAL_REQUESTED':
       return { icon: '✋', title: `사용자 승인 요청 · ${tool}`, tone: 'amber', detail: log.reason }
     case 'APPROVAL_DECIDED':
-      return log.status === 'APPROVED'
-        ? { icon: '👍', title: '사용자가 승인함', tone: 'green' }
-        : { icon: '🚫', title: '사용자가 취소함', tone: 'red', detail: String(log.output_data.comment ?? '') }
+      if (log.status !== 'APPROVED') return { icon: '🚫', title: '사용자가 취소함', tone: 'red', detail: String(log.output_data.comment ?? '') }
+      return log.output_data.edited
+        ? { icon: '✎', title: '사용자가 내용을 수정한 뒤 승인함', tone: 'green', detail: '수정 전 내용은 아래 "입력 / 결과 보기"에서 확인할 수 있습니다.' }
+        : { icon: '👍', title: '사용자가 승인함', tone: 'green' }
     case 'STATUS_CHANGED': {
       const to = STATUS_META[log.input_data.to as TaskStatus]?.label ?? String(log.input_data.to)
       const from = STATUS_META[log.input_data.from as TaskStatus]?.label ?? String(log.input_data.from)

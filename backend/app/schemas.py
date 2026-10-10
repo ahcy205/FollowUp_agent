@@ -133,6 +133,9 @@ class CompleteTaskIn(BaseModel):
 class ApprovalDecision(BaseModel):
     approved: bool
     comment: str = Field(default="", max_length=500)
+    # Optional rewrite of the draft, applied only when approving. The recipient is never user-editable.
+    subject: str | None = Field(default=None, min_length=2, max_length=200)
+    body: str | None = Field(default=None, min_length=10, max_length=5000)
 
 
 class SimulateReplyIn(BaseModel):

@@ -189,6 +189,9 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 0.88rem; fon
 .mail-row span:first-child { color: var(--muted); }
 .mail-preview .mail-body { padding: 14px; }
 .mail-body { white-space: pre-wrap; font-size: 0.92rem; }
+.mail-preview.editing .mail-row input { margin: -4px 0; }
+.mail-edit { margin: 10px 14px 0; width: calc(100% - 28px); font: inherit; line-height: 1.55; }
+.mail-tools { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 14px; }
 .comment { margin-top: 12px; }
 .approval-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 .code { background: var(--bg); padding: 12px; border-radius: 8px; font-size: 0.82rem; }

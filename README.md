@@ -10,7 +10,7 @@
 로그인 → "A회사에 견적서를 보내고 고객 답변이 오면 내용을 확인해서 내가 해야 할 일을 정리해줘."
 → plan_goal (하위 목표 5개) → search_customer → search_document → draft_email
 → send_email 호출 ⇒ 서버가 실행을 멈추고 승인 요청 (Task: ACTION_REQUIRED)
-→ [승인하고 발송] → 가상 메일 발송 → Agent 재개 → Task: WAITING (고객 답변 대기)
+→ [승인하고 발송] (필요하면 제목·본문을 수정한 뒤 [수정한 내용으로 발송]) → 가상 메일 발송 → Agent 재개 → Task: WAITING (고객 답변 대기)
 → [고객 답변 도착] (납기 단축 요청) → 이벤트로 Agent 재실행
 → check_email → analyze_email → create_followup_task("A회사 납기일 단축 가능 여부 확인")
 → complete_plan_step ×N → update_task_status(COMPLETED)  ※ 하위 목표가 남아 있으면 서버가 거부
@@ -53,7 +53,7 @@ React (Vite, TS)  ──same-origin cookie──▶  FastAPI
 | search_customer / search_document / check_email | READ | user_id 필터, 결과 최대 3~5건, 외부 콘텐츠는 `<untrusted_external_content>`로 격리 |
 | analyze_email | READ | 현재 업무의 수신 메일만, 구조화 출력 + 의심 지시문 분리 |
 | draft_email | READ/CREATE | 수신 주소는 **서버가 고객 레코드에서 결정**, 다른 고객 연락처 포함 시 차단 |
-| send_email | WRITE + **사용자 승인** | 현재 업무의 DRAFT만, 승인 전에는 절대 실행 안 됨 |
+| send_email | WRITE + **사용자 승인** | 현재 업무의 DRAFT만, 승인 전에는 절대 실행 안 됨. 승인 시 사용자가 제목·본문을 고칠 수 있고(수신자는 불가) 수정 사실과 원문이 로그에 남으며 Agent에게 `edited_by_user`로 전달됨 |
 | create_followup_task | WRITE | 업무당 최대 5개, 중복 제목 거부 |
 | complete_plan_step / update_task_status | WRITE(현재 업무) | **COMPLETED는 모든 하위 목표 달성 + 승인 대기 없음 + 결과 요약이 있을 때만 허용** |
 

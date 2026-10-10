@@ -149,7 +149,8 @@ def decide(approval_id: int, body: ApprovalDecision, user: User = Depends(get_cu
     if approval.status != ApprovalStatus.PENDING:
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 처리된 승인 요청입니다.")
     try:
-        return orchestrator.decide_approval(db, user, approval, body.approved, body.comment)
+        return orchestrator.decide_approval(db, user, approval, body.approved, body.comment,
+                                            edit={"subject": body.subject, "body": body.body})
     except orchestrator.AgentBusyError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
 
