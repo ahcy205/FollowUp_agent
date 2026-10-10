@@ -126,6 +126,10 @@ class GoalIn(BaseModel):
     title: str | None = Field(default=None, max_length=120)
 
 
+class CompleteTaskIn(BaseModel):
+    note: str = Field(default="", max_length=1500)
+
+
 class ApprovalDecision(BaseModel):
     approved: bool
     comment: str = Field(default="", max_length=500)

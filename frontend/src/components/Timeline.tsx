@@ -30,6 +30,10 @@ function view(log: ActionLog): ItemView {
       const from = STATUS_META[log.input_data.from as TaskStatus]?.label ?? String(log.input_data.from)
       return { icon: '⇄', title: `업무 상태 ${from} → ${to}`, tone: 'violet', detail: log.reason }
     }
+    case 'USER_COMPLETED':
+      return { icon: '✅', title: '사용자가 완료 처리', tone: 'green', detail: log.reason }
+    case 'FOLLOWUP_COMPLETED':
+      return { icon: '✅', title: '후속 업무 완료', tone: 'green', detail: log.reason }
     case 'EVENT_RECEIVED':
       return { icon: '📨', title: '새 이벤트', tone: 'blue', detail: log.reason }
     case 'SECURITY_WARNING':

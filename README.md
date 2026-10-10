@@ -15,6 +15,7 @@
 → check_email → analyze_email → create_followup_task("A회사 납기일 단축 가능 여부 확인")
 → complete_plan_step ×N → update_task_status(COMPLETED)  ※ 하위 목표가 남아 있으면 서버가 거부
 → 🟢 견적 업무 완료 · Agent Timeline에 전 과정 기록
+→ 후속 업무 열기 → [완료 처리] + 처리 메모 → 원래 업무 타임라인에 "후속 업무 완료" 기록
 ```
 
 발표 중 문제가 생기면 상단 **↺ Demo Reset** → 내 계정 데이터만 초기화 후 Fixture 재생성.
@@ -55,6 +56,8 @@ React (Vite, TS)  ──same-origin cookie──▶  FastAPI
 | send_email | WRITE + **사용자 승인** | 현재 업무의 DRAFT만, 승인 전에는 절대 실행 안 됨 |
 | create_followup_task | WRITE | 업무당 최대 5개, 중복 제목 거부 |
 | complete_plan_step / update_task_status | WRITE(현재 업무) | **COMPLETED는 모든 하위 목표 달성 + 승인 대기 없음 + 결과 요약이 있을 때만 허용** |
+
+Agent가 만든 후속 업무(`origin=agent`, `agent_enabled=false`)는 Agent가 아니라 **사용자가** `POST /api/tasks/{id}/complete`로 완료 처리합니다. 처리 메모는 `result_summary`에 저장되고, 부모 업무 타임라인에 `FOLLOWUP_COMPLETED`로 기록됩니다. Agent가 처리 중인 업무에는 409를 돌려줍니다.
 
 LLM은 `user_id`/`task_id`를 전달할 수 없습니다(입력 스키마에 없음, extra 필드 거부). 서버 컨텍스트에서만 주입됩니다.
 

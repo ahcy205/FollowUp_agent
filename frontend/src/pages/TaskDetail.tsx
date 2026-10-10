@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import ApprovalCard from '../components/ApprovalCard'
+import CompleteFollowupCard from '../components/CompleteFollowupCard'
 import ReplySimulator from '../components/ReplySimulator'
 import StatusBadge from '../components/StatusBadge'
 import Timeline from '../components/Timeline'
@@ -148,6 +149,10 @@ export default function TaskDetailPage() {
           )}
 
           {pending && <ApprovalCard approval={pending} customer={data.customer} onDecided={load} />}
+
+          {task.origin === 'agent' && !task.agent_enabled && task.status !== 'COMPLETED' && (
+            <CompleteFollowupCard taskId={task.id} onDone={load} />
+          )}
 
           {task.plan.length > 0 && (
             <section className="card">

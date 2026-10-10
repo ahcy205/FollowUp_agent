@@ -1,8 +1,11 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agent import orchestrator
+from app.agent.audit import log_action
 from app.config import get_settings
 from app.db import get_db
 from app.models import (
@@ -21,6 +24,7 @@ from app.models import (
 from app.schemas import (
     ApprovalDecision,
     ApprovalOut,
+    CompleteTaskIn,
     CustomerOut,
     DashboardOut,
     DocumentOut,
@@ -109,6 +113,34 @@ def retry_agent(task_id: int, user: User = Depends(get_current_user), db: Sessio
         return orchestrator.start_run(db, user, task, "manual_retry")
     except orchestrator.AgentBusyError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+
+
+@router.post("/tasks/{task_id}/complete", response_model=TaskBrief)
+def complete_followup(task_id: int, body: CompleteTaskIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """The user closes a follow-up task the agent created for them (agent-driven tasks are closed by the agent)."""
+    task = get_owned(db, Task, task_id, user)
+    if task.origin != "agent" or task.agent_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Agent가 처리하는 업무는 Agent가 완료합니다. 후속 업무만 직접 완료할 수 있습니다.")
+    if task.status == TaskStatus.COMPLETED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "이미 완료된 업무입니다.")
+    note = body.note.strip()
+    before = task.status
+    task.status = TaskStatus.COMPLETED
+    task.completed_at = datetime.now(timezone.utc)
+    task.current_step = "사용자가 완료 처리"
+    task.next_action = ""
+    if note:
+        task.result_summary = note
+    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="USER_COMPLETED",
+               input_data={"from": before, "to": TaskStatus.COMPLETED}, output_data={"note": note},
+               reason=note or "사용자가 후속 업무를 완료 처리했습니다.")
+    if task.parent_task_id:
+        log_action(db, user_id=user.id, task_id=task.parent_task_id, run_id=None, action_type="FOLLOWUP_COMPLETED",
+                   input_data={"followup_task_id": task.id}, output_data={"note": note},
+                   reason=f"후속 업무 '{task.title}' 완료" + (f" — {note}" if note else ""))
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 @router.post("/approvals/{approval_id}/decide", response_model=RunOut)

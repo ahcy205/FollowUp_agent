@@ -193,6 +193,8 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 0.88rem; fon
 .approval-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 .code { background: var(--bg); padding: 12px; border-radius: 8px; font-size: 0.82rem; }
 
+.followup-complete { border-color: #bbf7d0; }
+.followup-complete > p { margin: -6px 0 12px; }
 .simulator { border-style: dashed; border-color: #93c5fd; }
 .simulator > p { margin: -6px 0 12px; }
 .preset-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
