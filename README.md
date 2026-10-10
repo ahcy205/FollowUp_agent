@@ -96,6 +96,9 @@ cd backend && ../.venv/Scripts/alembic upgrade head       # 또는 backend/dev.d
 
 # Tests (LLM은 스크립트된 가짜 클라이언트로 대체)
 cd backend && ../.venv/Scripts/python -m pytest -q
+
+# 실 LLM 스모크 테스트 (opt-in, 공급자 쿼터 사용 · backend/.env의 LLM_API_KEY 필요, 약 30초~3분)
+cd backend && RUN_LLM_SMOKE=1 ../.venv/Scripts/python -m pytest smoke -v -s
 ```
 
 `DEMO_USER_PASSWORD`를 설정하면 기동 시 `DEMO_USER_EMAIL` 계정이 생성됩니다. 회원가입하는 모든 계정도 자기 전용 가상 데이터를 받습니다.
