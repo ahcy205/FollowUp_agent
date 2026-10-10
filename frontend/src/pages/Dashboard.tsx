@@ -157,7 +157,7 @@ function TaskRow({ task }: { task: Task }) {
           </div>
           <div className="task-sub muted">
             {task.status === 'WAITING' && task.waiting_for ? `⏳ ${task.waiting_for} 대기 · ` : ''}
-            {task.next_action || task.current_step}
+            {task.status === 'COMPLETED' ? task.current_step || task.result_summary : task.next_action || task.current_step}
           </div>
         </div>
         {task.plan.length > 0 && (
