@@ -194,7 +194,7 @@ export default function TaskDetailPage() {
                 {task.calendar_state === 'synced' && (
                   <>
                     <span>캘린더에 등록됨</span>
-                    {task.calendar_event_url && (
+                    {task.calendar_event_url.startsWith("https://") && (
                       <a href={task.calendar_event_url} target="_blank" rel="noopener noreferrer">
                         캘린더에서 열기
                       </a>
