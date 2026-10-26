@@ -80,6 +80,35 @@ def test_other_4xx_is_google_error():
     assert not isinstance(ei.value, (GoogleAuthError, GoogleTransientError))
 
 
+@pytest.mark.parametrize("body", [
+    {"error": {"code": 403, "errors": [{"domain": "usageLimits", "reason": "rateLimitExceeded"}]}},
+    {"error": {"code": 403, "errors": [{"domain": "usageLimits", "reason": "userRateLimitExceeded"}]}},
+    {"error": {"code": 403, "errors": [{"domain": "global", "reason": "backendError"}]}},
+    {"error": {"code": 403, "status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded"}},
+    {"error": {"code": 403, "errors": [{"reason": "forbidden"}, {"reason": "userRateLimitExceeded"}]}},
+])
+def test_403_rate_limit_is_transient(body):
+    c = client_with(lambda req: httpx.Response(403, json=body))
+    with pytest.raises(GoogleTransientError):
+        c.gmail_get_raw("tok", "m1")
+
+
+@pytest.mark.parametrize("resp", [
+    httpx.Response(403, json={"error": {"code": 403, "status": "PERMISSION_DENIED",
+                                        "errors": [{"reason": "insufficientPermissions"}]}}),
+    httpx.Response(403, json={"error": {"code": 403, "errors": [{"reason": "forbidden"}]}}),
+    httpx.Response(403, json={"error": "access_denied"}),
+    httpx.Response(403, json={"error": {"errors": "rateLimitExceeded"}}),
+    httpx.Response(403, json=["rateLimitExceeded"]),
+    httpx.Response(403, text="<html>rateLimitExceeded</html>"),
+])
+def test_403_other_is_plain_google_error(resp):
+    c = client_with(lambda req: resp)
+    with pytest.raises(GoogleError) as ei:
+        c.gmail_get_raw("tok", "m1")
+    assert not isinstance(ei.value, (GoogleAuthError, GoogleTransientError))
+
+
 @pytest.mark.parametrize("status", [429, 503])
 def test_429_and_503_raise_transient(status):
     c = client_with(lambda req: httpx.Response(status))

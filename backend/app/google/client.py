@@ -88,6 +88,27 @@ class GoogleClient(Protocol):
     def gmail_get_raw(self, access_token: str, message_id: str) -> RawMessage: ...
 
 
+_TRANSIENT_403_REASONS = frozenset({"rateLimitExceeded", "userRateLimitExceeded", "backendError"})
+
+
+def _is_rate_limited(resp: httpx.Response) -> bool:
+    """Gmail answers quota and backend hiccups with 403 too; those must be retried, not treated as final.
+
+    Any body we cannot read as Google's JSON error shape counts as a real (non-transient) 403.
+    """
+    try:
+        err = resp.json().get("error")
+        if not isinstance(err, dict):
+            return False
+        if err.get("status") == "RESOURCE_EXHAUSTED":
+            return True
+        details = err.get("errors") or []
+        return isinstance(details, list) and any(
+            isinstance(d, dict) and d.get("reason") in _TRANSIENT_403_REASONS for d in details)
+    except (ValueError, AttributeError):
+        return False
+
+
 class HttpGoogleClient:
     def __init__(self, transport: httpx.BaseTransport | None = None):
         self._http = httpx.Client(transport=transport, timeout=TIMEOUT_SECONDS)
@@ -106,6 +127,8 @@ class HttpGoogleClient:
             raise GoogleAuthError("Google 인증이 만료되었습니다.")
         if s == 404 and history:
             raise GoogleHistoryGone("Gmail 기록 지점이 만료되었습니다.")
+        if s == 403 and _is_rate_limited(resp):
+            raise GoogleTransientError("Google 사용량 한도 일시 초과(403)")
         try:
             err = resp.json().get("error")
         except (ValueError, AttributeError):

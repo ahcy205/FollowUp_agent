@@ -239,6 +239,31 @@ def test_transient_error_records_message(account, google_fake, monkeypatch):
     assert acc.history_id == hid
 
 
+def test_rate_limited_403_on_get_raw_is_retried_later(account, google_fake, monkeypatch):
+    """A Gmail 403 rateLimitExceeded is transient: the id is not skipped and the mail lands next cycle."""
+    import httpx
+
+    from app.google.client import HttpGoogleClient
+
+    _run(account, google_fake)
+    hid = _acc(account).history_id
+    mid = _mail(google_fake, "한도 초과 중 도착")
+    limited = HttpGoogleClient(transport=httpx.MockTransport(lambda req: httpx.Response(
+        403, json={"error": {"code": 403, "errors": [{"reason": "rateLimitExceeded"}]}})))
+    real_get = google_fake.gmail_get_raw
+    monkeypatch.setattr(google_fake, "gmail_get_raw", limited.gmail_get_raw)
+    res = _run(account, google_fake)
+    assert res.complete is False and res.stored == 0
+    assert mid not in sync._skipped_ids(account)
+    assert _acc(account).history_id == hid
+    assert _acc(account).last_sync_error == sync.TRANSIENT_MESSAGE
+
+    monkeypatch.setattr(google_fake, "gmail_get_raw", real_get)
+    res = _run(account, google_fake)
+    assert res.complete is True and res.stored == 1
+    assert [e.gmail_message_id for e in _gmail_rows()] == [mid]
+
+
 def test_transient_error_while_listing(account, google_fake, monkeypatch):
     def down(*a, **k):
         raise GoogleTransientError("x")
