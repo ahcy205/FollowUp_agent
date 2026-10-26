@@ -91,6 +91,25 @@ def _best_effort_revoke(token: str) -> None:
         log.warning("google revoke failed: %s", type(e).__name__)
 
 
+def _switch_mailbox(acc: GoogleAccount) -> None:
+    """The user reconnected with a different Google address: the old mailbox's sync point means nothing.
+
+    Restart from a fresh backfill and drop the old grant (a different Google user, so this never touches
+    the new one). Mail already stored from the old address is kept; disconnect with delete_mail removes it.
+    """
+    log.info("google account switched mailbox user=%s", acc.user_id)
+    try:
+        old_refresh = decrypt_token(acc.refresh_token_enc)
+    except TokenDecryptError:
+        old_refresh = None
+    if old_refresh:
+        _best_effort_revoke(old_refresh)
+    acc.history_id = None
+    acc.last_synced_at = None
+    mail_sync.clear_skipped(acc.id)
+    oauth.forget_access_token(acc.user_id)
+
+
 def _revoke_rejected_grant(db: Session, user_id: int, access_token: str) -> None:
     """Drop a grant we refuse to store, but only on a first-time connect.
 
@@ -184,11 +203,13 @@ def callback(request: Request, code: str | None = None, state: str | None = None
         log.warning("google profile fetch failed user=%s: %s", user.id, type(e).__name__)
         return _settings_redirect(reason="exchange")
 
-    # 8. Upsert. A reconnect keeps history_id so sync continues where it left off.
+    # 8. Upsert. A reconnect to the same mailbox keeps history_id so sync continues where it left off.
     acc = _account(db, user.id)
     if acc is None:
         acc = GoogleAccount(user_id=user.id, history_id=None)
         db.add(acc)
+    elif acc.google_email.strip().lower() != profile.email.strip().lower():
+        _switch_mailbox(acc)
     acc.google_email = profile.email[:255]
     acc.refresh_token_enc = encrypt_token(grant.refresh_token)
     acc.scopes = sorted(_normalize_scopes(grant.scopes))

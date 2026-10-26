@@ -8,6 +8,7 @@ from app.db import SessionLocal
 from app.google import oauth
 from app.google.client import REQUIRED_SCOPES, GoogleAuthError, TokenGrant
 from app.google.crypto import decrypt_token
+from app.mail import sync as mail_sync
 from app.models import Email, GoogleAccount, GoogleAccountStatus
 from tests.conftest import make_client, register
 
@@ -202,25 +203,77 @@ def test_callback_exchange_failure(client, google_fake, monkeypatch):
     assert _accounts() == []
 
 
-def test_reconnect_updates_existing_row(client, google_fake):
+def _reconnect_setup(client, google_fake) -> int:
+    """Connect once, record sync progress, then mark the account for reauth. Returns the account id."""
     register(client)
     _callback(client, _connect(client))
     with SessionLocal() as db:
         acc = db.scalar(select(GoogleAccount))
         acc.history_id = "555"
+        acc.last_synced_at = datetime.now(timezone.utc)
         acc.status = GoogleAccountStatus.REAUTH_REQUIRED
         acc.last_sync_error = "Google 재연결이 필요합니다."
         db.commit()
+        acc_id = acc.id
+    mail_sync._mark_skipped(acc_id, "old-msg")
     google_fake.grant = TokenGrant(access_token="at-2", refresh_token="1//second", expires_in=3600,
                                    scopes=list(REQUIRED_SCOPES))
-    google_fake.email = "new@gmail.com"
+    return acc_id
+
+
+def test_reconnect_same_address_keeps_history(client, google_fake):
+    acc_id = _reconnect_setup(client, google_fake)
+    google_fake.email = "Me@Gmail.com"  # same mailbox, different case
     assert _reason(_callback(client, _connect(client))) is None
     [acc] = _accounts()
     assert decrypt_token(acc.refresh_token_enc) == "1//second"
     assert acc.status == GoogleAccountStatus.CONNECTED
     assert acc.last_sync_error == ""
     assert acc.history_id == "555"
+    assert acc.last_synced_at is not None
+    assert mail_sync._skipped_ids(acc_id) == {"old-msg"}
+    assert google_fake.revoked == []
+
+
+def test_reconnect_different_address_resets_sync_point(client, google_fake):
+    acc_id = _reconnect_setup(client, google_fake)
+    me = client.get("/api/auth/me").json()
+    _add_gmail(me["id"], "old-gid", "이전 주소 메일", datetime.now(timezone.utc))
+    google_fake.email = "new@gmail.com"
+    assert _reason(_callback(client, _connect(client))) is None
+    [acc] = _accounts()
+    assert acc.id == acc_id
     assert acc.google_email == "new@gmail.com"
+    assert decrypt_token(acc.refresh_token_enc) == "1//second"
+    assert acc.status == GoogleAccountStatus.CONNECTED
+    assert acc.history_id is None
+    assert acc.last_synced_at is None
+    assert mail_sync._skipped_ids(acc_id) == set()
+    assert google_fake.revoked == ["1//fake-refresh"]  # the old mailbox's grant, never the new one
+    with SessionLocal() as db:  # mail already stored from the old address is kept
+        assert db.scalar(select(Email).where(Email.gmail_message_id == "old-gid")) is not None
+
+
+def test_reconnect_different_address_when_old_revoke_fails(client, google_fake):
+    _reconnect_setup(client, google_fake)
+    google_fake.revoke_fails = True
+    google_fake.email = "new@gmail.com"
+    assert _reason(_callback(client, _connect(client))) is None
+    [acc] = _accounts()
+    assert acc.google_email == "new@gmail.com" and acc.history_id is None
+    assert decrypt_token(acc.refresh_token_enc) == "1//second"
+
+
+def test_reconnect_different_address_with_undecryptable_old_token(client, google_fake):
+    _reconnect_setup(client, google_fake)
+    with SessionLocal() as db:
+        db.scalar(select(GoogleAccount)).refresh_token_enc = "garbage"
+        db.commit()
+    google_fake.email = "new@gmail.com"
+    assert _reason(_callback(client, _connect(client))) is None
+    [acc] = _accounts()
+    assert acc.history_id is None and decrypt_token(acc.refresh_token_enc) == "1//second"
+    assert google_fake.revoked == []
 
 
 def test_disconnect_revokes_and_deletes(client, google_fake):
