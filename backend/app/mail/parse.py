@@ -117,10 +117,15 @@ def _body_text(msg: Message) -> str:
     return html_to_text(raw) if part.get_content_type() == "text/html" else raw
 
 
+def _nul_free(s: str) -> str:
+    """PostgreSQL rejects NUL in text (and JSON) values; drop it from everything we store."""
+    return s.replace("\x00", "")
+
+
 def _hdr(msg: Message, name: str) -> str:
     try:
         v = msg.get(name)
-        return "" if v is None else str(v).strip()
+        return "" if v is None else _nul_free(str(v)).strip()
     except Exception:
         return ""
 
@@ -130,7 +135,8 @@ def _addresses(msg: Message, name: str) -> list[tuple[str, str]]:
         values = [str(v) for v in (msg.get_all(name) or [])]
     except Exception:
         return []
-    return [(n.strip(), a.strip().lower()) for n, a in getaddresses(values) if a.strip()]
+    pairs = [(_nul_free(n).strip(), _nul_free(a).strip().lower()) for n, a in getaddresses(values)]
+    return [(n, a) for n, a in pairs if a]
 
 
 def _sent_at(msg: Message) -> datetime | None:
@@ -156,10 +162,12 @@ def parse_raw(raw: bytes) -> ParsedMail:
         for part in msg.walk():
             fn = part.get_filename()
             if fn:
-                attachments.append(str(fn))
+                fn = _nul_free(str(fn)).strip()
+                if fn:
+                    attachments.append(fn)
     except Exception:
         pass
-    text = strip_quoted(_body_text(msg))[:TEXT_MAX].strip()
+    text = strip_quoted(_nul_free(_body_text(msg)))[:TEXT_MAX].strip()
     return ParsedMail(
         sender_email=addr,
         sender_name=name,

@@ -142,3 +142,32 @@ def test_cc_and_multiple_to():
 
 def test_body_capped():
     assert len(parse_raw(_raw(body="가" * 30000)).text) == 20000
+
+
+def _b64word(s: str) -> str:
+    return "=?utf-8?b?" + base64.b64encode(s.encode()).decode() + "?="
+
+
+def test_nul_characters_stripped():
+    """PostgreSQL rejects NUL in text columns; a stray \x00 must never block storing a mail."""
+    body = base64.b64encode("본문\x00내용\x00".encode()).decode()
+    att = base64.b64encode(b"%PDF").decode()
+    raw = (
+        f"From: {_b64word('홍\x00길동')} <hong@acme.co.kr>\r\n"
+        "To: me@gmail.com\r\n"
+        f"Subject: {_b64word('견적\x00문의')}\r\n"
+        "MIME-Version: 1.0\r\n"
+        'Content-Type: multipart/mixed; boundary="B"\r\n\r\n'
+        "--B\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+        f"{body}\r\n"
+        "--B\r\nContent-Type: application/pdf\r\nContent-Transfer-Encoding: base64\r\n"
+        f'Content-Disposition: attachment; filename="{_b64word("견적\x00서.pdf")}"\r\n\r\n'
+        f"{att}\r\n--B--\r\n"
+    ).encode()
+    p = parse_raw(raw)
+    assert p.subject == "견적문의"
+    assert p.text == "본문내용"
+    assert p.sender_name == "홍길동"
+    assert p.attachments == ["견적서.pdf"]
+    for v in (p.subject, p.text, p.sender_name, *p.attachments):
+        assert "\x00" not in v
