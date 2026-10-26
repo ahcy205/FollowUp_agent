@@ -1,5 +1,6 @@
 """4단계 Task 4: 업무 기한을 Google 캘린더 일정으로 동기화한다 (FakeGoogle)."""
 import logging
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -61,6 +62,17 @@ def _sync(db, account_id, fake, max_tasks=10) -> CalendarSyncResult:
     return r
 
 
+def _salt(db, account_id, value=None) -> str:
+    acc = db.get(GoogleAccount, account_id)
+    if value is not None:
+        acc.calendar_id_salt = value
+        db.commit()
+    return acc.calendar_id_salt
+
+
+MARK = "testsalt"  # 테스트에서 미리 정해 두는 salt (base32hex)
+
+
 def _logs(db, task_id, action_type):
     return db.scalars(select(AgentActionLog).where(AgentActionLog.task_id == task_id,
                                                    AgentActionLog.action_type == action_type)).all()
@@ -77,7 +89,7 @@ def test_creates_event_for_deadline_task(setup, google_fake):
         r = _sync(db, aid, google_fake)
         assert (r.created, r.updated, r.deleted_by_user, r.errors) == (1, 0, 0, 0)
         task = db.get(Task, tid)
-        eid = event_id_for(task)
+        eid = event_id_for(task, _salt(db, aid))
         assert _calls(google_fake, "insert") == [("insert", eid)]
         assert task.calendar_state == "synced"
         assert task.calendar_event_id == eid
@@ -131,7 +143,7 @@ def test_pending_updates_existing(setup, google_fake):
         db.commit()
         r = _sync(db, aid, google_fake)
         assert (r.created, r.updated) == (0, 1)
-        eid = event_id_for(task)
+        eid = event_id_for(task, _salt(db, aid))
         assert _calls(google_fake, "patch") == [("patch", eid)]
         assert len(_calls(google_fake, "insert")) == 1
         assert google_fake.events[eid]["start"] == {"date": "2026-11-03"}
@@ -201,8 +213,9 @@ def test_crash_after_insert_no_duplicate(setup, google_fake):
     with SessionLocal() as db:
         tid = _task(db, uid)
         task = db.get(Task, tid)
-        eid = event_id_for(task)
-        google_fake.events[eid] = {"id": eid, "summary": "old"}  # 지난 주기에 만들고 번호 저장 전에 죽었다
+        eid = event_id_for(task, _salt(db, aid, MARK))
+        google_fake.events[eid] = {"id": eid, "summary": "old",  # 지난 주기에 만들고 번호 저장 전에 죽었다
+                                   "extendedProperties": {"private": {"followupTask": f"{MARK}:{tid}"}}}
         r = _sync(db, aid, google_fake)
         assert [c[0] for c in google_fake.calendar_calls] == ["insert", "get", "patch"]
         assert list(google_fake.events) == [eid]
@@ -217,8 +230,9 @@ def test_conflict_with_user_deleted_event(setup, google_fake):
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid)
-        eid = event_id_for(db.get(Task, tid))
-        google_fake.deleted_events.add(eid)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid, MARK))
+        google_fake.deleted_events[eid] = {"id": eid,
+                                           "extendedProperties": {"private": {"followupTask": f"{MARK}:{tid}"}}}
         _sync(db, aid, google_fake)
         assert [c[0] for c in google_fake.calendar_calls] == ["insert", "get"]
         task = db.get(Task, tid)
@@ -234,7 +248,7 @@ def test_cancel_marks_check(setup, google_fake):
         orchestrator.cancel_task(db, db.get(User, uid), task, "")
         assert db.get(Task, tid).calendar_state == "pending"
         _sync(db, aid, google_fake)
-        ev = google_fake.events[event_id_for(task)]
+        ev = google_fake.events[event_id_for(task, _salt(db, aid))]
         assert ev["summary"].startswith("✓ ")
         assert db.get(Task, tid).calendar_state == "synced"
 
@@ -417,7 +431,7 @@ def test_deadline_removed_keeps_event(setup, google_fake):
         _sync(db, aid, google_fake)
         assert len(google_fake.calendar_calls) == n
         assert db.get(Task, tid).calendar_state == "synced"
-        assert event_id_for(task) in google_fake.events
+        assert event_id_for(task, _salt(db, aid)) in google_fake.events
 
 
 def test_intake_marks_dirty():
@@ -481,3 +495,73 @@ def test_remark_after_error_resets_attempts(setup, google_fake):
         _sync(db, aid, google_fake)
         task = db.get(Task, tid)
         assert task.calendar_state == "pending" and task.calendar_attempts == 1
+
+
+def test_salt_generated_once_and_reused(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        assert _salt(db, aid) == ""
+        t1 = _task(db, uid)
+        _sync(db, aid, google_fake)
+        salt = _salt(db, aid)
+        assert re.fullmatch(r"[0-9a-v]{8}", salt)
+        t2 = _task(db, uid)
+        _sync(db, aid, google_fake)
+        assert _salt(db, aid) == salt
+        for tid in (t1, t2):
+            eid = db.get(Task, tid).calendar_event_id
+            assert eid == "fu" + salt + f"{tid:08x}"
+            assert re.fullmatch(r"^[a-v0-9]{5,1024}$", eid)
+            assert google_fake.events[eid]["extendedProperties"] == {
+                "private": {"followupTask": f"{salt}:{tid}"}}
+
+
+def test_preset_salt_kept(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        _salt(db, aid, MARK)
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        assert _salt(db, aid) == MARK
+        assert db.get(Task, tid).calendar_event_id == f"fu{MARK}{tid:08x}"
+
+
+def test_no_targets_no_salt(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        _sync(db, aid, google_fake)
+        assert _salt(db, aid) == ""
+
+
+@pytest.mark.parametrize("marker", [None, "othersalt:1", f"{MARK}:999"])
+def test_conflict_with_foreign_event_is_error(setup, google_fake, marker):
+    """다른 DB · 다른 인스턴스가 만든 같은 번호의 일정은 고치지도, 사용자 삭제로 보지도 않는다."""
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid, MARK))
+        foreign = {"id": eid, "summary": "남의 일정"}
+        if marker is not None:
+            foreign["extendedProperties"] = {"private": {"followupTask": marker.replace("999", str(tid + 1))}}
+        google_fake.events[eid] = dict(foreign)
+        r = _sync(db, aid, google_fake)
+        assert [c[0] for c in google_fake.calendar_calls] == ["insert", "get"]
+        assert google_fake.events[eid] == foreign
+        task = db.get(Task, tid)
+        assert task.calendar_state == "error"
+        assert task.calendar_error == "같은 번호의 다른 캘린더 일정이 있어 반영하지 못했습니다."
+        assert task.calendar_event_id is None and task.calendar_event_url == ""
+        assert r.errors == 1 and r.deleted_by_user == 0
+        assert len(_logs(db, tid, "CALENDAR_ERROR")) == 1
+
+
+def test_conflict_with_foreign_cancelled_event_is_error(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid, MARK))
+        google_fake.deleted_events[eid] = {"id": eid}  # 표식 없는 지워진 일정
+        r = _sync(db, aid, google_fake)
+        task = db.get(Task, tid)
+        assert task.calendar_state == "error" and task.calendar_event_id is None
+        assert r.deleted_by_user == 0 and r.errors == 1

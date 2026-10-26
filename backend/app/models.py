@@ -147,6 +147,8 @@ class GoogleAccount(Base):
     last_sync_error: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default=GoogleAccountStatus.CONNECTED)
     sync_lease_until: Mapped[datetime | None] = mapped_column(Timestamp)
+    # 캘린더 일정 번호에 섞는 무작위 값 (base32hex 8자). 다른 DB · 다른 인스턴스와 번호가 겹치지 않게 한다.
+    calendar_id_salt: Mapped[str] = mapped_column(String(16), default="")
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
 

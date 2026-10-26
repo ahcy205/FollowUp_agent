@@ -11,9 +11,18 @@ _DESC_MAX = 4000
 _TIMED_DURATION = timedelta(minutes=30)
 
 
-def event_id_for(task: Task) -> str:
-    """결정적 일정 ID. 캘린더 규칙(a-v, 0-9, 5자 이상)을 만족한다."""
-    return "fuag" + f"{task.user_id:08x}" + f"{task.id:08x}"
+def event_id_for(task: Task, salt: str) -> str:
+    """결정적 일정 ID. 캘린더 규칙(a-v, 0-9, 5자 이상)을 만족한다.
+
+    salt는 Google 계정 연결마다 만드는 무작위 값이다. DB를 새로 만들거나 다른 인스턴스가 같은 계정을
+    연결해도 업무 번호만으로 남의 일정과 번호가 겹치지 않게 한다.
+    """
+    return "fu" + salt + f"{task.id:08x}"
+
+
+def private_marker(task: Task, salt: str) -> str:
+    """일정의 extendedProperties.private.followupTask 값. 409 때 우리 일정인지 확인하는 데 쓴다."""
+    return f"{salt}:{task.id}"
 
 
 def _local_deadline(task: Task, tz: str) -> datetime:
@@ -59,7 +68,7 @@ def _description(task: Task, public_url: str) -> str:
     return f"{body}\n\n{link}" if body else link
 
 
-def build_event(task: Task, *, tz: str, public_url: str) -> dict:
+def build_event(task: Task, *, tz: str, public_url: str, salt: str) -> dict:
     local = _local_deadline(task, tz)
     if task.deadline_all_day:
         day: date = local.date()
@@ -71,10 +80,11 @@ def build_event(task: Task, *, tz: str, public_url: str) -> dict:
         end = {"dateTime": (local + _TIMED_DURATION).isoformat(timespec="seconds"), "timeZone": tz}
         overrides = [{"method": "popup", "minutes": 1440}, {"method": "popup", "minutes": 60}]
     return {
-        "id": event_id_for(task),
+        "id": event_id_for(task, salt),
         "summary": _title(task),
         "description": _description(task, public_url),
         "start": start,
         "end": end,
         "reminders": {"useDefault": False, "overrides": overrides},
+        "extendedProperties": {"private": {"followupTask": private_marker(task, salt)}},
     }

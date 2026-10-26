@@ -52,7 +52,7 @@ class FakeGoogle:
         self.revoke_fails = False
         self.get_calls: list[str] = []
         self.events: dict[str, dict] = {}
-        self.deleted_events: set[str] = set()
+        self.deleted_events: dict[str, dict] = {}  # 사용자가 지운 일정. Google처럼 본문(표식 포함)을 남긴다
         self.calendar_fail: GoogleError | None = None
         self.calendar_fail_times: int = 0
         self.calendar_calls: list[tuple[str, str]] = []
@@ -132,8 +132,10 @@ class FakeGoogle:
                 self.calendar_fail_times = 0
             raise err
 
-    def _event(self, event_id: str, status: str = "confirmed") -> CalendarEvent:
-        return CalendarEvent(id=event_id, html_link=f"https://calendar.example/event/{event_id}", status=status)
+    def _event(self, event_id: str, status: str = "confirmed", body: dict | None = None) -> CalendarEvent:
+        private = ((body or {}).get("extendedProperties") or {}).get("private") or {}
+        return CalendarEvent(id=event_id, html_link=f"https://calendar.example/event/{event_id}", status=status,
+                             private=dict(private))
 
     def calendar_insert(self, access_token: str, body: dict) -> CalendarEvent:
         self._seq += 1
@@ -142,24 +144,25 @@ class FakeGoogle:
         if event_id in self.events or event_id in self.deleted_events:
             raise GoogleConflict("event id already exists")
         self.events[event_id] = {**body, "id": event_id}
-        return self._event(event_id)
+        return self._event(event_id, body=self.events[event_id])
 
     def calendar_get(self, access_token: str, event_id: str) -> CalendarEvent:
         self._calendar_enter("get", event_id)
         if event_id in self.deleted_events:
-            return self._event(event_id, "cancelled")
+            return self._event(event_id, "cancelled", self.deleted_events[event_id])
         if event_id not in self.events:
             raise GoogleNotFound("event not found")
-        return self._event(event_id, self.events[event_id].get("status", "confirmed"))
+        ev = self.events[event_id]
+        return self._event(event_id, ev.get("status", "confirmed"), ev)
 
     def calendar_patch(self, access_token: str, event_id: str, body: dict) -> CalendarEvent:
         self._calendar_enter("patch", event_id)
         if event_id in self.deleted_events or event_id not in self.events:
             raise GoogleNotFound("event not found")
         self.events[event_id].update(body)
-        return self._event(event_id, self.events[event_id].get("status", "confirmed"))
+        ev = self.events[event_id]
+        return self._event(event_id, ev.get("status", "confirmed"), ev)
 
     def delete_event(self, event_id: str) -> None:
         """Simulate the user deleting the event in Google Calendar."""
-        self.events.pop(event_id, None)
-        self.deleted_events.add(event_id)
+        self.deleted_events[event_id] = self.events.pop(event_id, {"id": event_id})

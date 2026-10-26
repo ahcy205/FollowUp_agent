@@ -1,7 +1,7 @@
 """Single boundary for every Google call (OAuth + Gmail). Tests swap in FakeGoogle via set_google_override."""
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 from urllib.parse import urlencode
@@ -67,6 +67,7 @@ class CalendarEvent:
     id: str
     html_link: str
     status: str  # "confirmed" | "tentative" | "cancelled"
+    private: dict = field(default_factory=dict)  # extendedProperties.private (우리 앱이 붙인 표식)
 
 
 class GoogleError(Exception):
@@ -243,7 +244,9 @@ class HttpGoogleClient:
         if body is not None:
             kwargs["json"] = body
         d = self._send(method, url, **kwargs).json()
-        return CalendarEvent(id=d["id"], html_link=d.get("htmlLink", ""), status=d.get("status", "confirmed"))
+        private = (d.get("extendedProperties") or {}).get("private") or {}
+        return CalendarEvent(id=d["id"], html_link=d.get("htmlLink", ""), status=d.get("status", "confirmed"),
+                             private=dict(private) if isinstance(private, dict) else {})
 
     def calendar_insert(self, access_token: str, body: dict) -> CalendarEvent:
         return self._calendar("POST", access_token, body=body)

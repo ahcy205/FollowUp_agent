@@ -271,7 +271,14 @@ def test_calendar_patch_and_get():
     assert seen[1][:2] == ("PATCH", f"{CAL}/e1")
     assert json.loads(seen[1][2]) == {"summary": "x"}
     assert g.status == "tentative" and g.html_link == ""
+    assert g.private == {}
     assert p.id == "e1"
+
+
+def test_calendar_event_private_marker_parsed():
+    body = {"id": "e1", "extendedProperties": {"private": {"followupTask": "abc:1"}, "shared": {"x": "y"}}}
+    c = client_with(lambda req: httpx.Response(200, json=body))
+    assert c.calendar_get("tok", "e1").private == {"followupTask": "abc:1"}
 
 
 @pytest.mark.parametrize("status", [404, 410])
