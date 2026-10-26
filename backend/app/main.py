@@ -9,7 +9,7 @@ from sqlalchemy import func, select, text
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.agent.orchestrator import recover_stale_runs
-from app.api import auth, demo, tasks
+from app.api import auth, demo, google, tasks
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine
 from app.models import User
@@ -71,6 +71,7 @@ if settings.is_production:
 app.include_router(auth.router)
 app.include_router(tasks.router)
 app.include_router(demo.router)
+app.include_router(google.router)
 
 
 @app.get("/api/health", include_in_schema=False)

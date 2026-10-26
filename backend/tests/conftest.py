@@ -18,9 +18,15 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.agent import orchestrator  # noqa: E402
 from app.agent.llm import LLMResponse, set_llm_override  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.google import oauth  # noqa: E402
+from app.google.client import set_google_override  # noqa: E402
 from app.db import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.security import agent_limiter, login_limiter  # noqa: E402
+from tests.fake_google import FakeGoogle  # noqa: E402
+
+TEST_GOOGLE_TOKEN_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="  # base64 of 32 bytes
 
 
 class ScriptedLLM:
@@ -70,12 +76,27 @@ def _fresh_db():
     orchestrator.set_dispatcher(orchestrator.execute_run)  # run the agent inline
     login_limiter.reset()
     agent_limiter.reset()
+    oauth.clear_access_token_cache()
     yield
     set_llm_override(None)
+    set_google_override(None)
+    oauth.clear_access_token_cache()
 
 
 def make_client() -> TestClient:
     return TestClient(app, headers={"X-Requested-With": "XMLHttpRequest"})
+
+
+@pytest.fixture
+def google_fake(monkeypatch) -> FakeGoogle:
+    """Turn Google on (fake credentials) and route every Google call to a fresh FakeGoogle."""
+    s = get_settings()
+    monkeypatch.setattr(s, "google_client_id", "test-client-id")
+    monkeypatch.setattr(s, "google_client_secret", "test-client-secret")
+    monkeypatch.setattr(s, "google_token_key", TEST_GOOGLE_TOKEN_KEY)
+    fake = FakeGoogle()
+    set_google_override(fake)
+    return fake
 
 
 @pytest.fixture
