@@ -218,11 +218,9 @@ def test_alerts_keys():
     # 요약이 없으면 제목
     no_summary = alerts_for(_t(deadline=kst(10, 27), summary=None), None, None, NOW, TZ)
     assert no_summary[0]["text"] == "[D-1] 원래 제목"
-    # 스누즈 해제 알림 (안전장치로 해제된 경우에도 기한 알림과 함께)
+    # 스누즈 해제 알림: 안전장치로 해제돼 기한 알림이 함께 울리면 기한 알림만 (test_alerts_skip_snooze_when_deadline_alert)
     woke = alerts_for(_t(snoozed_until=kst(11, 2, 9), deadline=kst(10, 27)), None, None, NOW, TZ)
-    assert _keys(woke) == ["deadline-d1:7:2026-10-27", "snooze:7:2026-10-26T00:00:00+00:00"]
-    assert woke[1]["text"] == f"[다시 표시] {SUMMARY}"
-    assert woke[1]["kind"] == "snooze"
+    assert _keys(woke) == ["deadline-d1:7:2026-10-27"]
     # 스누즈 중이어도 기한 알림은 울린다 (기한 전날 09:00에 이미 해제되므로 실제로는 겹치지 않음)
     assert _keys(alerts_for(_t(snoozed_until=kst(10, 26, 12), deadline=kst(10, 26)), None, None, NOW, TZ)) == [
         "deadline-d0:7:2026-10-26"]
@@ -321,3 +319,37 @@ def test_module_constants():
     assert (inbox.TAB_TODO, inbox.TAB_SENT, inbox.TAB_REFERENCE, inbox.TAB_DONE) == (
         "todo", "sent", "reference", "done")
     assert (inbox.BUCKET_NOW, inbox.BUCKET_WEEK, inbox.BUCKET_LATER) == ("now", "week", "later")
+
+
+def test_finalize_snooze():
+    t = _t(snoozed_until=kst(11, 2, 9), deadline=kst(10, 27))
+    inbox.finalize_snooze(t, NOW, TZ)
+    assert t.snoozed_until is None and t.snooze_returned_at == kst(10, 26, 9)
+    active = _t(snoozed_until=kst(10, 27, 9))
+    inbox.finalize_snooze(active, NOW, TZ)
+    assert active.snoozed_until == kst(10, 27, 9) and active.snooze_returned_at is None
+    none = _t()
+    inbox.finalize_snooze(none, NOW, TZ)
+    assert none.snoozed_until is None and none.snooze_returned_at is None
+
+
+def test_alerts_skip_snooze_when_deadline_alert():
+    # 기한 알림이 있으면 같은 업무의 다시 표시 알림은 내지 않는다
+    woke = alerts_for(_t(snoozed_until=kst(11, 2, 9), deadline=kst(10, 27)), None, None, NOW, TZ)
+    assert _keys(woke) == ["deadline-d1:7:2026-10-27"]
+    # 기한 알림이 없으면 낸다
+    back = alerts_for(_t(snoozed_until=kst(10, 26, 9)), None, None, NOW, TZ)
+    assert _keys(back) == ["snooze:7:2026-10-26T00:00:00+00:00"]
+    assert back[0]["text"] == f"[다시 표시] {SUMMARY}"
+
+
+def test_merge_candidates_none_while_analysing():
+    with SessionLocal() as db:
+        uid = _user(db, "a@example.com")
+        addr = "kim@partner.com"
+        _mail_task(db, uid, addr, created=NOW - timedelta(days=1))
+        new = _mail_task(db, uid, addr, created=NOW - timedelta(minutes=5), status=TaskStatus.PENDING)
+        assert len(merge_candidates(db, new, NOW)) == 1
+        new.brief = {**new.brief, "analysis": "pending"}
+        db.commit()
+        assert merge_candidates(db, new, NOW) == []

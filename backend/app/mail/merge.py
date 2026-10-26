@@ -11,8 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent.audit import log_action
+from app.config import get_settings
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.errors import ActionError
+from app.mail.inbox import finalize_snooze
 from app.models import Email, Task, TaskStatus, User
 
 MAX_HOPS = 5
@@ -277,7 +279,8 @@ def undo_merge(db: Session, user: User, target: Task, source_id: int, now: datet
                 reqs.remove(r)
         target.brief = {**(target.brief or {}), "requests": reqs}
 
-    # 기한 · 중요도: 합친 직후 값 그대로일 때만 이전 값으로
+    # 기한 · 중요도: 합친 직후 값 그대로일 때만 이전 값으로. 이전 기한이 더 늦으면 이미 풀린 스누즈가 다시 숨지 않게 먼저 끝낸다.
+    finalize_snooze(target, now, get_settings().user_timezone)
     current, after, before = _fields(target), rec.get("after") or {}, rec.get("before") or {}
     if all(current[k] == after.get(k) for k in _DEADLINE_KEYS):
         _restore(target, before, _DEADLINE_KEYS)

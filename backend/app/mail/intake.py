@@ -19,8 +19,10 @@ from app.agent.audit import log_action
 from app.agent.orchestrator import CLOSED_TASK_STATUSES
 from app.agent.guard import detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
+from app.config import get_settings
 from app.mail.calendar_sync import mark_calendar_dirty
-from app.mail.deadline import Deadline, earliest, normalize_deadline
+from app.mail.deadline import USER_DEADLINE_SOURCE, Deadline, earliest, normalize_deadline
+from app.mail.inbox import is_snoozed
 from app.mail.merge import resolve_merged
 from app.models import Email, EmailDirection, RiskLevel, Task, TaskStatus
 
@@ -263,6 +265,15 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
             item["due_note"] = t["due_text"][:NOTE_CHARS]  # 과거 날짜 등은 기한 대신 메모로 남긴다 (명세 4.5)
         plan.append(item)
     best: Deadline | None = earliest(candidates)
+    # 사용자가 직접 넣은 할 일은 다시 분석해도 남긴다(체크 · 메모 · 합쳐 온 표시 그대로). 번호가 겹치면 새 번호.
+    used = {p["id"] for p in plan}
+    for p in task.plan or []:
+        if isinstance(p, dict) and p.get("source") == "user":
+            item = dict(p)
+            if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool) or item["id"] in used:
+                item["id"] = max(used, default=0) + 1
+            used.add(item["id"])
+            plan.append(item)
 
     summary = data["summary"]
     brief = {"analysis": "done", "email_id": email.id, "summary": summary, "requests": requests,
@@ -277,7 +288,9 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
     task.brief = brief
     if task.priority_source != "user":  # 사용자가 직접 정한 중요도는 분석이 덮지 않는다
         task.priority = data["priority"]
-    if best:
+    if task.deadline_source == USER_DEADLINE_SOURCE:
+        pass  # 사용자가 직접 정한 기한은 분석이 덮지 않는다
+    elif best:
         task.deadline_at, task.deadline_all_day = best.at, best.all_day
         task.deadline_kind, task.deadline_source = best.kind, best.source
     else:
@@ -308,12 +321,16 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
 # ---------------------------------------------------------------- 접수 주기
 
 def link_email(db: Session, task: Task, email: Email) -> None:
-    """메일을 기존 업무에 붙인다. 스누즈 중이던 업무는 바로 다시 나타난다. 커밋하지 않는다."""
+    """메일을 기존 업무에 붙인다. 스누즈 중이던 업무는 바로 다시 나타난다. 커밋하지 않는다.
+
+    이미 풀린 스누즈(snoozed_until만 남은 것)에는 '다시 표시됨'을 새로 찍지 않는다.
+    """
     email.task_id = task.id
     email.processed = True
-    if task.snoozed_until is not None:
+    now = datetime.now(timezone.utc)
+    if is_snoozed(task, now, get_settings().user_timezone):
         task.snoozed_until = None
-        task.snooze_returned_at = datetime.now(timezone.utc)
+        task.snooze_returned_at = now
     log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="MAIL_ATTACHED",
                output_data={"email_id": email.id}, reason=ATTACHED_REASON)
 

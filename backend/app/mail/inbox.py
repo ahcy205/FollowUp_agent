@@ -152,6 +152,18 @@ def is_snoozed(task: Task, now: datetime, tz: str) -> bool:
     return wake is not None and _utc(now) < wake
 
 
+def finalize_snooze(task: Task, now: datetime, tz: str) -> None:
+    """이미 풀린 스누즈를 끝난 것으로 기록한다: snoozed_until을 비우고 해제 시각을 snooze_returned_at에 남긴다.
+
+    기한을 바꾸기 전에 부른다. 기한이 늦춰지면 해제 시각이 다시 미래로 가서 업무가 또 숨고 알림이 또 울리기 때문이다.
+    남기는 시각은 원래 해제 시각이므로 '다시 표시' 알림 키도 그대로다.
+    """
+    wake = snooze_wake_at(task, tz)
+    if wake is not None and wake <= _utc(now):
+        task.snooze_returned_at = wake
+        task.snoozed_until = None
+
+
 def returned_at(task: Task, now: datetime, tz: str) -> datetime | None:
     """스누즈에서 돌아온 시각. 돌아온 지 24시간이 지났으면 None."""
     now = _utc(now)
@@ -189,6 +201,7 @@ def alerts_for(task: Task, latest_inbound_id: int | None, latest_inbound_at: dat
     """처리할 일 탭 업무의 브라우저 알림. 같은 키는 화면이 한 번만 띄운다.
 
     기한 알림은 스누즈 중에도 낸다. 스누즈는 기한 전날 09:00에 풀리므로 실제로 숨겨진 채 울리지 않는다.
+    기한 알림을 낸 업무에는 '다시 표시' 알림을 함께 내지 않는다(같은 업무 알림 두 개).
     """
     if tab_of(task) != TAB_TODO:
         return []
@@ -205,7 +218,7 @@ def alerts_for(task: Task, latest_inbound_id: int | None, latest_inbound_at: dat
         elif due == today + timedelta(days=1) and now >= _local_at(today, MORNING, tz):
             out.append(_alert("deadline-d1", due.isoformat(), task, f"[D-1] {summary}"))
     back = returned_at(task, now, tz)
-    if back is not None:
+    if back is not None and not out:
         out.append(_alert("snooze", back.isoformat(timespec="seconds"), task, f"[다시 표시] {summary}"))
     days = nudge_days(task, latest_inbound_at, now, tz)
     if days is not None and latest_inbound_id is not None:
@@ -255,9 +268,12 @@ def _source_sender(db: Session, task: Task) -> str:
 
 
 def merge_candidates(db: Session, task: Task, now: datetime) -> list[Task]:
-    """같은 보낸 사람의 더 먼저 만들어진 진행 중 메일 업무. 최근 것부터 최대 3개."""
+    """같은 보낸 사람의 더 먼저 만들어진 진행 중 메일 업무. 최근 것부터 최대 3개.
+
+    분석 대기 중인 업무는 합칠 수 없으므로(합치기가 409) 후보를 내지 않는다.
+    """
     if (task.origin != "mail" or task.merged_into_id is not None or task.merge_dismissed
-            or str(task.status) in _CLOSED_STATUSES):
+            or str(task.status) in _CLOSED_STATUSES or _brief(task).get("analysis") == "pending"):
         return []
     sender = _source_sender(db, task)
     if not sender:

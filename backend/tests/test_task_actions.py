@@ -607,3 +607,118 @@ def test_api_restore_keeps_merged_from(client):
     r = client.post(f"/api/tasks/{tid}/todos", json={"op": "restore", "item": item, "index": 0})
     assert r.status_code == 200, r.text
     assert r.json()["task"]["plan"] == [item]
+
+
+# ---------------------------------------------------------------- 리뷰 수정 (스누즈 종료 · 재분석 · 탭)
+
+def test_deadline_later_after_wake_keeps_task_visible():
+    from app.mail import inbox
+    with SessionLocal() as db:
+        u = _user(db)
+        # 정한 시각은 11/10이지만 기한(10/27) 전날 09:00에 이미 풀렸다
+        t = _task(db, u.id, snoozed_until=_kst(2026, 11, 10, 9), deadline_at=_kst(2026, 10, 27),
+                  deadline_all_day=True, deadline_kind="explicit")
+        assert not inbox.is_snoozed(t, NOW, TZ)
+        task_actions.set_deadline(t, date="2026-11-20", time=None, clear=False, confirm=False, tz=TZ, now=NOW)
+        assert t.snoozed_until is None
+        assert t.snooze_returned_at.astimezone(UTC) == _kst(2026, 10, 26, 9)
+        # 11/9에도 숨지 않고, 11/10에 다시 표시 알림이 또 울리지 않는다
+        assert not inbox.is_snoozed(t, _kst(2026, 11, 9, 10), TZ)
+        later = inbox.alerts_for(t, None, None, _kst(2026, 11, 10, 10), TZ)
+        assert [a for a in later if a["kind"] == "snooze"] == []
+
+        # 아직 스누즈 중이면 그대로 둔다
+        s = _task(db, u.id, snoozed_until=NOW + timedelta(days=2))
+        task_actions.set_deadline(s, date="2026-11-20", time=None, clear=False, confirm=False, tz=TZ, now=NOW)
+        assert s.snoozed_until is not None and s.snooze_returned_at is None
+
+
+def test_new_mail_after_long_ended_snooze_no_stamp(monkeypatch):
+    monkeypatch.setattr(intake, "datetime", _FixedDatetime)
+    with SessionLocal() as db:
+        u = _user(db)
+        t = _task(db, u.id, snoozed_until=NOW - timedelta(days=3))
+        db.add(_mail(u.id, thread=t.gmail_thread_id))
+        db.commit()
+        assert intake.intake_work_mails(db, u.id, ScriptedLLM(), max_mails=5, tz=TZ).attached == 1
+        db.expire_all()
+        assert db.get(Task, t.id).snooze_returned_at is None
+
+
+def test_snooze_only_todo_tab():
+    with SessionLocal() as db:
+        u = _user(db)
+        for over in ({"status": TaskStatus.WAITING},
+                     {"status": TaskStatus.PENDING, "brief": {"analysis": "done", "needs_reply": False}}):
+            t = _task(db, u.id, **over)
+            with pytest.raises(ActionError) as e:
+                task_actions.snooze(t, preset="tomorrow", until=None, now=NOW, tz=TZ)
+            assert e.value.status == 409 and str(e.value) == "처리할 일에 있는 업무만 나중에 볼 수 있습니다."
+            assert t.snoozed_until is None
+        # 분석 대기 업무는 처리할 일 탭이므로 된다
+        p = _task(db, u.id, status=TaskStatus.PENDING, brief={"analysis": "pending", "attempts": 0})
+        task_actions.snooze(p, preset="tomorrow", until=None, now=NOW, tz=TZ)
+        assert p.snoozed_until is not None
+
+
+def _reanalysis():
+    return {"summary": "파트너사 견적 요청", "counterpart": {"name": "김", "organization": "P"},
+            "requests": ["견적"],
+            "todos": [{"title": "견적 보내기", "due_text": "", "due_date": "", "due_time": ""},
+                      {"title": "납기 확인", "due_text": "", "due_date": "", "due_time": ""}],
+            "deadline": {"text": "10월 28일", "date": "2026-10-28", "time": "", "kind": "explicit"},
+            "priority": "NORMAL", "needs_reply": True, "suspicious": []}
+
+
+def test_reanalysis_keeps_user_todos_and_deadline(monkeypatch):
+    monkeypatch.setattr(intake, "datetime", _FixedDatetime)
+    with SessionLocal() as db:
+        u = _user(db)
+        user_items = [{"id": 2, "title": "내가 넣은 일", "done": True, "evidence": "했음", "due_at": None,
+                       "source": "user"},
+                      {"id": 7, "title": "합쳐 온 내 일", "done": False, "evidence": "", "due_at": None,
+                       "source": "user", "merged_from": 42}]
+        t = _task(db, u.id, plan=[{"id": 1, "title": "옛 할 일", "done": False, "evidence": "", "due_at": None,
+                                   "source": "agent"}] + user_items,
+                  deadline_at=_kst(2026, 11, 20), deadline_all_day=True, deadline_kind="explicit",
+                  deadline_source=task_actions.USER_DEADLINE_SOURCE)
+        mail = _mail(u.id, thread=t.gmail_thread_id, task_id=t.id)
+        db.add(mail)
+        db.commit()
+        assert intake.analyze_into_task(db, t, mail, ScriptedLLM(analysis=_reanalysis()), TZ)
+        assert [p["title"] for p in t.plan] == ["견적 보내기", "납기 확인", "내가 넣은 일", "합쳐 온 내 일"]
+        assert len({p["id"] for p in t.plan}) == 4
+        kept = t.plan[2:]
+        assert kept[0]["done"] is True and kept[0]["evidence"] == "했음" and kept[0]["source"] == "user"
+        assert kept[1]["merged_from"] == 42
+        # 사용자가 정한 기한은 그대로
+        assert t.deadline_at.replace(tzinfo=UTC) == _kst(2026, 11, 20)  # DB에서 다시 읽어 naive UTC
+        assert t.deadline_source == task_actions.USER_DEADLINE_SOURCE and t.deadline_kind == "explicit"
+
+        # 사용자가 정하지 않은 기한은 분석 결과를 따른다
+        o = _task(db, u.id, deadline_at=_kst(2026, 11, 20), deadline_kind="estimated", deadline_source="다음 달")
+        mail2 = _mail(u.id, thread=o.gmail_thread_id, task_id=o.id)
+        db.add(mail2)
+        db.commit()
+        assert intake.analyze_into_task(db, o, mail2, ScriptedLLM(analysis=_reanalysis()), TZ)
+        assert o.deadline_at.astimezone(UTC) == _kst(2026, 10, 28)  # 분석이 새로 넣은 aware 값
+        assert [p["source"] for p in o.plan] == ["agent", "agent"]
+
+
+def test_promote_into_reference_task_makes_it_work(monkeypatch):
+    monkeypatch.setattr(get_settings(), "mail_triage_enabled", True)
+    with SessionLocal() as db:
+        u = _user(db)
+        ref = _task(db, u.id, status=TaskStatus.PENDING, brief={"analysis": "done", "needs_reply": False})
+        m = _mail(u.id, thread=ref.gmail_thread_id, triage="not_work")
+        db.add(m)
+        db.commit()
+        assert task_actions.promote_email(db, u, m).id == ref.id
+        assert ref.status == TaskStatus.ACTION_REQUIRED
+        # 분석 대기 업무는 그대로 분석 대기로 둔다
+        pend = _task(db, u.id, status=TaskStatus.PENDING, brief={"analysis": "pending", "attempts": 0})
+        m2 = _mail(u.id, thread=pend.gmail_thread_id, triage="not_work")
+        db.add(m2)
+        db.commit()
+        task_actions.promote_email(db, u, m2)
+        assert pend.status == TaskStatus.PENDING

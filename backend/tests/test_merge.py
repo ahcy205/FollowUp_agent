@@ -349,6 +349,24 @@ def test_merge_rejects_pending_source():
         assert e.value.status == 409 and str(e.value) == "합칠 수 없는 업무입니다."
 
 
+def test_undo_after_snooze_wake_keeps_target_visible():
+    from app.mail import inbox
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _ = _pair(db, u.id)
+        a.snoozed_until = NOW + timedelta(days=10)
+        b.deadline_at, b.deadline_all_day = _kst(2026, 10, 27), True  # 합치면 A 기한이 10/27 → 10/26 09:00에 풀림
+        db.commit()
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        assert not inbox.is_snoozed(a, NOW, TZ)
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=5))
+        db.commit()
+        assert a.deadline_at.astimezone(UTC) == _kst(2026, 11, 5)  # 이전 기한으로 돌아감
+        assert a.snoozed_until is None and not inbox.is_snoozed(a, NOW + timedelta(days=5), TZ)
+        assert a.snooze_returned_at.astimezone(UTC) == _kst(2026, 10, 26, 9)
+
+
 @pytest.mark.parametrize("change", ["closed", "merged"])
 def test_analysis_skips_task_closed_or_merged_meanwhile(change):
     from sqlalchemy import update

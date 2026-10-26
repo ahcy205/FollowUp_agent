@@ -16,9 +16,10 @@ from app.agent.audit import log_action
 from app.config import get_settings
 from app.mail import intake
 from app.mail.calendar_sync import mark_calendar_dirty
-from app.mail.deadline import MAX_AHEAD_DAYS
+from app.mail.deadline import MAX_AHEAD_DAYS, USER_DEADLINE_SOURCE
 from app.mail.errors import ActionError
-from app.mail.inbox import snooze_wake_at
+from app.mail import inbox
+from app.mail.inbox import finalize_snooze, snooze_wake_at
 from app.models import Email, EmailDirection, Task, TaskStatus, User
 
 PRESETS = ("evening", "tomorrow", "next_monday")
@@ -30,7 +31,6 @@ TODO_TITLE_MAX = 300
 TODO_MEMO_MAX = 1000
 DUE_NOTE_MAX = 300
 CLOSE_REASON_MAX = 500
-USER_DEADLINE_SOURCE = "사용자가 직접 정함"
 CLOSED_STEP = "답장 필요 없음으로 닫음"
 REOPENED_STEP = "새 메일로 다시 열림"
 PROMOTED_REASON = "사용자가 업무로 지정"
@@ -41,6 +41,7 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _TIME_RE = re.compile(r"(\d{2}):(\d{2})(?::(\d{2}))?")  # 브라우저 입력은 HH:MM:SS일 수 있다
 
 CLOSED_MESSAGE = "이미 완료되었거나 취소된 업무입니다."
+NOT_TODO_SNOOZE_MESSAGE = "처리할 일에 있는 업무만 나중에 볼 수 있습니다."
 
 
 def _utc(dt: datetime | None) -> datetime | None:
@@ -91,6 +92,8 @@ def _preset_until(preset: str, now: datetime, tz: str) -> datetime:
 def snooze(task: Task, *, preset: str | None, until: datetime | None, now: datetime, tz: str) -> None:
     """정한 시각까지 처리할 일 목록에서 숨긴다. 실제 해제는 min(정한 시각, 기한 전날 09:00)."""
     _require_open(task)
+    if inbox.tab_of(task) != inbox.TAB_TODO:  # 보낸 업무 · 참고용은 숨길 목록이 아니다
+        raise ActionError(NOT_TODO_SNOOZE_MESSAGE, 409)
     now = _utc(now)
     if (preset is None) == (until is None):
         raise ActionError("나중에 볼 시각을 하나 고르세요.", 400)
@@ -167,6 +170,8 @@ def set_deadline(task: Task, *, date: str | None, time: str | None, clear: bool,
     if modes != 1:
         raise ActionError("기한을 정하거나, 없애거나, 확인하는 것 중 하나만 하세요.", 400)
     before = _iso(task.deadline_at)
+    now = _utc(now or datetime.now(UTC))
+    finalize_snooze(task, now, tz)  # 이미 풀린 스누즈가 늦춘 기한 때문에 다시 숨지 않게
 
     if confirm:
         if task.deadline_at is None or task.deadline_kind != "estimated":
@@ -176,7 +181,7 @@ def set_deadline(task: Task, *, date: str | None, time: str | None, clear: bool,
         task.deadline_at, task.deadline_all_day, task.deadline_kind, task.deadline_source = None, False, "none", ""
     else:
         zone = ZoneInfo(tz)
-        today = _utc(now or datetime.now(UTC)).astimezone(zone).date()
+        today = now.astimezone(zone).date()
         day = _parse_day(date, today)
         at = _parse_time(time)
         task.deadline_at = datetime.combine(day, at or _time(0, 0), tzinfo=zone).astimezone(UTC)
@@ -357,6 +362,8 @@ def promote_email(db: Session, user: User, email: Email) -> Task:
             task.current_step = REOPENED_STEP
             task.next_action = ""
             mark_calendar_dirty(task)
+        elif inbox.tab_of(task) == inbox.TAB_REFERENCE:  # 참고용이던 업무: 사용자가 업무라고 했으므로 처리할 일로
+            task.status = TaskStatus.ACTION_REQUIRED
 
     email.triage = "work"
     email.triage_reason = PROMOTED_REASON

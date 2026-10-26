@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 MAX_AHEAD_DAYS = 730
 SOURCE_MAX = 300
+USER_DEADLINE_SOURCE = "사용자가 직접 정함"  # 사용자가 정한 기한의 근거. 다시 분석해도 덮지 않는다
 _KINDS = ("explicit", "estimated")
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _TIME_RE = re.compile(r"(\d{2}):(\d{2})")
