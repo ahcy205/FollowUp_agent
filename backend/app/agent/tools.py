@@ -267,7 +267,9 @@ def check_email(ctx: ToolContext, args: CheckEmailInput) -> dict:
     conds = [Email.task_id == ctx.task.id]
     if ctx.task.customer_id:
         conds.append((Email.customer_id == ctx.task.customer_id) & (Email.task_id.is_(None)) & (Email.created_at >= ctx.task.created_at))
-    stmt = select(Email).where(Email.user_id == ctx.user.id, Email.direction == EmailDirection.INBOUND, or_(*conds))
+    # 목표 입력 Agent는 가상 메일만 읽는다. 실제 Gmail 메일은 메일 판별 스위치 밖에서 LLM으로 보내지 않는다.
+    stmt = select(Email).where(Email.user_id == ctx.user.id, Email.direction == EmailDirection.INBOUND,
+                               Email.gmail_message_id.is_(None), or_(*conds))
     if not args.include_read:
         stmt = stmt.where(Email.processed.is_(False))
     emails = ctx.db.scalars(stmt.order_by(Email.created_at.desc()).limit(5)).all()
@@ -328,7 +330,8 @@ ANALYSIS_SYSTEM = (
 
 def analyze_email(ctx: ToolContext, args: AnalyzeEmailInput) -> dict:
     email = ctx.db.scalar(select(Email).where(Email.id == args.email_id, Email.user_id == ctx.user.id,
-                                              Email.direction == EmailDirection.INBOUND))
+                                              Email.direction == EmailDirection.INBOUND,
+                                              Email.gmail_message_id.is_(None)))  # 실제 Gmail 메일은 읽지 않는다
     if email is None or (email.task_id not in (None, ctx.task.id)):
         raise ToolError(f"email_id={args.email_id} 수신 메일을 이 업무에서 찾을 수 없습니다.")
     heuristics = detect_injection(email.content)
