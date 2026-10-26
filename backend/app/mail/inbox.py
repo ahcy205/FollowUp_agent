@@ -91,7 +91,7 @@ def deadline_badge(task: Task, now: datetime, tz: str) -> dict:
         return {"text": "기한 없음", "late": False, "estimated": False}
     days, late = dd
     if late:
-        text = f"D+{max(1, -days)} 지남"
+        text = "오늘 지남" if days == 0 else f"D+{-days} 지남"  # 오늘 지난 시간 지정 기한은 "오늘 지남"
     elif days == 0:
         text = "오늘"
     elif days == 1:
@@ -194,7 +194,9 @@ def alerts_for(task: Task, latest_inbound_id: int | None, latest_inbound_at: dat
         due = _local_date(task.deadline_at, tz)
         today = _local_date(now, tz)
         if due == today and now >= _local_at(today, MORNING, tz):
-            out.append(_alert("deadline-d0", due.isoformat(), task, f"[오늘 마감] {summary}"))
+            passed = not task.deadline_all_day and _utc(task.deadline_at) < now
+            label = "[마감 지남]" if passed else "[오늘 마감]"
+            out.append(_alert("deadline-d0", due.isoformat(), task, f"{label} {summary}"))
         elif due == today + timedelta(days=1) and now >= _local_at(today, MORNING, tz):
             out.append(_alert("deadline-d1", due.isoformat(), task, f"[D-1] {summary}"))
     back = returned_at(task, now, tz)

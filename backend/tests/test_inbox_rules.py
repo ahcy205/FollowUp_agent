@@ -121,9 +121,9 @@ def test_badges():
     assert deadline_badge(_t(deadline=kst(10, 22)), NOW, TZ)["text"] == "D+4 지남"
     assert deadline_badge(_t(deadline=kst(10, 26)), NOW, TZ) == {"text": "오늘", "late": False,
                                                                 "estimated": False}
-    # 오늘 09:00에 끝난 시간 지정 기한은 지남(최소 D+1)
+    # 오늘 09:00에 끝난 시간 지정 기한은 "오늘 지남"
     timed = deadline_badge(_t(deadline=kst(10, 26, 9), all_day=False), NOW, TZ)
-    assert timed == {"text": "D+1 지남", "late": True, "estimated": False}
+    assert timed == {"text": "오늘 지남", "late": True, "estimated": False}
     # 오늘 18:00 시간 지정 기한은 아직 오늘
     assert deadline_badge(_t(deadline=kst(10, 26, 18), all_day=False), NOW, TZ)["text"] == "오늘"
     assert deadline_badge(_t(deadline=kst(10, 27)), NOW, TZ)["text"] == "D-1 내일"
@@ -201,6 +201,13 @@ def test_alerts_keys():
     assert _keys(today) == ["deadline-d0:7:2026-10-26"]
     assert today[0]["text"] == f"[오늘 마감] {SUMMARY}"
     assert alerts_for(_t(deadline=kst(10, 26)), None, None, kst(10, 26, 8), TZ) == []
+    # 오늘 09:00에 이미 지난 시간 지정 기한: 키는 같고 문구만 "마감 지남"
+    passed = alerts_for(_t(deadline=kst(10, 26, 9), all_day=False), None, None, NOW, TZ)
+    assert passed == [{"key": "deadline-d0:7:2026-10-26", "kind": "deadline-d0", "task_id": 7,
+                       "text": f"[마감 지남] {SUMMARY}"}]
+    # 오늘 18:00 시간 지정 기한은 아직 "오늘 마감"
+    assert alerts_for(_t(deadline=kst(10, 26, 18), all_day=False), None, None, NOW, TZ)[0]["text"] == (
+        f"[오늘 마감] {SUMMARY}")
     # 기한이 바뀌면 키도 바뀐다
     assert _keys(alerts_for(_t(deadline=kst(10, 27, 15), all_day=False), None, None, NOW, TZ)) == [
         "deadline-d1:7:2026-10-27"]
