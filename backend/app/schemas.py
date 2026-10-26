@@ -70,6 +70,9 @@ class TaskBrief(ORM):
     deadline_all_day: bool
     deadline_kind: str
     deadline_source: str
+    calendar_state: str
+    calendar_event_url: str
+    calendar_error: str
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

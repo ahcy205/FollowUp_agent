@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     mail_triage_enabled: bool = False
     mail_triage_batches_per_cycle: int = Field(default=3, ge=1, le=10)
     mail_intake_per_cycle: int = Field(default=5, ge=1, le=20)
+    calendar_sync_per_cycle: int = Field(default=10, ge=1, le=50)
 
     # Injected automatically by Railway
     railway_public_domain: str = ""

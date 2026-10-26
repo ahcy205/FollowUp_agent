@@ -121,6 +121,12 @@ class Task(Base):
     deadline_all_day: Mapped[bool] = mapped_column(Boolean, default=False)
     deadline_kind: Mapped[str] = mapped_column(String(10), default="none")  # explicit | estimated | none
     deadline_source: Mapped[str] = mapped_column(Text, default="")
+    calendar_event_id: Mapped[str | None] = mapped_column(String(64))
+    calendar_event_url: Mapped[str] = mapped_column(Text, default="")
+    # none | pending | synced | deleted_by_user | error
+    calendar_state: Mapped[str] = mapped_column(String(20), default="none", index=True)
+    calendar_error: Mapped[str] = mapped_column(Text, default="")
+    calendar_attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(Timestamp)
