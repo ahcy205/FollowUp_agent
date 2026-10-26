@@ -19,9 +19,11 @@ from app.google.client import (
 )
 from app.google.oauth import access_token_for, forget_access_token
 from app.mail.calendar_event import build_event, event_id_for
-from app.models import GoogleAccount, Task
+from app.models import GoogleAccount, Task, TaskStatus
 
 log = logging.getLogger(__name__)
+
+_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 
 MAX_TRANSIENT_ATTEMPTS = 5
 TRANSIENT_MESSAGE = "Google 캘린더 연결이 불안정해 일정을 반영하지 못했습니다."
@@ -48,6 +50,8 @@ def mark_calendar_dirty(task: Task) -> None:
     if task.origin != "mail" or task.calendar_state == DELETED:
         return
     if task.deadline_at is not None or task.calendar_event_id:
+        if task.calendar_state == ERROR:
+            task.calendar_attempts = 0  # 다시 표시하면 "5번 연속" 횟수를 처음부터 센다
         task.calendar_state = PENDING
 
 
@@ -56,7 +60,9 @@ def _targets(db: Session, user_id: int, max_tasks: int) -> list[int]:
         select(Task.id)
         .where(Task.user_id == user_id, Task.origin == "mail",
                or_(Task.calendar_state == PENDING,
-                   and_(Task.calendar_state == NONE, Task.deadline_at.is_not(None))))
+                   # 닫힌 업무는 새 일정을 만들지 않으므로 고르지 않는다 (매 주기 한도를 차지하지 않게)
+                   and_(Task.calendar_state == NONE, Task.deadline_at.is_not(None),
+                        Task.status.not_in(_CLOSED))))
         .order_by(Task.updated_at, Task.id)
         .limit(max_tasks)
     ).all())
@@ -110,7 +116,8 @@ def _patch(db: Session, task: Task, client: GoogleClient, token: str, body: dict
 def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str, public_url: str) -> str:
     """업무 1개를 반영한다. 결과: created | updated | deleted | skipped. GoogleError는 호출한 쪽이 처리한다."""
     if not task.calendar_event_id:
-        if task.deadline_at is None:
+        if task.deadline_at is None or task.status in _CLOSED:
+            # 완료 · 취소된 업무는 이미 있는 일정에만 ✓를 붙인다. 새 일정은 만들지 않는다.
             task.calendar_state = NONE
             return "skipped"
         body = build_event(task, tz=tz, public_url=public_url)
@@ -186,7 +193,11 @@ def _sync_one(db: Session, task_id: int, client: GoogleClient, token: str, tz: s
 
 def sync_calendars(db: Session, account: GoogleAccount, client: GoogleClient, *, max_tasks: int, tz: str,
                    public_url: str) -> CalendarSyncResult:
-    """이 계정 사용자의 메일 업무 중 반영할 것을 오래된 순으로 최대 max_tasks개 처리한다. 예외를 내보내지 않는다."""
+    """이 계정 사용자의 메일 업무 중 반영할 것을 오래된 순으로 최대 max_tasks개 처리한다. 예외를 내보내지 않는다.
+
+    호출하는 쪽은 세션의 바뀐 내용을 먼저 커밋해야 한다. 업무 하나가 실패하면 세션을 rollback하므로
+    커밋하지 않은 변경은 함께 사라진다.
+    """
     result = CalendarSyncResult()
     user_id = account.user_id
     try:

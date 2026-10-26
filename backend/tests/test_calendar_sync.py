@@ -433,3 +433,51 @@ def test_intake_marks_dirty():
         with_deadline, without = _mail_tasks(db, u.id)
         assert with_deadline.calendar_state == "pending"
         assert without.calendar_state == "none"
+
+
+def test_closed_task_without_event_not_created(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        done = _task(db, uid, status=TaskStatus.COMPLETED)
+        cancelled = _task(db, uid, status=TaskStatus.CANCELLED, state="pending")
+        r = _sync(db, aid, google_fake)
+        assert google_fake.calendar_calls == []
+        assert db.get(Task, done).calendar_state == "none"
+        assert db.get(Task, cancelled).calendar_state == "none"
+        assert r.skipped == 1 and r.created == 0  # 완료 업무는 대상에서 빠지고, pending 취소 업무만 건너뛴다
+        assert _logs(db, cancelled, "CALENDAR_SYNCED") == []
+        # 다음 주기에도 다시 고르지 않는다 (한도를 차지하지 않는다)
+        r = _sync(db, aid, google_fake)
+        assert google_fake.calendar_calls == [] and r.skipped == 0
+
+
+def test_cancelled_before_first_sync_no_event(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        orchestrator.cancel_task(db, db.get(User, uid), db.get(Task, tid), "")
+        assert db.get(Task, tid).calendar_state == "pending"
+        _sync(db, aid, google_fake)
+        assert google_fake.calendar_calls == [] and google_fake.events == {}
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+
+
+def test_remark_after_error_resets_attempts(setup, google_fake):
+    uid, aid = setup
+    google_fake.calendar_fail = GoogleTransientError("503")
+    google_fake.calendar_fail_times = 5
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        for _ in range(5):
+            _sync(db, aid, google_fake)
+        task = db.get(Task, tid)
+        assert task.calendar_state == "error" and task.calendar_attempts == 5
+        mark_calendar_dirty(task)
+        assert task.calendar_state == "pending" and task.calendar_attempts == 0
+        db.commit()
+        google_fake.calendar_fail = GoogleTransientError("503")
+        google_fake.calendar_fail_times = 1
+        _sync(db, aid, google_fake)
+        task = db.get(Task, tid)
+        assert task.calendar_state == "pending" and task.calendar_attempts == 1
