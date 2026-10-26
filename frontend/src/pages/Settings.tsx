@@ -76,6 +76,32 @@ export default function Settings() {
 
   const g = params.get('google')
   const reason = params.get('reason') ?? ''
+  const firstMailFetched = !!status && (status.mail_count > 0 || !!status.last_synced_at)
+
+  // Shared by the connected and reauth_required states: a stale connection must be removable too.
+  const disconnectButton = !confirming && (
+    <button type="button" className="btn btn-link btn-sm" onClick={() => setConfirming(true)}>
+      연결 해제
+    </button>
+  )
+  const disconnectConfirm = confirming && (
+    <div className="disconnect-confirm">
+      <b>Google 연결을 해제할까요?</b>
+      <div className="muted small">해제하면 더 이상 메일을 가져오지 않습니다.</div>
+      <label className="check-row small">
+        <input type="checkbox" checked={deleteMail} onChange={(e) => setDeleteMail(e.target.checked)} />
+        저장된 Gmail 메일도 삭제
+      </label>
+      <div className="approval-actions">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirming(false)} disabled={disconnecting}>
+          돌아가기
+        </button>
+        <button type="button" className="btn btn-danger btn-sm" onClick={disconnect} disabled={disconnecting}>
+          {disconnecting ? '해제 중…' : '연결 해제 확정'}
+        </button>
+      </div>
+    </div>
+  )
 
   return (
     <div className="stack-lg">
@@ -83,7 +109,11 @@ export default function Settings() {
         <h1>설정</h1>
         <p className="muted">Google 계정을 연결하면 받은 편지함의 메일을 주기적으로 가져옵니다.</p>
       </div>
-      {g === 'connected' && <div className="alert alert-green">연결되었습니다. 첫 메일을 가져오는 중입니다.</div>}
+      {g === 'connected' && (
+        <div className="alert alert-green">
+          {firstMailFetched ? '연결되었습니다.' : '연결되었습니다. 첫 메일을 가져오는 중입니다.'}
+        </div>
+      )}
       {g === 'error' && <div className="alert alert-red">{REASONS[reason] ?? REASONS.exchange}</div>}
       {actionError && <div className="alert alert-red">{actionError}</div>}
       <div className="card">
@@ -108,12 +138,16 @@ export default function Settings() {
             Google 계정 연결
           </button>
         ) : status.status === 'reauth_required' ? (
-          <div className="alert alert-red alert-action">
-            <span>Google 연결이 만료되었습니다. 다시 연결해 주세요.</span>
-            <button type="button" className="btn btn-danger btn-sm" onClick={connect}>
-              다시 연결
-            </button>
-          </div>
+          <>
+            <div className="alert alert-red alert-action">
+              <span>Google 연결이 만료되었습니다. 다시 연결해 주세요.</span>
+              <button type="button" className="btn btn-danger btn-sm" onClick={connect}>
+                다시 연결
+              </button>
+            </div>
+            {disconnectButton && <div className="approval-actions settings-actions">{disconnectButton}</div>}
+            {disconnectConfirm}
+          </>
         ) : (
           <>
             <dl className="settings-list">
@@ -145,30 +179,9 @@ export default function Settings() {
               <button type="button" className="btn btn-sm" onClick={sync} disabled={syncing}>
                 {syncing ? '확인 중…' : '지금 확인'}
               </button>
-              {!confirming && (
-                <button type="button" className="btn btn-link btn-sm" onClick={() => setConfirming(true)}>
-                  연결 해제
-                </button>
-              )}
+              {disconnectButton}
             </div>
-            {confirming && (
-              <div className="disconnect-confirm">
-                <b>Google 연결을 해제할까요?</b>
-                <div className="muted small">해제하면 더 이상 메일을 가져오지 않습니다.</div>
-                <label className="check-row small">
-                  <input type="checkbox" checked={deleteMail} onChange={(e) => setDeleteMail(e.target.checked)} />
-                  저장된 Gmail 메일도 삭제
-                </label>
-                <div className="approval-actions">
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirming(false)} disabled={disconnecting}>
-                    돌아가기
-                  </button>
-                  <button type="button" className="btn btn-danger btn-sm" onClick={disconnect} disabled={disconnecting}>
-                    {disconnecting ? '해제 중…' : '연결 해제 확정'}
-                  </button>
-                </div>
-              </div>
-            )}
+            {disconnectConfirm}
           </>
         )}
       </div>
