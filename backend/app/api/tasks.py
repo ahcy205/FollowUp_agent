@@ -268,6 +268,8 @@ def _act(fn, *args, **kwargs):
 def _done(db: Session, task: Task, user: User) -> TaskDetail:
     db.commit()
     db.refresh(task)
+    if task.calendar_state == "pending":
+        mail_sync.wake()  # 캘린더 반영이 필요해졌으면 다음 주기(90초)를 기다리지 않는다
     return build_task_detail(db, task, user)
 
 

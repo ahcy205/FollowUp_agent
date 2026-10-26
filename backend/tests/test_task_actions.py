@@ -463,6 +463,8 @@ def test_api_actions(client, monkeypatch):
     assert r.json()["task"]["plan"] == plan
     assert client.post(f"/api/tasks/{tid}/todos", json={"op": "toggle", "id": 999, "done": True}).status_code == 404
 
+    assert woke  # 기한을 넣어 캘린더 반영이 필요해지면 동기화를 바로 깨운다
+    woke.clear()
     failed = _api_task(me["id"], status=TaskStatus.PENDING, brief={"analysis": "failed", "attempts": 3})
     r = client.post(f"/api/tasks/{failed}/reanalyze")
     assert r.status_code == 200 and r.json()["task"]["brief"]["analysis"] == "pending"

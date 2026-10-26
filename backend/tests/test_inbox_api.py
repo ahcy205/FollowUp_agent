@@ -171,3 +171,22 @@ def test_fingerprint_changes_on_snooze_merge_and_mail():
         db.add(_mail(u.id, thread="z", task_id=t.id))
         db.commit()
         assert task_fingerprint(db, t) != undo
+
+
+def test_action_wakes_calendar_sync_only_when_pending(client, monkeypatch):
+    """기한을 바꿔 캘린더 반영이 필요해지면 90초를 기다리지 않고 동기화를 바로 깨운다."""
+    _fix_now(monkeypatch)
+    woke = []
+    monkeypatch.setattr("app.mail.sync.wake", lambda: woke.append(1))
+    me = register(client)
+    with SessionLocal() as db:
+        tid = _task(db, me["id"]).id
+
+    r = client.post(f"/api/tasks/{tid}/snooze", json={"preset": "tomorrow"})
+    assert r.status_code == 200, r.text
+    assert woke == []  # 캘린더와 상관없는 동작은 깨우지 않는다
+
+    r = client.post(f"/api/tasks/{tid}/deadline", json={"date": "2026-10-30"})
+    assert r.status_code == 200, r.text
+    assert r.json()["task"]["calendar_state"] == "pending"
+    assert woke == [1]
