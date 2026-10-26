@@ -16,6 +16,7 @@ export default function TaskDetailPage() {
   const [data, setData] = useState<TaskDetail | null>(null)
   const [error, setError] = useState('')
   const [retrying, setRetrying] = useState(false)
+  const [calRetrying, setCalRetrying] = useState(false)
   const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // One-shot fetch, used right after a user action so the button feels instant and as a fallback when the stream closes.
@@ -74,6 +75,18 @@ export default function TaskDetailPage() {
       setError((e as Error).message)
     } finally {
       setRetrying(false)
+    }
+  }
+
+  const retryCalendar = async () => {
+    setCalRetrying(true)
+    try {
+      setData(await api.post<TaskDetail>(`/tasks/${id}/calendar/retry`))
+      setError('')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setCalRetrying(false)
     }
   }
 
@@ -175,6 +188,33 @@ export default function TaskDetailPage() {
                 </div>
               )}
             </dl>
+
+            {task.origin === 'mail' && task.calendar_state !== 'none' && (
+              <div className="calendar-line small">
+                {task.calendar_state === 'synced' && (
+                  <>
+                    <span>캘린더에 등록됨</span>
+                    {task.calendar_event_url && (
+                      <a href={task.calendar_event_url} target="_blank" rel="noopener noreferrer">
+                        캘린더에서 열기
+                      </a>
+                    )}
+                  </>
+                )}
+                {task.calendar_state === 'pending' && <span className="muted">캘린더 반영 대기 중</span>}
+                {task.calendar_state === 'deleted_by_user' && (
+                  <span className="muted">캘린더에서 삭제된 일정입니다 (다시 만들지 않음)</span>
+                )}
+                {task.calendar_state === 'error' && (
+                  <>
+                    <span className="text-red">{task.calendar_error}</span>
+                    <button className="btn btn-sm" onClick={retryCalendar} disabled={calRetrying}>
+                      {calRetrying ? '요청 중…' : '다시 시도'}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </section>
 
           {failed && (

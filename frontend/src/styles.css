@@ -307,3 +307,4 @@ a.tag:hover { text-decoration: underline; }
 .check-row input { width: auto; }
 .settings-gap { margin-top: 12px; }
 .settings-actions { margin-top: 16px; }
+.calendar-line { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }

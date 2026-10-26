@@ -40,7 +40,8 @@ from app.schemas import (
     TaskBrief,
     TaskDetail,
 )
-from app.security import agent_limiter, get_current_user
+from app.mail import sync as mail_sync
+from app.security import agent_limiter, calendar_retry_limiter, get_current_user
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
@@ -174,6 +175,24 @@ def retry_agent(task_id: int, user: User = Depends(get_current_user), db: Sessio
         return orchestrator.start_run(db, user, task, "manual_retry")
     except orchestrator.AgentBusyError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+
+
+@router.post("/tasks/{task_id}/calendar/retry", response_model=TaskDetail)
+def retry_calendar(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Put a task whose calendar sync failed back in the queue; the sync worker picks it up right away."""
+    task = get_owned(db, Task, task_id, user)
+    if task.origin != "mail":
+        raise HTTPException(status.HTTP_409_CONFLICT, "메일 업무만 캘린더에 반영합니다.")
+    if task.calendar_state == "deleted_by_user":
+        raise HTTPException(status.HTTP_409_CONFLICT, "캘린더에서 삭제된 일정은 다시 만들지 않습니다.")
+    calendar_retry_limiter.check(f"cal:{user.id}")  # after the checks above so rejected calls cost nothing
+    task.calendar_attempts = 0
+    task.calendar_state = "pending"
+    task.calendar_error = ""
+    db.commit()
+    mail_sync.wake()
+    db.refresh(task)
+    return build_task_detail(db, task, user)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskBrief)
