@@ -62,11 +62,18 @@ def build_status(db: Session, user: User) -> GoogleStatusOut:
     recent = db.scalars(
         select(Email).where(*where).order_by(Email.received_at.desc().nulls_last(), Email.id.desc()).limit(RECENT_LIMIT)
     ).all()
+    counts = {"pending": 0, "work": 0, "not_work": 0, "filtered": 0}
+    for key, n in db.execute(select(Email.triage, func.count()).where(*where).group_by(Email.triage)):
+        if key in counts:
+            counts[key] = n
+    settings = get_settings()
     out = GoogleStatusOut(
-        enabled=get_settings().google_enabled,
+        enabled=settings.google_enabled,
         status="disconnected",
         mail_count=mail_count,
         recent=[RecentMailOut.model_validate(e) for e in recent],
+        triage_counts=counts,
+        triage_enabled=settings.mail_triage_enabled,
     )
     if acc is not None:
         out.status = "reauth_required" if acc.status == GoogleAccountStatus.REAUTH_REQUIRED else "connected"

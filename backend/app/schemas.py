@@ -169,6 +169,9 @@ class RecentMailOut(ORM):
     subject: str
     sender: str
     received_at: datetime | None
+    triage: str | None = None
+    triage_reason: str = ""
+    task_id: int | None = None
 
 
 class GoogleStatusOut(BaseModel):
@@ -180,6 +183,8 @@ class GoogleStatusOut(BaseModel):
     last_sync_error: str = ""
     mail_count: int = 0
     recent: list[RecentMailOut] = []
+    triage_counts: dict[str, int] = {}
+    triage_enabled: bool = False
 
 
 class GoogleDisconnect(BaseModel):

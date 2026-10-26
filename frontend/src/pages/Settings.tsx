@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { dateTime } from '../format'
-import type { GoogleStatus } from '../types'
+import type { GoogleRecentMail, GoogleStatus } from '../types'
 
 const REASONS: Record<string, string> = {
   denied: 'Google 동의가 취소되었습니다.',
@@ -10,6 +10,31 @@ const REASONS: Record<string, string> = {
   scopes: '필요한 권한(메일 읽기 · 발송 · 캘린더)이 빠졌습니다. 모든 항목에 체크하고 다시 연결해 주세요.',
   no_refresh_token: "Google에서 장기 토큰을 받지 못했습니다. Google 계정의 '타사 연결'에서 이 앱을 삭제한 뒤 다시 연결해 주세요.",
   exchange: 'Google 응답 처리 중 오류가 났습니다. 잠시 후 다시 시도해 주세요.',
+}
+
+const TRIAGE_TAGS: Record<string, { label: string; cls: string }> = {
+  work: { label: '업무', cls: 'tag-green' },
+  not_work: { label: '업무 아님', cls: '' },
+  filtered: { label: '자동 필터', cls: '' },
+  pending: { label: '판별 대기', cls: 'tag-amber' },
+}
+
+function TriageTag({ mail }: { mail: GoogleRecentMail }) {
+  const t = TRIAGE_TAGS[mail.triage ?? '']
+  if (!t) return null
+  const cls = `tag ${t.cls}`.trim()
+  if (mail.triage === 'work' && mail.task_id != null) {
+    return (
+      <Link to={`/tasks/${mail.task_id}`} className={cls} title={mail.triage_reason || undefined}>
+        {t.label}
+      </Link>
+    )
+  }
+  return (
+    <span className={cls} title={mail.triage_reason || undefined}>
+      {t.label}
+    </span>
+  )
 }
 
 const connect = () => {
@@ -160,6 +185,18 @@ export default function Settings() {
               <dt>가져온 메일</dt>
               <dd>{status.mail_count}통</dd>
             </dl>
+            {status.mail_count > 0 && (
+              <div className="muted small triage-summary">
+                업무 {status.triage_counts.work} · 업무 아님 {status.triage_counts.not_work} · 자동 필터{' '}
+                {status.triage_counts.filtered} · 판별 대기 {status.triage_counts.pending}
+              </div>
+            )}
+            {!status.triage_enabled && (
+              <div className="alert alert-amber settings-gap">
+                업무 메일 자동 판별이 꺼져 있습니다. <code>backend/.env</code>에서 <code>MAIL_TRIAGE_ENABLED=true</code>로 켜면
+                메일 내용이 LLM으로 전송되어 분석됩니다.
+              </div>
+            )}
             {status.last_sync_error && (
               <div className="alert alert-red settings-gap">{status.last_sync_error}</div>
             )}
@@ -171,6 +208,7 @@ export default function Settings() {
                     <b>{m.sender}</b>
                     <span>{m.subject}</span>
                     <span className="muted">{m.received_at ? dateTime(m.received_at) : ''}</span>
+                    {m.triage && <TriageTag mail={m} />}
                   </li>
                 ))}
               </ul>

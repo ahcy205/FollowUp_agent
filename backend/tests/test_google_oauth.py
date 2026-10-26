@@ -343,6 +343,41 @@ def test_status_mail_count_and_recent(client, google_fake):
     assert set(st["recent"][0]) >= {"subject", "sender", "received_at"}
 
 
+def test_status_triage_fields(client, google_fake, monkeypatch):
+    from app.config import get_settings
+
+    me = register(client)
+    with make_client() as other:
+        them = register(other, "b@example.com")
+    now = datetime.now(timezone.utc)
+    st = client.get("/api/google/status").json()
+    assert st["triage_counts"] == {"pending": 0, "work": 0, "not_work": 0, "filtered": 0}
+    assert st["triage_enabled"] is False
+
+    def add(uid, gid, triage, reason="", minutes=0):
+        with SessionLocal() as db:
+            db.add(Email(user_id=uid, sender="x@y.com", receiver="me@gmail.com", subject=gid, content="c",
+                         direction="INBOUND", gmail_message_id=gid, received_at=now - timedelta(minutes=minutes),
+                         triage=triage, triage_reason=reason))
+            db.commit()
+
+    add(me["id"], "w1", "work", "견적 요청", 1)
+    add(me["id"], "w2", "work", "", 2)
+    add(me["id"], "n1", "not_work", "", 3)
+    add(me["id"], "p1", "pending", "", 4)
+    add(them["id"], "t1", "work", "", 0)  # another user's mail is not counted
+    with SessionLocal() as db:  # seed mail without a Gmail id is not counted either
+        db.add(Email(user_id=me["id"], sender="s", receiver="r", subject="seed", content="c",
+                     direction="INBOUND", triage="work"))
+        db.commit()
+    monkeypatch.setattr(get_settings(), "mail_triage_enabled", True)
+    st = client.get("/api/google/status").json()
+    assert st["triage_counts"] == {"pending": 1, "work": 2, "not_work": 1, "filtered": 0}
+    assert st["triage_enabled"] is True
+    first = st["recent"][0]
+    assert first["triage"] == "work" and first["triage_reason"] == "견적 요청" and first["task_id"] is None
+
+
 def test_status_requires_login():
     with make_client() as c:
         assert c.get("/api/google/status").status_code == 401
