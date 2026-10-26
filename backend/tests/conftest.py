@@ -11,6 +11,7 @@ os.environ["SECRET_KEY"] = "test-secret-key-that-is-long-enough-1234567890"
 os.environ["LLM_API_KEY"] = ""
 os.environ["DEMO_USER_PASSWORD"] = ""
 os.environ["MAX_AGENT_STEPS"] = "10"
+os.environ["MAIL_SYNC_ENABLED"] = "false"  # no background sync thread in tests
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
