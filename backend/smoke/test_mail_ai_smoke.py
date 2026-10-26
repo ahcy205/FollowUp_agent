@@ -1,6 +1,6 @@
 """Real-LLM check of mail triage + intake prompts on six fictional Korean mails (no real mail is used).
 
-    RUN_LLM_SMOKE=1 ../.venv/Scripts/python -m pytest smoke/test_mail_ai_smoke.py -v -s
+    PYTHONUTF8=1 RUN_LLM_SMOKE=1 ../.venv/Scripts/python -m pytest smoke/test_mail_ai_smoke.py -v -s
 
 About 1 triage call + up to 5 intake calls. Assertions stay loose: labels, deadline date/kind, field presence.
 """
