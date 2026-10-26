@@ -289,8 +289,8 @@ export default function TaskDetailPage() {
 
           {isMail && (
             <>
-              <TodoChecklist key={task.id} task={task} act={act} />
-              <MailActions key={task.id} task={task} act={act} onCancelled={load} emphasizeReply={task.plan.length > 0 && doneCount === task.plan.length} />
+              <TodoChecklist key={`todos-${task.id}`} task={task} act={act} />
+              <MailActions key={`actions-${task.id}`} task={task} act={act} onCancelled={load} emphasizeReply={task.plan.length > 0 && doneCount === task.plan.length} />
             </>
           )}
 
