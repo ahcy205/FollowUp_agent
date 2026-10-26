@@ -21,6 +21,7 @@ from app.agent.prompts import REMINDER_SET_STATUS, SYSTEM_PROMPT
 from app.agent.tools import TOOLS, ToolContext, ToolError, serialize_output, tool_definitions
 from app.config import get_settings
 from app.db import SessionLocal
+from app.mail.calendar_sync import mark_calendar_dirty
 from app.models import (
     AgentActionLog,
     AgentRun,
@@ -174,6 +175,8 @@ def cancel_task(db: Session, user: User, task: Task, reason: str = "") -> None:
         task.status = TaskStatus.CANCELLED
         task.waiting_for = ""
         task.next_action = "사용자가 취소한 업무입니다." + (f" 사유: {reason}" if reason else "")
+        if task.origin == "mail":
+            mark_calendar_dirty(task)  # 일정은 지우지 않고 제목 앞에 ✓를 붙인다
         log_action(db, user_id=user.id, task_id=task.id, run_id=run.id if run else None, action_type="TASK_CANCELLED",
                    input_data={"from": before, "to": TaskStatus.CANCELLED},
                    output_data={"stopped_run": run.id if run else None, "voided_approvals": len(pending)},
