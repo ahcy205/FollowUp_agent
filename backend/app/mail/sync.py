@@ -13,12 +13,15 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.agent.llm import LLMError, get_llm
 from app.config import get_settings
 from app.google.client import (
     GoogleAuthError, GoogleClient, GoogleError, GoogleHistoryGone, GoogleTransientError, get_google_client,
 )
 from app.google.oauth import access_token_for, forget_access_token
+from app.mail.intake import intake_work_mails
 from app.mail.parse import parse_raw
+from app.mail.triage import triage_pending
 from app.models import Email, EmailDirection, GoogleAccount
 
 log = logging.getLogger(__name__)
@@ -275,8 +278,38 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
 
 # --- cycle over all connected accounts ---
 
-def run_sync_cycle(now: datetime | None = None, user_id: int | None = None) -> int:
+def process_inbox(db: Session, user_id: int) -> None:
+    """Triage, then intake, one user's stored mail. Sync results are already committed.
+
+    Does nothing unless the feature switch is on. Failures are logged by type only and never raised.
+    """
+    settings = get_settings()
+    if not settings.mail_triage_enabled:
+        return
+    try:
+        llm = get_llm()
+    except LLMError as e:
+        log.info("mail processing for user %s skipped: LLM unavailable (%s)", user_id, type(e).__name__)
+        return
+    try:
+        db.rollback()  # start from a clean transaction
+        triage_pending(db, user_id, llm, max_batches=settings.mail_triage_batches_per_cycle)
+        # intake also retries analyses that failed earlier, so it runs even if triage did nothing
+        intake_work_mails(db, user_id, llm, max_mails=settings.mail_intake_per_cycle,
+                          tz=settings.user_timezone)
+    except Exception as e:  # noqa: BLE001 - processing must never undo or fail the sync
+        log.warning("mail processing for user %s failed: %s", user_id, type(e).__name__)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+
+
+def run_sync_cycle(now: datetime | None = None, user_id: int | None = None, process: bool = True) -> int:
     """Sync every connected account (or one user's). Returns how many were processed.
+
+    With process=True (and the triage switch on) each account's new mail is also triaged and taken in,
+    inside the same lease. "Sync now" passes process=False so it never waits on the LLM.
 
     Each account gets its own session and lease; one failing account never stops the others.
     """
@@ -306,6 +339,8 @@ def run_sync_cycle(now: datetime | None = None, user_id: int | None = None) -> i
                         continue
                     sync_account(db, account, client, now=now)
                     processed += 1
+                    if process:
+                        process_inbox(db, account.user_id)
                 finally:
                     try:
                         db.rollback()

@@ -236,7 +236,8 @@ async def sync_now(user: User = Depends(get_current_user), db: Session = Depends
     if acc is None or acc.status != GoogleAccountStatus.CONNECTED:
         raise HTTPException(status.HTTP_409_CONFLICT, "Gmail이 연결되어 있지 않습니다.")
     google_sync_limiter.check(f"gsync:{user.id}")
-    await run_in_threadpool(mail_sync.run_sync_cycle, user_id=user.id)
+    await run_in_threadpool(mail_sync.run_sync_cycle, user_id=user.id, process=False)
+    mail_sync.wake()  # the worker triages and takes in the new mail; this request never waits on the LLM
     db.expire_all()  # the cycle ran in other sessions
     return build_status(db, user)
 
