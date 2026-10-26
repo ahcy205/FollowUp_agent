@@ -1,7 +1,7 @@
 """Gmail sync for one account: backfill, incremental history, 404 fallback, lease, dedupe.
 
 Logs carry Gmail message ids and counts only: never subjects, bodies, addresses or tokens.
-The background worker (wake) arrives in a later task.
+Also holds the background worker and the per-cycle runner.
 """
 
 import logging
@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.google.client import (
-    GoogleAuthError, GoogleClient, GoogleError, GoogleHistoryGone, GoogleTransientError,
+    GoogleAuthError, GoogleClient, GoogleError, GoogleHistoryGone, GoogleTransientError, get_google_client,
 )
 from app.google.oauth import access_token_for, forget_access_token
 from app.mail.parse import parse_raw
@@ -273,5 +273,106 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
     return result
 
 
+# --- cycle over all connected accounts ---
+
+def run_sync_cycle(now: datetime | None = None, user_id: int | None = None) -> int:
+    """Sync every connected account (or one user's). Returns how many were processed.
+
+    Each account gets its own session and lease; one failing account never stops the others.
+    """
+    from app.db import SessionLocal
+    from app.models import GoogleAccountStatus
+
+    now = _utc(now) if now else datetime.now(timezone.utc)
+    q = select(GoogleAccount.id).where(GoogleAccount.status == GoogleAccountStatus.CONNECTED)
+    if user_id is not None:
+        q = q.where(GoogleAccount.user_id == user_id)
+    try:
+        with SessionLocal() as db:
+            ids = list(db.scalars(q.order_by(GoogleAccount.id)))
+    except SQLAlchemyError as e:
+        log.warning("gmail sync cycle: could not list accounts: %s", type(e).__name__)
+        return 0
+    client = get_google_client()
+    processed = 0
+    for account_id in ids:
+        try:
+            with SessionLocal() as db:
+                if not acquire_lease(db, account_id, now):
+                    continue
+                try:
+                    account = db.get(GoogleAccount, account_id)
+                    if account is None or account.status != GoogleAccountStatus.CONNECTED:
+                        continue
+                    sync_account(db, account, client, now=now)
+                    processed += 1
+                finally:
+                    try:
+                        db.rollback()
+                        release_lease(db, account_id)
+                    except SQLAlchemyError as e:
+                        log.warning("gmail sync account %s: could not release lease: %s",
+                                    account_id, type(e).__name__)
+        except Exception as e:  # noqa: BLE001 - isolate accounts from each other
+            log.warning("gmail sync account %s failed: %s", account_id, type(e).__name__)
+    return processed
+
+
+# --- background worker ---
+
+class MailSyncWorker:
+    def __init__(self) -> None:
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="mail-sync", daemon=True)
+        self._thread.start()
+
+    def wake(self) -> None:
+        self._wake.set()
+
+    def stop(self, timeout: float = 10.0) -> None:
+        self._stop.set()
+        self._wake.set()
+        if self._thread is not None:
+            self._thread.join(timeout)
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                run_sync_cycle()
+            except Exception as e:  # noqa: BLE001 - the thread must never die
+                log.warning("gmail sync cycle failed: %s", type(e).__name__)
+            if self._stop.is_set():
+                break
+            self._wake.wait(get_settings().mail_sync_interval_seconds)
+            self._wake.clear()
+
+
+_worker: MailSyncWorker | None = None
+
+
+def start_worker() -> None:
+    global _worker
+    if _worker is None:
+        _worker = MailSyncWorker()
+    _worker.start()
+
+
+def stop_worker() -> None:
+    global _worker
+    w, _worker = _worker, None
+    if w is not None:
+        w.stop()
+
+
 def wake() -> None:
-    """Wake the background sync worker. Implemented in a later task; a no-op for now."""
+    """Wake the background sync worker so it runs a cycle now. No-op when no worker runs."""
+    w = _worker
+    if w is not None:
+        w.wake()

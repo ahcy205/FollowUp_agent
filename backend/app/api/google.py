@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -18,7 +19,7 @@ from app.google.crypto import TokenDecryptError, decrypt_token, encrypt_token
 from app.mail import sync as mail_sync
 from app.models import Email, GoogleAccount, GoogleAccountStatus, User
 from app.schemas import GoogleDisconnect, GoogleStatusOut, RecentMailOut
-from app.security import get_current_user
+from app.security import get_current_user, google_sync_limiter
 
 log = logging.getLogger(__name__)
 
@@ -204,6 +205,19 @@ def callback(request: Request, code: str | None = None, state: str | None = None
     # 9. Start the first sync without waiting for the next cycle.
     mail_sync.wake()
     return _settings_redirect()
+
+
+@router.post("/sync", response_model=GoogleStatusOut)
+async def sync_now(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not get_settings().google_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Google 연결이 설정되어 있지 않습니다.")
+    acc = _account(db, user.id)
+    if acc is None or acc.status != GoogleAccountStatus.CONNECTED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Gmail이 연결되어 있지 않습니다.")
+    google_sync_limiter.check(f"gsync:{user.id}")
+    await run_in_threadpool(mail_sync.run_sync_cycle, user_id=user.id)
+    db.expire_all()  # the cycle ran in other sessions
+    return build_status(db, user)
 
 
 @router.post("/disconnect", status_code=204)

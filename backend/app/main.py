@@ -12,6 +12,7 @@ from app.agent.orchestrator import recover_stale_runs
 from app.api import auth, demo, google, tasks
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine
+from app.mail import sync as mail_sync
 from app.models import User
 from app.security import CSRFMiddleware, SecurityHeadersMiddleware, hash_password, verify_password
 from app.seed import seed_user_data
@@ -51,7 +52,14 @@ async def lifespan(_: FastAPI):
     recover_stale_runs()
     _ensure_demo_user()
     log.info("started env=%s model=%s llm_configured=%s", s.app_env, s.llm_model, bool(s.llm_api_key))
-    yield
+    worker_on = s.google_enabled and s.mail_sync_enabled
+    if worker_on:
+        mail_sync.start_worker()
+    try:
+        yield
+    finally:
+        if worker_on:
+            mail_sync.stop_worker()
 
 
 settings = get_settings()
