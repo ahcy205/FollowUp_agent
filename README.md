@@ -147,6 +147,11 @@ Gmail을 연결하려면 본인 Google Cloud 프로젝트에 OAuth 클라이언�
 - 테스트 상태 앱은 Google 정책상 갱신 토큰이 **7일 뒤 만료**됩니다. 만료되면 앱 상단 빨간 배너에서 다시 연결하세요.
 - 메일 판별 · 요약 · 캘린더 · 답장은 다음 단계에서 추가됩니다. 지금은 메일을 가져와 저장하는 것까지입니다.
 
+### 업무 메일 자동 판별 켜기
+
+`backend/.env`에 `MAIL_TRIAGE_ENABLED=true`를 넣고 서버를 재시작하면, 가져온 메일에서 업무 메일을 골라 요약 · 할 일 · 기한이 담긴 업무를 자동으로 만듭니다. 기본값은 꺼짐입니다.
+켜면 메일의 보낸 사람 · 제목 · 본문 일부가 LLM 공급자로 전송됩니다. 전송 범위와 무료 등급 주의 사항은 [데이터 · 개인정보 흐름](docs/privacy.md)을 보세요.
+
 ## Railway 배포
 
 1. GitHub에 push → Railway에서 **New Project → Deploy from GitHub repo** (루트의 `Dockerfile`, `railway.json` 사용).
