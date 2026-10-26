@@ -19,6 +19,7 @@ from app.agent.audit import log_action
 from app.agent.orchestrator import CLOSED_TASK_STATUSES
 from app.agent.guard import detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
+from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.deadline import Deadline, earliest, normalize_deadline
 from app.models import Email, EmailDirection, RiskLevel, Task, TaskStatus
 
@@ -274,6 +275,7 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
         task.deadline_kind, task.deadline_source = best.kind, best.source
     else:
         task.deadline_at, task.deadline_all_day, task.deadline_kind, task.deadline_source = None, False, "none", ""
+    mark_calendar_dirty(task)  # 기한이 생기거나 바뀌면 다음 주기에 캘린더에 반영한다
     if not data["needs_reply"] and not plan:
         task.status, task.current_step, task.next_action = TaskStatus.PENDING, REFERENCE_STEP, ""
     else:

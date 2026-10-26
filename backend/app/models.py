@@ -121,6 +121,12 @@ class Task(Base):
     deadline_all_day: Mapped[bool] = mapped_column(Boolean, default=False)
     deadline_kind: Mapped[str] = mapped_column(String(10), default="none")  # explicit | estimated | none
     deadline_source: Mapped[str] = mapped_column(Text, default="")
+    calendar_event_id: Mapped[str | None] = mapped_column(String(64))
+    calendar_event_url: Mapped[str] = mapped_column(Text, default="")
+    # none | pending | synced | deleted_by_user | error
+    calendar_state: Mapped[str] = mapped_column(String(20), default="none", index=True)
+    calendar_error: Mapped[str] = mapped_column(Text, default="")
+    calendar_attempts: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(Timestamp)
@@ -141,6 +147,8 @@ class GoogleAccount(Base):
     last_sync_error: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default=GoogleAccountStatus.CONNECTED)
     sync_lease_until: Mapped[datetime | None] = mapped_column(Timestamp)
+    # 캘린더 일정 번호에 섞는 무작위 값 (base32hex 8자). 다른 DB · 다른 인스턴스와 번호가 겹치지 않게 한다.
+    calendar_id_salt: Mapped[str] = mapped_column(String(16), default="")
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
 

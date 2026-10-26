@@ -6,7 +6,8 @@ import httpx
 import pytest
 
 from app.google.client import (
-    REQUIRED_SCOPES, GoogleAuthError, GoogleError, GoogleHistoryGone, GoogleTransientError,
+    REQUIRED_SCOPES, GoogleAuthError, GoogleConflict, GoogleError, GoogleHistoryGone, GoogleNotFound,
+    GoogleTransientError,
     HttpGoogleClient, get_google_client, set_google_override,
 )
 from tests.fake_google import FakeGoogle, make_raw
@@ -233,3 +234,96 @@ def test_fake_list_paginates():
         if not tok:
             break
     assert sorted(got) == sorted(ids)
+
+
+# --- Calendar ---
+CAL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+
+
+def test_calendar_insert_request_shape():
+    seen = {}
+
+    def handler(req):
+        seen["method"], seen["url"] = req.method, str(req.url)
+        seen["auth"] = req.headers["authorization"]
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"id": "fuag1", "htmlLink": "https://cal/x", "status": "confirmed"})
+
+    body = {"id": "fuag1", "summary": "[업무] 테스트"}
+    ev = client_with(handler).calendar_insert("tok", body)
+    assert (seen["method"], seen["url"]) == ("POST", CAL)
+    assert seen["auth"] == "Bearer tok"
+    assert seen["body"] == body
+    assert (ev.id, ev.html_link, ev.status) == ("fuag1", "https://cal/x", "confirmed")
+
+
+def test_calendar_patch_and_get():
+    seen = []
+
+    def handler(req):
+        seen.append((req.method, str(req.url), req.content))
+        return httpx.Response(200, json={"id": "e1", "status": "tentative"})
+
+    c = client_with(handler)
+    g = c.calendar_get("tok", "e1")
+    p = c.calendar_patch("tok", "e1", {"summary": "x"})
+    assert seen[0][:2] == ("GET", f"{CAL}/e1")
+    assert seen[1][:2] == ("PATCH", f"{CAL}/e1")
+    assert json.loads(seen[1][2]) == {"summary": "x"}
+    assert g.status == "tentative" and g.html_link == ""
+    assert g.private == {}
+    assert p.id == "e1"
+
+
+def test_calendar_event_private_marker_parsed():
+    body = {"id": "e1", "extendedProperties": {"private": {"followupTask": "abc:1"}, "shared": {"x": "y"}}}
+    c = client_with(lambda req: httpx.Response(200, json=body))
+    assert c.calendar_get("tok", "e1").private == {"followupTask": "abc:1"}
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_calendar_404_410_not_found(status):
+    c = client_with(lambda req: httpx.Response(status, json={"error": {"message": "gone"}}))
+    with pytest.raises(GoogleNotFound):
+        c.calendar_get("tok", "e1")
+    with pytest.raises(GoogleNotFound):
+        c.calendar_patch("tok", "e1", {})
+
+
+def test_calendar_409_conflict():
+    c = client_with(lambda req: httpx.Response(409, json={"error": {"message": "dup"}}))
+    with pytest.raises(GoogleConflict):
+        c.calendar_insert("tok", {"id": "e1"})
+
+
+def test_calendar_403_rate_limit_transient():
+    body = {"error": {"errors": [{"reason": "rateLimitExceeded"}]}}
+    c = client_with(lambda req: httpx.Response(403, json=body))
+    with pytest.raises(GoogleTransientError):
+        c.calendar_get("tok", "e1")
+
+
+def test_calendar_error_message_has_no_secrets():
+    c = client_with(lambda req: httpx.Response(409, json={"error": {"message": "SECRETBODY"}}))
+    with pytest.raises(GoogleConflict) as ei:
+        c.calendar_insert("tok-secret", {"summary": "SECRETBODY"})
+    assert "SECRET" not in str(ei.value) and "tok-secret" not in str(ei.value)
+
+
+def test_gmail_history_404_still_history_gone_and_get_raw_404_is_google_error():
+    c = client_with(lambda req: httpx.Response(404, json={}))
+    with pytest.raises(GoogleHistoryGone):
+        c.gmail_history("tok", "1", None)
+    with pytest.raises(GoogleError):
+        c.gmail_get_raw("tok", "m1")
+
+
+def test_fake_deleted_event_semantics():
+    f = FakeGoogle()
+    f.calendar_insert("t", {"id": "e1", "summary": "a"})
+    f.delete_event("e1")
+    with pytest.raises(GoogleConflict):
+        f.calendar_insert("t", {"id": "e1"})
+    assert f.calendar_get("t", "e1").status == "cancelled"
+    with pytest.raises(GoogleNotFound):
+        f.calendar_patch("t", "e1", {"summary": "b"})

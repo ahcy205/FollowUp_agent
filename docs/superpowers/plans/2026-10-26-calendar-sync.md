@@ -39,7 +39,7 @@
 - **알림:** `reminders.useDefault=false`, 팝업만 쓴다.
   - 시각 있는 일정: 하루 전(1,440분)과 1시간 전(60분)
   - 하루 종일 일정: 전날 오전 9시. 시작(그날 00:00)보다 900분 전이다.
-- **일정 번호(결정적 ID):** `"fuag" + f"{user_id:08x}" + f"{task_id:08x}"`
+- **일정 번호(결정적 ID):** `"fuag" + f"{user_id:08x}" + f"{task_id:08x}"` (→ 변경 #2)
   - 캘린더 ID 규칙(소문자 a–v, 숫자 0–9, 5자 이상)을 만족한다.
   - 같은 번호로 다시 만들면 Google이 409를 돌려준다. 이를 "이미 있음"으로 처리해서 중복을 막는다.
 - **상태값 `calendar_state`**
@@ -187,8 +187,8 @@ def test_fake_deleted_event_semantics(): ...     # delete_event 후 insert→Con
 
 **Interfaces:**
 - Produces:
-  - `event_id_for(task: Task) -> str`
-  - `build_event(task: Task, *, tz: str, public_url: str) -> dict`
+  - `event_id_for(task: Task) -> str` (→ 변경 #2)
+  - `build_event(task: Task, *, tz: str, public_url: str) -> dict` (→ 변경 #2)
     - 반환값은 Calendar API 본문이다: `id`, `summary`, `description`, `start`, `end`, `reminders`
     - `id`는 insert에만 쓴다. patch에서는 호출하는 쪽이 뺀다.
 - 규칙: Global Constraints의 제목 · 설명 · 시각 · 알림 규칙을 그대로 따른다.
@@ -236,16 +236,16 @@ def test_no_deadline_raises(): ...
 **업무 1개 처리**
 
 1. 접근 토큰을 받는다. `GoogleAuthError`면 이번 호출 전체를 멈추고 상태는 그대로 둔다.
-2. **일정 번호가 없는 경우** (`calendar_event_id`가 없음)
+2. **일정 번호가 없는 경우** (`calendar_event_id`가 없음) (→ 변경 #1)
    - 기한이 없으면 `none`으로 두고 끝낸다.
    - `calendar_insert(build_event(...))`를 호출한다.
    - **성공:** `calendar_event_id`, `calendar_event_url`을 저장하고 `synced`, `attempts=0`, `error=""`로 둔다.
    - **`GoogleConflict`** (같은 ID 일정이 이미 있음)
-     - `calendar_get`을 호출한다. `status=="cancelled"`면 `deleted_by_user`로 둔다 `[RF 1]`.
+     - `calendar_get`을 호출한다. `status=="cancelled"`면 `deleted_by_user`로 둔다 `[RF 1]`. (→ 변경 #2)
      - 아니면 ID와 링크를 저장하고 수정 경로(3번)로 이어간다 `[RF 2]`.
 3. **일정 번호가 있는 경우**
    - 기한이 없어졌으면 이 단계에서는 일정을 건드리지 않고 `synced`로 둔다. 기한 삭제는 6단계 범위다.
-   - 그 밖에는 `calendar_patch(id 없는 본문)`을 호출한다.
+   - 그 밖에는 `calendar_patch(id 없는 본문)`을 호출한다. (→ 변경 #3)
    - **`GoogleNotFound`** 또는 응답의 `status=="cancelled"` → `deleted_by_user`로 둔다 `[RF 1]`.
    - **성공** → `synced`
 4. **오류**
@@ -351,6 +351,10 @@ def test_retry_endpoint(client): ...                # error 업무 → retry →
 
 | # | 날짜 | 작업 | 계획 | 실제 구현 | 이유 | 영향 |
 |---|---|---|---|---|---|---|
+| 1 | 2026-10-26 | Task 4 | 일정 번호가 없으면 기한이 있는 업무는 상태와 관계없이 일정을 만든다 | 완료 · 취소된 업무는 일정이 없으면 새로 만들지 않고 `none`으로 둔다. `none` 상태의 닫힌 업무는 동기화 대상에서도 뺀다 | 끝난 업무의 일정을 새로 만들면 캘린더만 어지럽힌다. 대상에 남기면 매 주기 한도(`max_tasks`)를 차지한다 (Task 4 중 controller 판정) | 이미 일정이 있는 업무는 그대로 ✓가 붙는다. 일정 없이 닫힌 업무는 캘린더에 나타나지 않는다 |
+| 2 | 2026-10-26 | 전체 리뷰 | 일정 번호 = `"fuag"` + 사용자 번호 + 업무 번호. 409면 조회해서 `cancelled`는 사용자 삭제, 아니면 이어 쓴다 | `GoogleAccount.calendar_id_salt`(base32hex 8자, 첫 동기화 때 `secrets`로 만들어 저장, 마이그레이션 `f7a2b5c9d3e6`)를 두고 일정 번호 = `"fu"` + salt + 업무 번호(16진 8자리). 본문에 `extendedProperties.private.followupTask = "salt:업무번호"` 표식을 붙인다. 409 때 표식이 이 업무 것일 때만 사용자 삭제 / 이어 쓰기로 처리하고, 표식이 없거나 다르면 고치지 않고 `error`("같은 번호의 다른 캘린더 일정이 있어 반영하지 못했습니다.") | dev.db를 새로 만들거나 다른 인스턴스가 같은 Google 계정을 연결하면 업무 #N이 예전 DB의 일정과 번호가 겹쳐, 남의 일정을 덮어쓰거나 사용자 삭제로 오판해 영영 반영되지 않았다 | `event_id_for(task, salt)`, `build_event(..., salt)`로 시그니처가 바뀌었다. 재연결은 salt를 유지하고, 연결 해제는 행과 함께 지운다(이미 저장된 `calendar_event_id`로 계속 고치므로 문제없다) |
+| 3 | 2026-10-26 | 전체 리뷰 | `calendar_patch`에 id만 뺀 본문을 그대로 보낸다 | 시간 일정이면 start/end에 `"date": null`, 종일 일정이면 `"dateTime": null, "timeZone": null`을 함께 보낸다. `FakeGoogle.calendar_patch`도 Google처럼 중첩 객체를 합치고 `None`은 필드 삭제로 처리하며, date와 dateTime이 함께 남으면 400을 낸다 | Google PATCH는 중첩 객체를 합치므로 종일 ↔ 시간 전환 때 두 필드가 함께 남아 400이 났다. 기존 가짜는 얕은 update라 이를 잡지 못했다 | 기한의 종일 / 시간 여부가 바뀌어도 일정이 고쳐진다 |
+| 4 | 2026-10-26 | 실계정 확인 (사용자 결정) | 일정 공개 범위는 캘린더 기본값 | 일정 본문에 `"visibility": "private"` | 캘린더를 공유하면 상대 이름 · 요청 · 기한 근거 문장이 공유받은 사람에게 보일 수 있음. 사용자가 비공개로 결정 | 공유받은 사람에게는 "바쁨"으로만 보임. 기존 일정은 다음 수정 때 적용 |
 
 ## 이 계획 다음
 

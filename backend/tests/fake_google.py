@@ -7,8 +7,8 @@ from email.message import EmailMessage
 from urllib.parse import urlencode
 
 from app.google.client import (
-    REQUIRED_SCOPES, AccessToken, GmailProfile, GoogleAuthError, GoogleError, GoogleHistoryGone,
-    GoogleTransientError, IdPage, RawMessage, TokenGrant,
+    REQUIRED_SCOPES, AccessToken, CalendarEvent, GmailProfile, GoogleAuthError, GoogleConflict, GoogleError,
+    GoogleHistoryGone, GoogleNotFound, GoogleTransientError, IdPage, RawMessage, TokenGrant,
 )
 
 
@@ -38,6 +38,20 @@ def make_raw(*, sender, to, subject, body="", html=None, cc=None, message_id=Non
     return m.as_bytes()
 
 
+def _merge_patch(current: dict, patch: dict) -> dict:
+    """Google PATCH처럼 합친다: 중첩 객체는 재귀로 합치고, None은 필드 삭제, 그 밖(배열 포함)은 교체."""
+    out = dict(current)
+    for key, value in patch.items():
+        if value is None:
+            out.pop(key, None)
+        elif isinstance(value, dict):
+            base = out.get(key)
+            out[key] = _merge_patch(base if isinstance(base, dict) else {}, value)
+        else:
+            out[key] = value
+    return out
+
+
 class FakeGoogle:
     def __init__(self, email: str = "me@gmail.com"):
         self.email = email
@@ -51,6 +65,11 @@ class FakeGoogle:
         self.revoked: list[str] = []
         self.revoke_fails = False
         self.get_calls: list[str] = []
+        self.events: dict[str, dict] = {}
+        self.deleted_events: dict[str, dict] = {}  # 사용자가 지운 일정. Google처럼 본문(표식 포함)을 남긴다
+        self.calendar_fail: GoogleError | None = None
+        self.calendar_fail_times: int = 0
+        self.calendar_calls: list[tuple[str, str]] = []
         self._seq = 0
         self._tokens = 0
 
@@ -114,3 +133,54 @@ class FakeGoogle:
         if message_id not in self.mailbox:
             raise GoogleError(f"message not found: {message_id}")
         return self.mailbox[message_id]
+
+    # --- Calendar ---
+    def _calendar_enter(self, method: str, event_id: str) -> None:
+        self.calendar_calls.append((method, event_id))
+        if self.calendar_fail is not None:
+            err = self.calendar_fail
+            if self.calendar_fail_times > 1:
+                self.calendar_fail_times -= 1
+            else:
+                self.calendar_fail = None
+                self.calendar_fail_times = 0
+            raise err
+
+    def _event(self, event_id: str, status: str = "confirmed", body: dict | None = None) -> CalendarEvent:
+        private = ((body or {}).get("extendedProperties") or {}).get("private") or {}
+        return CalendarEvent(id=event_id, html_link=f"https://calendar.example/event/{event_id}", status=status,
+                             private=dict(private))
+
+    def calendar_insert(self, access_token: str, body: dict) -> CalendarEvent:
+        self._seq += 1
+        event_id = body.get("id") or f"evt{self._seq:04d}"
+        self._calendar_enter("insert", event_id)
+        if event_id in self.events or event_id in self.deleted_events:
+            raise GoogleConflict("event id already exists")
+        self.events[event_id] = {**body, "id": event_id}
+        return self._event(event_id, body=self.events[event_id])
+
+    def calendar_get(self, access_token: str, event_id: str) -> CalendarEvent:
+        self._calendar_enter("get", event_id)
+        if event_id in self.deleted_events:
+            return self._event(event_id, "cancelled", self.deleted_events[event_id])
+        if event_id not in self.events:
+            raise GoogleNotFound("event not found")
+        ev = self.events[event_id]
+        return self._event(event_id, ev.get("status", "confirmed"), ev)
+
+    def calendar_patch(self, access_token: str, event_id: str, body: dict) -> CalendarEvent:
+        self._calendar_enter("patch", event_id)
+        if event_id in self.deleted_events or event_id not in self.events:
+            raise GoogleNotFound("event not found")
+        merged = _merge_patch(self.events[event_id], body)
+        for key in ("start", "end"):
+            part = merged.get(key) or {}
+            if "date" in part and "dateTime" in part:
+                raise GoogleError("400 invalid start/end: both date and dateTime")
+        self.events[event_id] = merged
+        return self._event(event_id, merged.get("status", "confirmed"), merged)
+
+    def delete_event(self, event_id: str) -> None:
+        """Simulate the user deleting the event in Google Calendar."""
+        self.deleted_events[event_id] = self.events.pop(event_id, {"id": event_id})

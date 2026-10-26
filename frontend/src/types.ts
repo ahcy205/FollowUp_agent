@@ -30,6 +30,9 @@ export interface Task {
   created_at: string
   updated_at: string
   completed_at: string | null
+  calendar_state: 'none' | 'pending' | 'synced' | 'deleted_by_user' | 'error'
+  calendar_event_url: string
+  calendar_error: string
 }
 
 export interface Customer {

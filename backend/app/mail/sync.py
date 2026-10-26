@@ -19,6 +19,7 @@ from app.google.client import (
     GoogleAuthError, GoogleClient, GoogleError, GoogleHistoryGone, GoogleTransientError, get_google_client,
 )
 from app.google.oauth import access_token_for, forget_access_token
+from app.mail.calendar_sync import sync_calendars
 from app.mail.intake import intake_work_mails
 from app.mail.parse import parse_raw
 from app.mail.triage import triage_pending
@@ -305,6 +306,24 @@ def process_inbox(db: Session, user_id: int) -> None:
             pass
 
 
+def _sync_calendar_for(db: Session, account_id: int, client: GoogleClient) -> None:
+    """Push task deadlines to the user's calendar. Runs whatever the triage switch says; never raises."""
+    settings = get_settings()
+    try:
+        db.rollback()  # process_inbox commits its own work; start clean (sync_calendars needs committed state)
+        account = db.get(GoogleAccount, account_id)
+        if account is None:
+            return
+        sync_calendars(db, account, client, max_tasks=settings.calendar_sync_per_cycle,
+                       tz=settings.user_timezone, public_url=settings.public_url)
+    except Exception as e:  # noqa: BLE001 - calendar problems must never undo or fail the mail sync
+        log.warning("calendar sync for account %s failed: %s", account_id, type(e).__name__)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+
+
 def run_sync_cycle(now: datetime | None = None, user_id: int | None = None, process: bool = True) -> int:
     """Sync every connected account (or one user's). Returns how many were processed.
 
@@ -341,6 +360,7 @@ def run_sync_cycle(now: datetime | None = None, user_id: int | None = None, proc
                     processed += 1
                     if process:
                         process_inbox(db, account.user_id)
+                        _sync_calendar_for(db, account_id, client)
                 finally:
                     try:
                         db.rollback()

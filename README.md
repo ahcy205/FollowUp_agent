@@ -12,7 +12,7 @@
 - **완료는 서버가 판정** — LLM이 “끝났다”고 해도 하위 목표가 남았거나 승인 대기가 있으면 서버가 `COMPLETED`를 거부합니다.
 - **외부 콘텐츠는 데이터로만** — 고객 메일 · 문서 속 지시문은 격리 태그와 탐지 규칙으로 막고, 시연용 악성 문서로 검증합니다.
 - **공급자 중립** — 대화 기록을 중립 형식으로 저장해 Claude와 Gemini를 환경변수 하나로 바꿉니다.
-- **테스트 268개** — LLM과 Google API를 가짜 클라이언트로 바꿔 시나리오 · 보안 · 동시성 · 재시도 · Gmail 동기화 · 메일 판별을 검증하고, push마다 CI로 돌립니다(실 LLM 스모크 테스트는 opt-in).
+- **테스트 340개** — LLM과 Google API(Gmail · 캘린더)를 가짜 클라이언트로 바꿔 시나리오 · 보안 · 동시성 · 재시도 · Gmail 동기화 · 메일 판별 · 캘린더 동기화를 검증하고, push마다 CI로 돌립니다(실 LLM 스모크 테스트는 opt-in).
 
 **목차** · [진행 상황](#진행-상황) · [데모 시나리오](#데모-시나리오-최우선-완료-기준) · [구조](#구조) · [보안](#보안) · [로컬 실행](#로컬-실행) · [Railway 배포](#railway-배포) · [범위 밖](#범위-밖-의도적으로-제외)
 
@@ -23,7 +23,8 @@
 | 가상 메일 데모 — 목표 → 계획 → 승인 대기 → 재개 → 완료 판정 | 완료 |
 | Gmail 연결 · 메일 동기화 (설계 1 · 2단계) | 완료 (로컬 기준) |
 | 업무 메일 판별과 접수 (설계 3단계) | 완료 (실제 계정 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-mail-triage-and-intake.md) |
-| 캘린더 · 받은 업무 화면 · 답장 (설계 4~7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
+| Google 캘린더 연동 (설계 4단계) | 완료 (실제 캘린더 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-calendar-sync.md) |
+| 받은 업무 화면 · 답장 · 정리 (설계 5~7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
 | RAG (검색 증강 생성) | 설계 중, 구현 전 — [설계 문서](docs/superpowers/specs/2026-10-26-rag-design.md) |
 
 **문서** · [변경 이력](CHANGELOG.md) · [결정 기록](docs/decisions.md) · [데이터 · 개인정보 흐름](docs/privacy.md) · [문제 해결](docs/troubleshooting.md) · [설계 문서 · 구현 계획](docs/superpowers/)
