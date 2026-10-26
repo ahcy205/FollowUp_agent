@@ -29,19 +29,27 @@ from app.schemas import (
     ApprovalDecision,
     ApprovalOut,
     CancelTaskIn,
+    CloseTaskIn,
     CompleteTaskIn,
     CustomerOut,
     DashboardOut,
+    DeadlineIn,
     DocumentOut,
     EmailOut,
     GoalIn,
     GoalUpdateIn,
+    PriorityIn,
+    PromoteOut,
     RunOut,
+    SnoozeIn,
     TaskBrief,
     TaskDetail,
+    TodoOpIn,
 )
 from app.mail import sync as mail_sync
-from app.security import agent_limiter, calendar_retry_limiter, get_current_user
+from app.mail import task_actions
+from app.mail.task_actions import ActionError
+from app.security import agent_limiter, ai_action_limiter, calendar_retry_limiter, get_current_user
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
@@ -205,6 +213,100 @@ def cancel_task(task_id: int, body: CancelTaskIn, user: User = Depends(get_curre
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     db.refresh(task)
     return task
+
+
+# ------------------------------------------------------------------ 받은 업무: 메일 업무 동작
+
+def _mail_task(db: Session, task_id: int, user: User) -> Task:
+    task = get_owned(db, Task, task_id, user)
+    if task.origin != "mail":
+        raise HTTPException(status.HTTP_409_CONFLICT, "메일 업무에서만 쓸 수 있습니다.")
+    return task
+
+
+def _act(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except ActionError as e:
+        raise HTTPException(e.status, str(e))
+
+
+def _done(db: Session, task: Task, user: User) -> TaskDetail:
+    db.commit()
+    db.refresh(task)
+    return build_task_detail(db, task, user)
+
+
+@router.post("/tasks/{task_id}/snooze", response_model=TaskDetail)
+def snooze_task(task_id: int, body: SnoozeIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.snooze, task, preset=body.preset, until=body.until, now=datetime.now(timezone.utc),
+         tz=get_settings().user_timezone)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/unsnooze", response_model=TaskDetail)
+def unsnooze_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.unsnooze, task)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/priority", response_model=TaskDetail)
+def set_task_priority(task_id: int, body: PriorityIn, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.set_priority, task, body.priority)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/deadline", response_model=TaskDetail)
+def set_task_deadline(task_id: int, body: DeadlineIn, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.set_deadline, task, date=body.date, time=body.time, clear=body.clear, confirm=body.confirm,
+         tz=get_settings().user_timezone)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/todos", response_model=TaskDetail)
+def edit_task_todos(task_id: int, body: TodoOpIn, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.edit_todos, task, body.model_dump(exclude_none=True))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/close", response_model=TaskDetail)
+def close_task(task_id: int, body: CloseTaskIn, user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)):
+    """답장 필요 없음으로 닫기."""
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.close_without_reply, db, user, task, body.reason)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reanalyze", response_model=TaskDetail)
+def reanalyze_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.ensure_reanalyzable, task)
+    ai_action_limiter.check(f"ai:{user.id}")  # after the checks above so rejected calls cost nothing
+    _act(task_actions.request_reanalyze, task)
+    detail = _done(db, task, user)
+    mail_sync.wake()
+    return detail
+
+
+@router.post("/emails/{email_id}/promote", response_model=PromoteOut)
+def promote_email(email_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """'업무 아님' · '자동 필터' 메일을 업무로 처리한다. 분석은 워커가 이어서 한다."""
+    email = get_owned(db, Email, email_id, user)
+    _act(task_actions.ensure_promotable, user, email)
+    ai_action_limiter.check(f"ai:{user.id}")
+    task = _act(task_actions.promote_email, db, user, email)
+    db.commit()
+    mail_sync.wake()
+    return PromoteOut(task_id=task.id)
 
 
 @router.post("/tasks/{task_id}/goal", response_model=TaskBrief)

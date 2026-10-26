@@ -150,6 +150,55 @@ class CompleteTaskIn(BaseModel):
     note: str = Field(default="", max_length=1500)
 
 
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SnoozeIn(_Strict):
+    preset: Literal["evening", "tomorrow", "next_monday"] | None = None
+    until: datetime | None = None
+
+
+class PriorityIn(_Strict):
+    priority: Literal["HIGH", "NORMAL", "LOW"]
+
+
+class DeadlineIn(_Strict):
+    date: str | None = Field(default=None, max_length=10)
+    time: str | None = Field(default=None, max_length=5)
+    clear: bool = False
+    confirm: bool = False
+
+
+class TodoItemIn(_Strict):
+    id: int
+    title: str = Field(max_length=2000)
+    done: bool = False
+    evidence: str = Field(default="", max_length=2000)
+    due_at: str | None = Field(default=None, max_length=40)
+    source: Literal["agent", "user"] = "user"
+    due_note: str | None = Field(default=None, max_length=2000)
+
+
+class TodoOpIn(_Strict):
+    """할 일 작업 하나. 길이 · 필수 항목 검사는 task_actions가 한국어 문구로 한다."""
+    op: Literal["add", "toggle", "memo", "delete", "restore"]
+    id: int | None = None
+    title: str | None = Field(default=None, max_length=2000)
+    done: bool | None = None
+    memo: str | None = Field(default=None, max_length=2000)
+    item: TodoItemIn | None = None
+    index: int | None = None
+
+
+class CloseTaskIn(_Strict):
+    reason: str = Field(default="", max_length=500)
+
+
+class PromoteOut(BaseModel):
+    task_id: int
+
+
 class ApprovalDecision(BaseModel):
     approved: bool
     comment: str = Field(default="", max_length=500)

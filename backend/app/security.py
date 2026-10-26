@@ -136,6 +136,7 @@ login_limiter = RateLimiter(max_calls=10, window_seconds=300)
 agent_limiter = RateLimiter(max_calls=30, window_seconds=600)
 google_sync_limiter = RateLimiter(max_calls=3, window_seconds=60)
 calendar_retry_limiter = RateLimiter(max_calls=5, window_seconds=60)
+ai_action_limiter = RateLimiter(max_calls=10, window_seconds=60)  # 업무로 처리 · 다시 분석 (LLM 호출로 이어짐)
 
 
 def client_ip(request: Request) -> str:
