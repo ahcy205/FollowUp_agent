@@ -195,6 +195,10 @@ class CloseTaskIn(_Strict):
     reason: str = Field(default="", max_length=500)
 
 
+class MergeIn(_Strict):
+    into_task_id: int
+
+
 class PromoteOut(BaseModel):
     task_id: int
 

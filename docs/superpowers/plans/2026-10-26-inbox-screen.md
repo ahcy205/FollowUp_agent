@@ -239,7 +239,7 @@ def test_api_ownership_and_limits(client): ...  # 다른 사용자 404, 에이�
 ### Task 4: 업무 합치기
 
 **Files:**
-- Create: `backend/app/mail/merge.py`
+- Create: `backend/app/mail/merge.py` (→ 변경 #1)
 - Modify: `backend/app/mail/intake.py` (`_thread_task`), `backend/app/api/tasks.py`
 - Test: `backend/tests/test_merge.py`
 
@@ -253,7 +253,7 @@ def test_api_ownership_and_limits(client): ...  # 다른 사용자 404, 에이�
       - `{"source_id", "at", "moved_email_ids", "added_todo_ids", "added_requests"}`
       - `"before"`: target의 deadline_at · all_day · kind · source · priority · priority_source
       - `"after"`: 합친 직후 같은 값
-      - `"source_before"`: source의 status · current_step · completed_at · snoozed_until
+      - `"source_before"`: source의 status · current_step · completed_at · snoozed_until (→ 변경 #2)
   - `undo_merge(db, user, target: Task, now) -> Task` (설계 4.3절)
     - 10분이 지났거나 기록이 없으면 409를 돌려준다.
     - 옮긴 메일, 그리고 합친 뒤 source 스레드로 들어온 메일(`gmail_thread_id == source.gmail_thread_id`)을 source로 돌려보낸다.
@@ -442,6 +442,8 @@ def test_fingerprint_changes_on_snooze(): ... # snooze 후 fingerprint 달라짐
 
 | # | 날짜 | 작업 | 계획 | 실제 구현 | 이유 | 영향 |
 |---|---|---|---|---|---|---|
+| 1 | 2026-10-26 | Task 4 | `merge.py`를 새로 만든다 | `resolve_merged`는 Task 3 리뷰 수정 때 먼저 만들어져 있어 같은 파일에 합치기 · 되돌리기를 더했다. `ActionError`는 `app/mail/errors.py`로 옮기고 `task_actions`가 다시 내보낸다 | `task_actions → intake → merge` 순환 import를 피하려고 | 없음 (`task_actions.ActionError` 그대로 쓸 수 있음) |
+| 2 | 2026-10-26 | Task 4 | `merge_undo` 기록 항목 | `source_before`에 `next_action`을, 기록에 `added_todo_from`(A 번호 → B 원래 번호)을 더했다. 옮긴 할 일은 B의 plan에서 빼고(중복이라 건너뛴 것은 B에 남김), 되돌릴 때 원래 번호로 돌려놓는다(겹치면 새 번호) | B를 닫을 때 다음 행동을 비우므로 복구가 필요하고, 되돌린 뒤 할 일 번호가 원래대로여야 하므로 | 없음 (내부 기록 형식) |
 
 ## 이 계획 다음
 

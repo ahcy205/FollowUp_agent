@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.mail import intake
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.deadline import MAX_AHEAD_DAYS
+from app.mail.errors import ActionError
 from app.mail.inbox import snooze_wake_at
 from app.models import Email, EmailDirection, Task, TaskStatus, User
 
@@ -40,12 +41,6 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _TIME_RE = re.compile(r"(\d{2}):(\d{2})(?::(\d{2}))?")  # 브라우저 입력은 HH:MM:SS일 수 있다
 
 CLOSED_MESSAGE = "이미 완료되었거나 취소된 업무입니다."
-
-
-class ActionError(Exception):
-    def __init__(self, message: str, status: int = 400):
-        super().__init__(message)
-        self.status = status
 
 
 def _utc(dt: datetime | None) -> datetime | None:

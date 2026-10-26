@@ -1,13 +1,31 @@
 """업무 합치기.
 
+같은 상대가 새 스레드로 보낸 메일 업무(B, 원본)를 기존 업무(A, 대상)에 합치고, 10분 안에 되돌린다.
 합쳐진 업무(merged_into_id가 있음)로 오는 메일과 동작은 합쳐진 대상 업무로 간다.
+- 커밋하지 않는다. API가 커밋한다.
+- 타임라인에는 업무 번호만 남긴다. 할 일 제목 · 요청 · 메일 내용은 남기지 않는다.
 """
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Task
+from app.agent.audit import log_action
+from app.mail.calendar_sync import mark_calendar_dirty
+from app.mail.errors import ActionError
+from app.models import Email, Task, TaskStatus, User
 
 MAX_HOPS = 5
+UNDO_WINDOW = timedelta(minutes=10)
+MERGE_TARGET_STATUSES = (TaskStatus.ACTION_REQUIRED.value, TaskStatus.IN_PROGRESS.value,
+                         TaskStatus.BLOCKED.value, TaskStatus.WAITING.value)
+_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
+_RANK = {"HIGH": 3, "NORMAL": 2, "LOW": 1}
+_DEADLINE_KEYS = ("deadline_at", "deadline_all_day", "deadline_kind", "deadline_source")
+_PRIORITY_KEYS = ("priority", "priority_source")
+
+CANNOT_MERGE = "합칠 수 없는 업무입니다."
+NOTHING_TO_UNDO = "되돌릴 수 있는 합치기가 없습니다."
 
 
 def resolve_merged(db: Session, task: Task) -> Task:
@@ -27,3 +45,236 @@ def resolve_merged(db: Session, task: Task) -> Task:
         seen.add(target.id)
         current = target
     return current
+
+
+# ---------------------------------------------------------------- 도우미
+
+def _utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+def _iso(dt: datetime | None) -> str | None:
+    dt = _utc(dt)
+    return dt.isoformat() if dt else None
+
+
+def _parse(text) -> datetime | None:
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        return _utc(datetime.fromisoformat(text))
+    except ValueError:
+        return None
+
+
+def _fields(task: Task) -> dict:
+    """되돌릴 때 비교 · 복구하는 대상 업무의 기한 · 중요도."""
+    return {"deadline_at": _iso(task.deadline_at), "deadline_all_day": bool(task.deadline_all_day),
+            "deadline_kind": task.deadline_kind, "deadline_source": task.deadline_source,
+            "priority": task.priority, "priority_source": task.priority_source}
+
+
+def _title(item: dict) -> str:
+    title = item.get("title")
+    return title.strip() if isinstance(title, str) else ""
+
+
+def _int_ids(plan: list) -> set[int]:
+    return {p["id"] for p in plan if isinstance(p, dict) and isinstance(p.get("id"), int)
+            and not isinstance(p.get("id"), bool)}
+
+
+def _requests(task: Task) -> list:
+    reqs = (task.brief or {}).get("requests")
+    return list(reqs) if isinstance(reqs, list) else []
+
+
+def _log(db: Session, user: User, task: Task, action_type: str, data: dict, reason: str) -> None:
+    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type=action_type,
+               output_data=data, reason=reason)
+
+
+# ---------------------------------------------------------------- 합치기
+
+def _mergeable(user: User, source: Task, target: Task) -> bool:
+    return (source.id != target.id
+            and source.user_id == user.id and target.user_id == user.id
+            and source.origin == "mail" and target.origin == "mail"
+            and source.merged_into_id is None and target.merged_into_id is None
+            and str(source.status) not in _CLOSED
+            and str(target.status) in MERGE_TARGET_STATUSES)
+
+
+def merge(db: Session, user: User, source: Task, target: Task, now: datetime) -> None:
+    """원본 B(source)를 대상 A(target)에 합친다. 되돌리기용 기록을 target.merge_undo에 남긴다."""
+    if not _mergeable(user, source, target):
+        raise ActionError(CANNOT_MERGE, 409)
+    now = _utc(now)
+    before = _fields(target)
+
+    # 메일
+    emails = db.scalars(select(Email).where(Email.user_id == user.id, Email.task_id == source.id)).all()
+    for email in emails:
+        email.task_id = target.id
+    moved_email_ids = sorted(e.id for e in emails)
+
+    # 할 일: 같은 제목(앞뒤 공백 무시)은 건너뛰고 B에 남긴다. 옮긴 것은 A의 새 번호를 받는다.
+    target_plan = [dict(p) if isinstance(p, dict) else p for p in (target.plan or [])]
+    titles = {_title(p) for p in target_plan if isinstance(p, dict)}
+    next_id = max(_int_ids(target_plan), default=0) + 1
+    kept, added_ids, id_from = [], [], {}
+    for p in source.plan or []:
+        title = _title(p) if isinstance(p, dict) else ""
+        if not title or title in titles:
+            kept.append(dict(p) if isinstance(p, dict) else p)
+            continue
+        titles.add(title)
+        target_plan.append({**p, "id": next_id})
+        id_from[str(next_id)] = p.get("id")
+        added_ids.append(next_id)
+        next_id += 1
+    target.plan = target_plan
+    source.plan = kept
+
+    # 상대 요청
+    reqs = _requests(target)
+    seen = {r.strip() for r in reqs if isinstance(r, str)}
+    added_requests = []
+    for r in _requests(source):
+        if isinstance(r, str) and r.strip() and r.strip() not in seen:
+            seen.add(r.strip())
+            added_requests.append(r)
+    if added_requests:
+        target.brief = {**(target.brief or {}), "requests": reqs + added_requests}
+
+    # 기한: B가 더 이르거나 A에 없으면 B 것
+    s_due, t_due = _utc(source.deadline_at), _utc(target.deadline_at)
+    if s_due is not None and (t_due is None or s_due < t_due):
+        target.deadline_at = source.deadline_at
+        target.deadline_all_day = source.deadline_all_day
+        target.deadline_kind = source.deadline_kind
+        target.deadline_source = source.deadline_source
+
+    # 중요도: 높은 쪽
+    if _RANK.get(source.priority, 0) > _RANK.get(target.priority, 0):
+        target.priority = source.priority
+        if source.priority_source == "user":
+            target.priority_source = "user"
+
+    source_before = {"status": str(source.status), "current_step": source.current_step,
+                     "completed_at": _iso(source.completed_at), "snoozed_until": _iso(source.snoozed_until),
+                     "next_action": source.next_action}
+    source.merged_into_id = target.id
+    source.status = TaskStatus.COMPLETED
+    source.completed_at = now
+    source.current_step = f"업무 #{target.id}에 합쳐짐"
+    source.next_action = ""
+    source.snoozed_until = None
+
+    target.merge_undo = {
+        "source_id": source.id, "at": now.isoformat(), "moved_email_ids": moved_email_ids,
+        "added_todo_ids": added_ids, "added_todo_from": id_from, "added_requests": added_requests,
+        "before": before, "after": _fields(target), "source_before": source_before,
+    }
+    mark_calendar_dirty(source)  # 일정이 있으면 ✓를 붙인다
+    mark_calendar_dirty(target)
+    data = {"source_id": source.id, "target_id": target.id}
+    _log(db, user, target, "TASK_MERGED", data, f"업무 #{source.id}을 이 업무에 합쳤습니다")
+    _log(db, user, source, "TASK_MERGED", data, f"업무 #{target.id}에 합쳤습니다")
+
+
+# ---------------------------------------------------------------- 되돌리기
+
+def _restore(task: Task, values: dict, keys: tuple) -> None:
+    for key in keys:
+        value = values.get(key)
+        if key == "deadline_at":
+            value = _parse(value)
+        setattr(task, key, value)
+
+
+def undo_merge(db: Session, user: User, target: Task, now: datetime) -> Task:
+    """합친 뒤 10분 안이면 옮겨 온 것만 B로 돌려보낸다. 사용자가 그사이 바꾼 A의 기한 · 중요도는 유지한다."""
+    rec = target.merge_undo if isinstance(target.merge_undo, dict) else {}
+    at = _parse(rec.get("at"))
+    if (not rec or at is None or _utc(now) - at > UNDO_WINDOW or target.user_id != user.id
+            or target.merged_into_id is not None):
+        raise ActionError(NOTHING_TO_UNDO, 409)
+    source = db.scalar(select(Task).where(Task.id == rec.get("source_id"), Task.user_id == user.id))
+    if source is None or source.merged_into_id != target.id:
+        raise ActionError(NOTHING_TO_UNDO, 409)
+
+    # 메일: 옮긴 메일, 그리고 합친 뒤 B 스레드로 들어와 A에 붙은 메일
+    moved = [i for i in rec.get("moved_email_ids") or [] if isinstance(i, int)]
+    emails = list(db.scalars(select(Email).where(Email.user_id == user.id, Email.task_id == target.id,
+                                                 Email.id.in_(moved))).all()) if moved else []
+    if source.gmail_thread_id:
+        emails += db.scalars(select(Email).where(Email.user_id == user.id, Email.task_id == target.id,
+                                                 Email.gmail_thread_id == source.gmail_thread_id)).all()
+    for email in emails:
+        email.task_id = source.id
+
+    # 할 일: 지금 상태(체크 · 메모) 그대로 B로. 원래 번호가 B에서 겹치면 새 번호.
+    added = set(i for i in rec.get("added_todo_ids") or [] if isinstance(i, int))
+    id_from = rec.get("added_todo_from") if isinstance(rec.get("added_todo_from"), dict) else {}
+    target_plan, returning = [], []
+    for p in target.plan or []:
+        if isinstance(p, dict) and p.get("id") in added:
+            returning.append(dict(p))
+        else:
+            target_plan.append(dict(p) if isinstance(p, dict) else p)
+    source_plan = [dict(p) if isinstance(p, dict) else p for p in (source.plan or [])]
+    used = _int_ids(source_plan)
+    for item in returning:
+        orig = id_from.get(str(item["id"]), item["id"])
+        if not isinstance(orig, int) or isinstance(orig, bool) or orig in used:
+            orig = max(used, default=0) + 1
+        item["id"] = orig
+        used.add(orig)
+        source_plan.append(item)
+    target.plan = target_plan
+    source.plan = source_plan
+
+    # 요청
+    added_requests = [r for r in rec.get("added_requests") or [] if isinstance(r, str)]
+    if added_requests:
+        reqs = _requests(target)
+        for r in added_requests:
+            if r in reqs:
+                reqs.remove(r)
+        target.brief = {**(target.brief or {}), "requests": reqs}
+
+    # 기한 · 중요도: 합친 직후 값 그대로일 때만 이전 값으로
+    current, after, before = _fields(target), rec.get("after") or {}, rec.get("before") or {}
+    if all(current[k] == after.get(k) for k in _DEADLINE_KEYS):
+        _restore(target, before, _DEADLINE_KEYS)
+    if all(current[k] == after.get(k) for k in _PRIORITY_KEYS):
+        _restore(target, before, _PRIORITY_KEYS)
+
+    sb = rec.get("source_before") or {}
+    try:
+        source.status = TaskStatus(sb.get("status"))
+    except ValueError:
+        source.status = TaskStatus.ACTION_REQUIRED
+    source.current_step = sb.get("current_step") or ""
+    source.completed_at = _parse(sb.get("completed_at"))
+    source.snoozed_until = _parse(sb.get("snoozed_until"))
+    source.next_action = sb.get("next_action") or ""
+    source.merged_into_id = None
+
+    target.merge_undo = {}
+    mark_calendar_dirty(source)
+    mark_calendar_dirty(target)
+    data = {"source_id": source.id, "target_id": target.id}
+    _log(db, user, target, "TASK_UNMERGED", data, f"업무 #{source.id} 합치기를 되돌렸습니다")
+    _log(db, user, source, "TASK_UNMERGED", data, f"업무 #{target.id}와의 합치기를 되돌렸습니다")
+    return target
+
+
+def dismiss_merge(task: Task) -> None:
+    """'따로 두기'. 이 업무에는 다시 합치기를 제안하지 않는다."""
+    if task.origin != "mail":
+        raise ActionError(CANNOT_MERGE, 409)
+    task.merge_dismissed = True

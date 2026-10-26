@@ -38,6 +38,7 @@ from app.schemas import (
     EmailOut,
     GoalIn,
     GoalUpdateIn,
+    MergeIn,
     PriorityIn,
     PromoteOut,
     RunOut,
@@ -46,6 +47,7 @@ from app.schemas import (
     TaskDetail,
     TodoOpIn,
 )
+from app.mail import merge as mail_merge
 from app.mail import sync as mail_sync
 from app.mail import task_actions
 from app.mail.task_actions import ActionError
@@ -295,6 +297,31 @@ def reanalyze_task(task_id: int, user: User = Depends(get_current_user), db: Ses
     detail = _done(db, task, user)
     mail_sync.wake()
     return detail
+
+
+@router.post("/tasks/{task_id}/merge", response_model=TaskDetail)
+def merge_task(task_id: int, body: MergeIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """이 업무(B)를 같은 상대의 기존 업무(A)에 합친다. 응답은 A."""
+    source = _mail_task(db, task_id, user)
+    target = get_owned(db, Task, body.into_task_id, user)
+    _act(mail_merge.merge, db, user, source, target, datetime.now(timezone.utc))
+    return _done(db, target, user)
+
+
+@router.post("/tasks/{task_id}/merge/undo", response_model=TaskDetail)
+def undo_merge_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """합친 대상(A)에서 10분 안에 합치기를 되돌린다."""
+    target = _mail_task(db, task_id, user)
+    _act(mail_merge.undo_merge, db, user, target, datetime.now(timezone.utc))
+    return _done(db, target, user)
+
+
+@router.post("/tasks/{task_id}/merge/dismiss", response_model=TaskDetail)
+def dismiss_merge_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """합치기 제안 '따로 두기'."""
+    task = _mail_task(db, task_id, user)
+    _act(mail_merge.dismiss_merge, task)
+    return _done(db, task, user)
 
 
 @router.post("/emails/{email_id}/promote", response_model=PromoteOut)
