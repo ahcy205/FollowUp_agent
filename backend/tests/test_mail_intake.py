@@ -242,7 +242,7 @@ def test_llm_error_creates_pending_task():
         assert task.goal == PENDING_GOAL == "메일 분석 대기 중"
         assert task.current_step == PENDING_STEP == "메일 분석 대기"
         assert task.title == "견적 요청드립니다"
-        assert task.brief == {"analysis": "pending", "attempts": 1, "email_id": first}
+        assert task.brief == {"analysis": "pending", "attempts": 0, "email_id": first}  # 장애는 시도로 세지 않는다
         e1, e2 = db.get(Email, first), db.get(Email, second)
         assert e1.task_id == task.id and e1.processed is False
         assert e2.task_id is None
@@ -263,12 +263,26 @@ def test_pending_retried_next_cycle():
         assert db.get(Email, mid).processed is True
 
 
+def test_llm_error_never_counts():
+    with SessionLocal() as db:
+        uid = _user(db)
+        _add(db, [_mail(uid, minutes=0), _mail(uid, minutes=1)])
+        for _ in range(5):
+            llm = ScriptedLLM(structured_steps=[LLMError("한도 초과", retryable=True)])
+            r = _run(db, uid, llm)
+            assert len(llm.structured_prompts) == 1  # 주기마다 한 번만 헛걸음
+            assert r.pending == 1 and r.failed == 0
+        (task,) = _mail_tasks(db, uid)
+        assert task.brief["analysis"] == "pending" and task.brief["attempts"] == 0
+        assert task.current_step == PENDING_STEP
+
+
 def test_failed_after_three():
     with SessionLocal() as db:
         uid = _user(db)
         _add(db, [_mail(uid)])
         for _ in range(3):
-            r = _run(db, uid, ScriptedLLM(structured_steps=[LLMError("오류")]))
+            r = _run(db, uid, ScriptedLLM(structured_steps=[{"summary": "형식이 틀린 응답"}]))
         assert r.failed == 1 and r.pending == 0
         (task,) = _mail_tasks(db, uid)
         assert task.brief["analysis"] == "failed" and task.brief["attempts"] == 3
@@ -386,6 +400,8 @@ def test_analyze_into_task_direct_returns_false_on_error():
         db.commit()
         email = db.get(Email, mid)
         assert analyze_into_task(db, task, email, ScriptedLLM(structured_steps=[LLMError("x")]), TZ) is False
+        assert task.brief["attempts"] == 0
+        assert analyze_into_task(db, task, email, ScriptedLLM(structured_steps=[{}]), TZ) is False
         assert task.brief["attempts"] == 1
         assert analyze_into_task(db, task, email, ScriptedLLM(structured_steps=[_analysis()]), TZ) is True
         assert task.brief["analysis"] == "done"
@@ -430,3 +446,86 @@ def test_thread_race_integrity_error_attaches(monkeypatch):
         assert (r.created, r.attached) == (0, 1)
         assert db.get(Email, mid).task_id == existing.id
         assert len(_mail_tasks(db, uid)) == 1
+
+
+def test_unexpected_error_counts_and_finalizes():
+    with SessionLocal() as db:
+        uid = _user(db)
+        _add(db, [_mail(uid, minutes=0)])
+        for i in range(3):
+            llm = ScriptedLLM(structured_steps=[RuntimeError("sdk")])
+            r = _run(db, uid, llm)
+            assert len(llm.structured_prompts) == 1
+            (task,) = _mail_tasks(db, uid)
+            assert task.brief["attempts"] == i + 1
+        assert r.failed == 1
+        assert task.brief["analysis"] == "failed" and task.current_step == FAILED_STEP
+        # 확정된 업무는 다시 분석하지 않고, 새 메일을 받는다
+        (new_mid,) = _add(db, [_mail(uid, minutes=5)])
+        llm = ScriptedLLM(structured_steps=[_analysis()])
+        r = _run(db, uid, llm)
+        assert len(llm.structured_prompts) == 1 and (r.created, r.analyzed) == (1, 1)
+        assert db.get(Email, new_mid).task_id is not None
+
+
+def test_unexpected_error_while_applying_rolls_back(monkeypatch):
+    from app.mail import intake
+
+    def boom(*a, **k):
+        raise ValueError("bug")
+
+    monkeypatch.setattr(intake, "normalize_deadline", boom)
+    with SessionLocal() as db:
+        uid = _user(db)
+        (mid,) = _add(db, [_mail(uid)])
+        r = _run(db, uid, ScriptedLLM(structured_steps=[_analysis()]))
+        assert r.pending == 1 and r.analyzed == 0
+        (task,) = _mail_tasks(db, uid)
+        assert task.brief == {"analysis": "pending", "attempts": 1, "email_id": mid}
+        assert task.title == "견적 요청드립니다" and task.goal == PENDING_GOAL and task.plan == []
+        assert _logs(db, task.id, "MAIL_INTAKE") == []
+        assert db.get(Email, mid).processed is False
+
+
+def test_cancelled_pending_task_not_retried():
+    with SessionLocal() as db:
+        uid = _user(db)
+        _add(db, [_mail(uid)])
+        _run(db, uid, ScriptedLLM(structured_steps=[LLMError("x")]))
+        (task,) = _mail_tasks(db, uid)
+        task.status = TaskStatus.CANCELLED
+        db.commit()
+        llm = ScriptedLLM(structured_steps=[_analysis()])
+        r = _run(db, uid, llm)
+        assert llm.structured_prompts == [] and r.analyzed == 0
+        (task,) = _mail_tasks(db, uid)
+        assert task.status == TaskStatus.CANCELLED and task.brief["analysis"] == "pending"
+
+
+def test_suspicious_log_is_capped():
+    with SessionLocal() as db:
+        uid = _user(db)
+        _add(db, [_mail(uid, content="평범한 견적 요청입니다")])
+        # 기록 한도(6,000자) 안에 들어오는 크기로 개수 제한을 확인한다. 첫 항목은 길이 제한(300자)을 확인한다.
+        llm = ScriptedLLM(structured_steps=[_analysis(
+            suspicious=["의" * 500] + [f"{i:02d}" + "의" * 150 for i in range(29)])])
+        _run(db, uid, llm)
+        (task,) = _mail_tasks(db, uid)
+        (warn,) = _logs(db, task.id, "SECURITY_WARNING")
+        patterns = warn.output_data["patterns"]
+        assert len(patterns) == 20 and len(patterns[0]) == 300 and patterns[-1].startswith("18")
+
+
+def test_past_todo_due_kept_as_note():
+    with SessionLocal() as db:
+        uid = _user(db)
+        _add(db, [_mail(uid)])
+        llm = ScriptedLLM(structured_steps=[_analysis(todos=[
+            _todo("자료 보내기", "지난주 금요일", "2026-10-23", ""), _todo("회신"),
+            _todo("견적 제출", "이번 주 금요일", "2026-10-30", "")])])
+        _run(db, uid, llm)
+        (task,) = _mail_tasks(db, uid)
+        past, plain, future = task.plan
+        assert past["due_at"] is None and past["due_note"] == "지난주 금요일"
+        assert "due_note" not in plain and "due_note" not in future
+        assert future["due_at"].startswith("2026-10-29T15:00")

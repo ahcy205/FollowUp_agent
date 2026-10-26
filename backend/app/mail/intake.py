@@ -2,6 +2,8 @@
 
 새 스레드면 업무를 "분석 대기"로 먼저 만들고 커밋한 다음 LLM에 한 번 분석을 맡긴다. 분석이 실패해도
 메일이 화면에서 사라지지 않게 하기 위해서다. 이미 업무가 있는 스레드의 메일은 LLM 없이 붙인다.
+LLM 제공자 장애(LLMError)는 시도 횟수에 넣지 않고 "분석 대기"로 둔다(명세 4.3.3 · 7절). LLM이 형식이 틀린 답을 냈거나
+그 밖의 예외가 났을 때만 시도 횟수를 올리고, 3회째에 분석을 멈춘다. 완료 · 취소된 업무는 다시 분석하지 않는다.
 로그에는 메일 · 업무 번호, 건수, 예외 타입 이름만 남긴다.
 """
 import logging
@@ -14,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agent.audit import log_action
+from app.agent.orchestrator import CLOSED_TASK_STATUSES
 from app.agent.guard import detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
 from app.mail.deadline import Deadline, earliest, normalize_deadline
@@ -94,7 +97,7 @@ class IntakeResult:
 
 
 class _InvalidResult(Exception):
-    """LLM 응답이 스키마와 맞지 않는다. LLMError와 같은 분석 실패로 다룬다."""
+    """LLM 응답이 스키마와 맞지 않는다. 시도 횟수를 올리는 분석 실패다."""
 
 
 # ---------------------------------------------------------------- 프롬프트
@@ -204,20 +207,35 @@ def _record_failure(task: Task) -> None:
 
 
 def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz: str) -> bool:
-    """메일을 LLM으로 한 번 분석해 업무를 채운다. 실패(LLMError · 형식 오류)면 시도 횟수를 올리고 False.
+    """메일을 LLM으로 한 번 분석해 업무를 채운다. 성공하면 True, 실패하면 False.
 
+    - LLMError(제공자 장애): 아무것도 바꾸지 않는다. 시도 횟수도 그대로다.
+    - 형식 오류 · 그 밖의 예외: 세션을 되돌린 뒤(호출한 쪽은 미리 커밋해 둔다) 시도 횟수를 올린다.
     커밋하지 않는다. 호출한 쪽이 커밋한다.
     """
+    task_id, email_id = task.id, email.id
     try:
         data = _validate(llm.structured(INTAKE_SYSTEM, _build_prompt(email, tz), INTAKE_SCHEMA))
-    except (LLMError, _InvalidResult) as e:
-        _record_failure(task)
-        db.flush()
-        log.warning("mail intake analysis failed for task %s email %s: %s", task.id, email.id, type(e).__name__)
+        _apply(db, task, email, data, tz)
+    except LLMError as e:
+        log.warning("mail intake analysis for task %s email %s postponed: %s", task_id, email_id, type(e).__name__)
         return False
+    except Exception as e:  # noqa: BLE001 - 예상 밖 오류도 시도로 세야 같은 업무를 끝없이 다시 분석하지 않는다
+        db.rollback()  # 반쯤 채운 업무 · 기록을 버린다
+        task = db.get(Task, task_id)
+        if task is not None:
+            _record_failure(task)
+            db.flush()
+        log.warning("mail intake analysis failed for task %s email %s: %s", task_id, email_id, type(e).__name__)
+        return False
+    return True
 
+
+def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
     ref = _reference_time(email)
-    flags = list(dict.fromkeys([*data["suspicious"], *detect_injection(email.content or "")]))
+    # 기록에 남기는 의심 문장은 개수와 길이를 제한한다. 걸러내기에는 전부 쓴다.
+    logged = [x[:ITEM_CHARS] for x in data["suspicious"][:MAX_ITEMS]]
+    flags = list(dict.fromkeys([*logged, *detect_injection(email.content or "")]))
     requests = [r for r in data["requests"] if not _is_suspicious(r, data["suspicious"])][:MAX_ITEMS]
     todos = [t for t in data["todos"] if not _is_suspicious(t["title"], data["suspicious"])][:MAX_ITEMS]
 
@@ -232,8 +250,11 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
         due = normalize_deadline(t["due_text"], t["due_date"], t["due_time"], kind, ref, tz)
         if due:
             candidates.append(due)
-        plan.append({"id": i + 1, "title": t["title"], "done": False, "evidence": "",
-                     "due_at": due.at.isoformat() if due else None, "source": "agent"})
+        item = {"id": i + 1, "title": t["title"], "done": False, "evidence": "",
+                "due_at": due.at.isoformat() if due else None, "source": "agent"}
+        if due is None and t["due_text"]:
+            item["due_note"] = t["due_text"][:NOTE_CHARS]  # 과거 날짜 등은 기한 대신 메모로 남긴다 (명세 4.5)
+        plan.append(item)
     best: Deadline | None = earliest(candidates)
 
     summary = data["summary"]
@@ -273,7 +294,6 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
                    risk_level=RiskLevel.HIGH, status="FLAGGED")
         log.info("mail intake flagged %d suspicious items in email %s", len(flags), email.id)
     db.flush()
-    return True
 
 
 # ---------------------------------------------------------------- 접수 주기
@@ -335,7 +355,7 @@ def _retryable_tasks(db: Session, user_id: int) -> list[Task]:
             attempts = int(brief.get("attempts") or 0)
         except (TypeError, ValueError):
             attempts = 0
-        if brief.get("analysis") == "pending" and attempts < MAX_ATTEMPTS:
+        if brief.get("analysis") == "pending" and attempts < MAX_ATTEMPTS and t.status not in CLOSED_TASK_STATUSES:
             out.append(t)
     return out
 

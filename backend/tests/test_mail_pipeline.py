@@ -129,3 +129,21 @@ def test_processing_error_does_not_undo_sync(client, google_fake, monkeypatch):
         for i in (ida, idb):
             acc = db.get(GoogleAccount, i)
             assert acc.last_sync_error == "" and acc.sync_lease_until is None
+
+
+def test_unexpected_llm_error_counts_and_ends(acct, google_fake):
+    # 감싸지지 않은 SDK 오류가 롤백만 되고 시도로 세지 않으면 같은 메일을 주기마다 영원히 다시 묻는다
+    _, uid = acct
+    _deliver(google_fake, "견적 요청")
+    for i in range(3):
+        llm = ScriptedLLM(structured_steps=[RuntimeError("sdk")])
+        set_llm_override(llm)
+        assert run_sync_cycle() == 1
+        assert len(llm.structured_prompts) == 1
+    with SessionLocal() as db:
+        (e,) = db.scalars(select(Email).where(Email.user_id == uid, Email.gmail_message_id.is_not(None))).all()
+        assert e.triage == "not_work" and e.gmail_meta["triage_attempts"] == 3
+    llm = ScriptedLLM(structured_steps=[AssertionError("no LLM")])
+    set_llm_override(llm)
+    run_sync_cycle()
+    assert llm.structured_prompts == []
