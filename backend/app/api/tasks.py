@@ -38,6 +38,7 @@ from app.schemas import (
     EmailOut,
     GoalIn,
     GoalUpdateIn,
+    MailExtras,
     MergeIn,
     MergeUndoIn,
     PriorityIn,
@@ -48,6 +49,7 @@ from app.schemas import (
     TaskDetail,
     TodoOpIn,
 )
+from app.mail import inbox as mail_inbox
 from app.mail import merge as mail_merge
 from app.mail import sync as mail_sync
 from app.mail import task_actions
@@ -122,6 +124,31 @@ def build_task_detail(db: Session, task: Task, user: User) -> TaskDetail:
         approvals=approvals_out, runs=[RunOut.model_validate(r) for r in runs[:10]],
         active_run=RunOut.model_validate(active) if active else None, max_steps=get_settings().max_agent_steps,
         can_simulate_reply=has_sent and active is None and task.agent_enabled and task.status not in orchestrator.CLOSED_TASK_STATUSES,
+        mail=_mail_extras(db, task, emails) if task.origin == "mail" else None,
+    )
+
+
+def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
+    now = mail_inbox.now_utc()
+    tz = get_settings().user_timezone
+    inbound = [e for e in emails if e.direction == EmailDirection.INBOUND]
+    latest = max(inbound, key=lambda e: (mail_inbox._utc(e.received_at or e.created_at), e.id), default=None)
+    latest_at = mail_inbox._utc(latest.received_at or latest.created_at) if latest else None
+    wake = mail_inbox.snooze_wake_at(task, tz)
+    candidates = mail_inbox.merge_candidates(db, task, now)
+    source_ids = mail_merge.undoable_sources(task, now)
+    titles = {}
+    if source_ids:
+        titles = dict(db.execute(select(Task.id, Task.title).where(Task.user_id == task.user_id,
+                                                                    Task.id.in_(source_ids))).all())
+    return MailExtras(
+        is_snoozed=mail_inbox.is_snoozed(task, now, tz), wake_at=wake,
+        returned=mail_inbox.returned_at(task, now, tz) is not None,
+        nudge_days=mail_inbox.nudge_days(task, latest_at, now, tz),
+        merge_candidates=[{"task_id": c.id, "title": c.title} for c in candidates],
+        undoable_merges=[{"source_id": i, "title": titles.get(i, "")} for i in source_ids],
+        merged_into_id=task.merged_into_id, deadline_badge=mail_inbox.deadline_badge(task, now, tz),
+        priority_source=task.priority_source,
     )
 
 
@@ -131,7 +158,11 @@ def task_fingerprint(db: Session, task: Task) -> tuple:
     last_log = db.scalar(select(func.max(AgentActionLog.id)).where(AgentActionLog.task_id == task.id))
     runs = db.execute(select(AgentRun.id, AgentRun.status, AgentRun.steps, AgentRun.updated_at)
                       .where(AgentRun.task_id == task.id).order_by(AgentRun.id.desc()).limit(1)).first()
-    return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None)
+    mail_count = db.scalar(select(func.count()).select_from(Email).where(Email.task_id == task.id))
+    snoozed = task.snoozed_until.isoformat() if task.snoozed_until else ""
+    undo = len(task.merge_undo) if isinstance(task.merge_undo, dict) else 0
+    return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None,
+            snoozed, undo, mail_count or 0)
 
 
 SSE_POLL_SECONDS = 0.4

@@ -119,6 +119,28 @@ class RunOut(ORM):
     finished_at: datetime | None
 
 
+class MergeCandidateOut(BaseModel):
+    task_id: int
+    title: str
+
+
+class UndoableMergeOut(BaseModel):
+    source_id: int
+    title: str
+
+
+class MailExtras(BaseModel):
+    is_snoozed: bool
+    wake_at: datetime | None
+    returned: bool
+    nudge_days: int | None
+    merge_candidates: list[MergeCandidateOut]
+    undoable_merges: list[UndoableMergeOut]
+    merged_into_id: int | None
+    deadline_badge: dict
+    priority_source: str
+
+
 class TaskDetail(BaseModel):
     task: TaskBrief
     customer: CustomerOut | None
@@ -131,6 +153,7 @@ class TaskDetail(BaseModel):
     active_run: RunOut | None
     max_steps: int
     can_simulate_reply: bool
+    mail: MailExtras | None = None
 
 
 class GoalIn(BaseModel):
@@ -252,3 +275,76 @@ class GoogleStatusOut(BaseModel):
 
 class GoogleDisconnect(BaseModel):
     delete_mail: bool = False
+
+
+class InboxCard(BaseModel):
+    task_id: int
+    title: str
+    summary: str
+    sender_name: str
+    sender_org: str
+    priority: str
+    deadline_badge: dict
+    todo_done: int
+    todo_total: int
+    nudge_days: int | None
+    returned: bool
+    has_merge_candidates: bool
+    analysis: str
+    received_at: datetime | None
+
+
+class SnoozedCard(InboxCard):
+    wake_at: datetime
+
+
+class InboxCounts(BaseModel):
+    now: int
+    week: int
+    later: int
+    todo: int
+    sent: int
+    reference: int
+    done: int
+
+
+class InboxBuckets(BaseModel):
+    now: list[InboxCard]
+    week: list[InboxCard]
+    later: list[InboxCard]
+
+
+class InboxTabs(BaseModel):
+    todo: InboxBuckets
+    sent: list[InboxCard]
+    reference: list[InboxCard]
+    done: list[InboxCard]
+
+
+class NotWorkMail(BaseModel):
+    email_id: int
+    sender: str
+    subject: str
+    triage: str
+    triage_reason: str
+    received_at: datetime | None
+
+
+class InboxOut(BaseModel):
+    counts: InboxCounts
+    tabs: InboxTabs
+    snoozed: list[SnoozedCard]
+    not_work: list[NotWorkMail]
+    triage_enabled: bool
+
+
+class InboxAlert(BaseModel):
+    key: str
+    kind: str
+    task_id: int
+    text: str
+
+
+class InboxAlertsOut(BaseModel):
+    now_count: int
+    alerts: list[InboxAlert]

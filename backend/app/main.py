@@ -9,7 +9,7 @@ from sqlalchemy import func, select, text
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.agent.orchestrator import recover_stale_runs
-from app.api import auth, demo, google, tasks
+from app.api import auth, demo, google, inbox, tasks
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine
 from app.mail import sync as mail_sync
@@ -78,6 +78,7 @@ if settings.is_production:
 
 app.include_router(auth.router)
 app.include_router(tasks.router)
+app.include_router(inbox.router)
 app.include_router(demo.router)
 app.include_router(google.router)
 

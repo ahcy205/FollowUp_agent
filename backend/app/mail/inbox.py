@@ -30,6 +30,11 @@ _PRIORITY_RANK = {"HIGH": 0, "NORMAL": 1, "LOW": 2}
 _MAX_DT = datetime.max.replace(tzinfo=UTC)
 
 
+def now_utc() -> datetime:
+    """API가 시간을 읽는 유일한 곳. 테스트가 monkeypatch한다."""
+    return datetime.now(UTC)
+
+
 def _utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
