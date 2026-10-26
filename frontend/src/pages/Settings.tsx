@@ -37,6 +37,62 @@ function TriageTag({ mail }: { mail: GoogleRecentMail }) {
   )
 }
 
+type Permission = NotificationPermission | 'unsupported'
+
+const PERMISSION_LABELS: Record<Permission, string> = {
+  granted: '허용됨',
+  denied: '거부됨',
+  default: '아직 정하지 않음',
+  unsupported: '지원하지 않음',
+}
+
+function currentPermission(): Permission {
+  return 'Notification' in window ? Notification.permission : 'unsupported'
+}
+
+function BrowserAlerts() {
+  const [permission, setPermission] = useState<Permission>(currentPermission)
+  const [asking, setAsking] = useState(false)
+
+  const ask = async () => {
+    setAsking(true)
+    try {
+      setPermission(await Notification.requestPermission())
+    } catch {
+      setPermission(currentPermission())
+    } finally {
+      setAsking(false)
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>브라우저 알림</h2>
+      <p className="muted">앱이 열려 있을 때 기한이 다가온 업무, 다시 표시된 업무, 답장하지 않은 업무를 알려 드립니다.</p>
+      {permission === 'unsupported' ? (
+        <div className="muted">이 브라우저는 알림을 지원하지 않습니다.</div>
+      ) : (
+        <>
+          <dl className="settings-list">
+            <dt>현재 상태</dt>
+            <dd>{PERMISSION_LABELS[permission]}</dd>
+          </dl>
+          {permission === 'denied' && (
+            <div className="alert alert-amber settings-gap">브라우저 설정에서 이 사이트의 알림을 허용해 주세요.</div>
+          )}
+          {permission === 'default' && (
+            <div className="approval-actions settings-actions">
+              <button type="button" className="btn btn-sm" onClick={ask} disabled={asking}>
+                {asking ? '요청 중…' : '알림 허용'}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 const connect = () => {
   window.location.href = '/api/google/connect'
 }
@@ -223,6 +279,7 @@ export default function Settings() {
           </>
         )}
       </div>
+      <BrowserAlerts />
     </div>
   )
 }

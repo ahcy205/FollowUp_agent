@@ -93,7 +93,7 @@ export default function TaskDetailPage() {
   if (!data) {
     return error ? (
       <div className="alert alert-red">
-        {error} <Link to="/">← 내 업무로</Link>
+        {error} <Link to="/">← 받은 업무로</Link>
       </div>
     ) : (
       <p className="muted">불러오는 중…</p>
@@ -125,7 +125,7 @@ export default function TaskDetailPage() {
   return (
     <div className="stack-lg">
       <div className="crumbs">
-        <Link to="/">← 내 업무</Link>
+        <Link to="/">← 받은 업무</Link>
         {data.parent && (
           <>
             <span>/</span>

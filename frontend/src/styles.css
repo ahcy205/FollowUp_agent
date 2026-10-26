@@ -308,3 +308,52 @@ a.tag:hover { text-decoration: underline; }
 .settings-gap { margin-top: 12px; }
 .settings-actions { margin-top: 16px; }
 .calendar-line { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+
+/* ---------- inbox */
+.pdot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; flex: none; border: 2px solid; }
+.pdot-high { background: #d93025; border-color: #d93025; }
+.pdot-mid { border-color: #e0a800; background: linear-gradient(90deg, #e0a800 50%, transparent 50%); }
+.pdot-low { border-color: #1e8e3e; background: transparent; }
+.inbox-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.inbox-status:empty { display: none; }
+.inbox-status .dot { vertical-align: 1px; }
+.inbox-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.inbox-now { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+.inbox-legend { display: flex; align-items: center; gap: 6px; }
+.inbox-legend .pdot + * { margin-right: 4px; }
+.inbox-tabs { flex-wrap: wrap; margin-bottom: 4px; }
+.inbox-list { display: flex; flex-direction: column; gap: 8px; }
+.inbox-list-gap { margin-top: 16px; }
+.inbox-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.inbox-card:hover { border-color: var(--border-strong); }
+.inbox-card-link { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; color: var(--text); border-radius: 10px; }
+.inbox-card-link:hover { background: var(--bg); }
+.inbox-card-link .pdot { margin-top: 4px; }
+.inbox-card-body { flex: 1; min-width: 0; }
+.inbox-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.inbox-sender { font-size: 0.88rem; color: #344054; min-width: 0; overflow-wrap: anywhere; }
+.inbox-summary { font-weight: 600; overflow-wrap: anywhere; }
+.inbox-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 0.84rem; }
+.inbox-meta .tag { margin-right: 0; }
+.deadline-badge { border: 1px solid var(--border-strong); border-radius: 999px; padding: 0 9px; font-size: 0.8rem; white-space: nowrap; flex: none; }
+.deadline-badge.late { border-color: #d93025; color: #d93025; font-weight: 700; }
+.inbox-card-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 0 12px 10px 38px; }
+.inbox-card-extra .alert { width: 100%; }
+.inbox-fold summary { cursor: pointer; font-weight: 600; }
+.inbox-fold[open] summary { margin-bottom: 12px; }
+.not-work-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; }
+.not-work-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.not-work-list li + li { border-top: 1px solid var(--border); }
+.not-work-main { flex: 1; min-width: 0; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 2px; }
+.not-work-main .alert { margin-top: 6px; }
+@media (max-width: 480px) {
+  .inbox-card-top { flex-direction: column; gap: 4px; }
+  .inbox-card-extra { padding-left: 12px; }
+  .not-work-list li { flex-direction: column; }
+  .inbox-tabs button { padding: 6px 8px; }
+}
+@media (max-width: 640px) {
+  .topbar-inner { flex-wrap: wrap; height: auto; padding: 8px 12px; row-gap: 4px; }
+  .nav { order: 3; width: 100%; overflow-x: auto; }
+  .nav a { white-space: nowrap; }
+}

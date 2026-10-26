@@ -156,3 +156,74 @@ export interface GoogleStatus {
   triage_counts: Record<'pending' | 'work' | 'not_work' | 'filtered', number>
   triage_enabled: boolean
 }
+
+export interface DeadlineBadge {
+  text: string
+  late: boolean
+  estimated: boolean
+}
+
+export interface InboxCard {
+  task_id: number
+  title: string
+  summary: string
+  sender_name: string
+  sender_org: string
+  priority: string
+  deadline_badge: DeadlineBadge
+  todo_done: number
+  todo_total: number
+  nudge_days: number | null
+  returned: boolean
+  has_merge_candidates: boolean
+  analysis: string
+  received_at: string | null
+}
+
+export interface SnoozedCard extends InboxCard {
+  wake_at: string
+}
+
+export interface NotWorkMail {
+  email_id: number
+  sender: string
+  subject: string
+  triage: string
+  triage_reason: string
+  received_at: string | null
+}
+
+export interface InboxCounts {
+  now: number
+  week: number
+  later: number
+  todo: number
+  sent: number
+  reference: number
+  done: number
+}
+
+export interface Inbox {
+  counts: InboxCounts
+  tabs: {
+    todo: { now: InboxCard[]; week: InboxCard[]; later: InboxCard[] }
+    sent: InboxCard[]
+    reference: InboxCard[]
+    done: InboxCard[]
+  }
+  snoozed: SnoozedCard[]
+  not_work: NotWorkMail[]
+  triage_enabled: boolean
+}
+
+export interface InboxAlert {
+  key: string
+  kind: string
+  task_id: number
+  text: string
+}
+
+export interface InboxAlerts {
+  now_count: number
+  alerts: InboxAlert[]
+}

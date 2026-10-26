@@ -115,7 +115,7 @@ export default function Dashboard() {
 
       <section className="card">
         <div className="section-head">
-          <h2>내 업무 {filter !== 'ALL' && <span className="muted">· {STATUS_META[filter].label}</span>}</h2>
+          <h2>전체 업무 {filter !== 'ALL' && <span className="muted">· {STATUS_META[filter].label}</span>}</h2>
           {filter !== 'ALL' && (
             <button className="btn btn-link btn-sm" onClick={() => setFilter('ALL')}>
               전체 보기
