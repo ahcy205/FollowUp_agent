@@ -221,18 +221,19 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
     requests = [r for r in data["requests"] if not _is_suspicious(r, data["suspicious"])][:MAX_ITEMS]
     todos = [t for t in data["todos"] if not _is_suspicious(t["title"], data["suspicious"])][:MAX_ITEMS]
 
-    plan, candidates = [], []
+    dl = data["deadline"]
+    mail_due = normalize_deadline(dl["text"], dl["date"], dl["time"], dl["kind"], ref, tz)
+    # 같은 시각이면 업무 전체 기한을 고른다(earliest는 앞의 것을 고른다). 할 일 기한은 원문이 업무 기한과 같으면
+    # 그 종류("다음 주 중" → estimated)를 따르고, 아니면 explicit으로 본다.
+    candidates: list[Deadline] = [mail_due] if mail_due else []
+    plan = []
     for i, t in enumerate(todos):
-        due = normalize_deadline(t["due_text"], t["due_date"], t["due_time"], "explicit", ref, tz)
+        kind = mail_due.kind if mail_due and _norm(t["due_text"]) == _norm(dl["text"]) else "explicit"
+        due = normalize_deadline(t["due_text"], t["due_date"], t["due_time"], kind, ref, tz)
         if due:
             candidates.append(due)
         plan.append({"id": i + 1, "title": t["title"], "done": False, "evidence": "",
                      "due_at": due.at.isoformat() if due else None, "source": "agent"})
-
-    dl = data["deadline"]
-    mail_due = normalize_deadline(dl["text"], dl["date"], dl["time"], dl["kind"], ref, tz)
-    if mail_due:
-        candidates.append(mail_due)
     best: Deadline | None = earliest(candidates)
 
     summary = data["summary"]

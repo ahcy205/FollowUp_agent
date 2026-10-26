@@ -152,6 +152,22 @@ def test_earliest_of_todo_and_mail_deadline():
         assert task.plan[1]["due_at"] is None
 
 
+def test_todo_due_with_same_phrase_keeps_estimated_kind():
+    # 실제 LLM은 "다음 주 중"을 할 일 기한에도 같은 날짜로 넣는다. 할 일 기한을 explicit으로 보면 같은 시각끼리
+    # 비교에서 할 일 쪽이 이겨 업무 기한이 explicit으로 바뀌던 문제.
+    with SessionLocal() as db:
+        uid = _user(db)
+        _add(db, [_mail(uid)])
+        llm = ScriptedLLM(structured_steps=[_analysis(
+            deadline=_deadline("다음 주 중", "2026-11-06", "", "estimated"),
+            todos=[_todo("미팅 가능 시간 회신", "다음 주 중", "2026-11-06", "")])])
+        _run(db, uid, llm)
+        (task,) = _mail_tasks(db, uid)
+        assert task.deadline_kind == "estimated"
+        assert task.deadline_source == "다음 주 중"
+        assert task.plan[0]["due_at"].startswith("2026-11-05T15:00")
+
+
 def test_past_deadline_goes_to_note():
     with SessionLocal() as db:
         uid = _user(db)
