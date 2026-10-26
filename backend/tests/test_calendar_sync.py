@@ -165,6 +165,9 @@ def test_patch_body_has_no_id(setup, google_fake, monkeypatch):
         db.commit()
         _sync(db, aid, google_fake)
         assert len(seen) == 1 and "id" not in seen[0] and "summary" in seen[0]
+        # 종일 일정이면 시간 필드를 명시적으로 지운다 (Google PATCH는 중첩 객체를 합친다)
+        assert seen[0]["start"] == {"date": "2026-10-30", "dateTime": None, "timeZone": None}
+        assert seen[0]["end"] == {"date": "2026-10-31", "dateTime": None, "timeZone": None}
 
 
 def test_user_deleted_event_not_recreated(setup, google_fake):
@@ -565,3 +568,29 @@ def test_conflict_with_foreign_cancelled_event_is_error(setup, google_fake):
         task = db.get(Task, tid)
         assert task.calendar_state == "error" and task.calendar_event_id is None
         assert r.deleted_by_user == 0 and r.errors == 1
+
+
+TIMED = datetime(2026, 10, 30, 5, 0, tzinfo=timezone.utc)  # 2026-10-30 14:00 KST
+
+
+@pytest.mark.parametrize("first_all_day", [True, False])
+def test_switch_between_all_day_and_timed(setup, google_fake, first_all_day):
+    """종일 ↔ 시간 일정 전환. Google PATCH는 start/end를 합치므로 반대쪽 필드를 None으로 지워야 한다."""
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid, deadline=TIMED, all_day=first_all_day)
+        _sync(db, aid, google_fake)
+        task = db.get(Task, tid)
+        eid = task.calendar_event_id
+        task.deadline_all_day = not first_all_day
+        mark_calendar_dirty(task)
+        db.commit()
+        r = _sync(db, aid, google_fake)
+        assert (r.updated, r.errors) == (1, 0)
+        assert db.get(Task, tid).calendar_state == "synced"
+        ev = google_fake.events[eid]
+        if first_all_day:
+            assert ev["start"] == {"dateTime": "2026-10-30T14:00:00+09:00", "timeZone": TZ}
+            assert ev["end"] == {"dateTime": "2026-10-30T14:30:00+09:00", "timeZone": TZ}
+        else:
+            assert ev["start"] == {"date": "2026-10-30"} and ev["end"] == {"date": "2026-10-31"}

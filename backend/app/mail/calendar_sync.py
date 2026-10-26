@@ -117,6 +117,16 @@ def _ensure_salt(db: Session, account: GoogleAccount) -> str:
 
 def _patch(db: Session, task: Task, client: GoogleClient, token: str, body: dict) -> str:
     patch_body = {k: v for k, v in body.items() if k != "id"}
+    # Google PATCH는 start/end 같은 중첩 객체를 합친다. 종일 ↔ 시간 일정으로 바뀌면 이전 필드가 남아
+    # date와 dateTime이 함께 있게 되어 400이 난다. 반대쪽 필드를 None(JSON null)으로 보내 지운다.
+    for key in ("start", "end"):
+        part = dict(patch_body[key])
+        if "dateTime" in part:
+            part["date"] = None
+        else:
+            part["dateTime"] = None
+            part["timeZone"] = None
+        patch_body[key] = part
     try:
         event = client.calendar_patch(token, task.calendar_event_id, patch_body)
     except GoogleNotFound:

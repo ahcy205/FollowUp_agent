@@ -38,6 +38,20 @@ def make_raw(*, sender, to, subject, body="", html=None, cc=None, message_id=Non
     return m.as_bytes()
 
 
+def _merge_patch(current: dict, patch: dict) -> dict:
+    """Google PATCH처럼 합친다: 중첩 객체는 재귀로 합치고, None은 필드 삭제, 그 밖(배열 포함)은 교체."""
+    out = dict(current)
+    for key, value in patch.items():
+        if value is None:
+            out.pop(key, None)
+        elif isinstance(value, dict):
+            base = out.get(key)
+            out[key] = _merge_patch(base if isinstance(base, dict) else {}, value)
+        else:
+            out[key] = value
+    return out
+
+
 class FakeGoogle:
     def __init__(self, email: str = "me@gmail.com"):
         self.email = email
@@ -159,9 +173,13 @@ class FakeGoogle:
         self._calendar_enter("patch", event_id)
         if event_id in self.deleted_events or event_id not in self.events:
             raise GoogleNotFound("event not found")
-        self.events[event_id].update(body)
-        ev = self.events[event_id]
-        return self._event(event_id, ev.get("status", "confirmed"), ev)
+        merged = _merge_patch(self.events[event_id], body)
+        for key in ("start", "end"):
+            part = merged.get(key) or {}
+            if "date" in part and "dateTime" in part:
+                raise GoogleError("400 invalid start/end: both date and dateTime")
+        self.events[event_id] = merged
+        return self._event(event_id, merged.get("status", "confirmed"), merged)
 
     def delete_event(self, event_id: str) -> None:
         """Simulate the user deleting the event in Google Calendar."""

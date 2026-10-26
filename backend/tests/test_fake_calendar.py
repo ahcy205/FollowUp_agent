@@ -1,6 +1,6 @@
 import pytest
 
-from app.google.client import GoogleNotFound, GoogleTransientError
+from app.google.client import GoogleError, GoogleNotFound, GoogleTransientError
 from tests.fake_google import FakeGoogle
 
 
@@ -38,3 +38,25 @@ def test_calendar_fail_times():
     assert f.calendar_fail is None and f.calendar_fail_times == 0
     with pytest.raises(GoogleNotFound):
         f.calendar_get("t", "e1")
+
+
+def test_patch_deep_merges_like_google():
+    """Google PATCH는 중첩 객체를 합친다. None은 그 필드를 지운다. 배열은 통째로 바꾼다."""
+    f = FakeGoogle()
+    f.calendar_insert("t", {"id": "e1", "start": {"date": "2026-10-30"}, "end": {"date": "2026-10-31"},
+                            "reminders": {"useDefault": False, "overrides": [{"minutes": 1}]}})
+    f.calendar_patch("t", "e1", {"reminders": {"overrides": [{"minutes": 2}]}})
+    assert f.events["e1"]["reminders"] == {"useDefault": False, "overrides": [{"minutes": 2}]}
+    f.calendar_patch("t", "e1", {"start": {"dateTime": "2026-10-30T14:00:00+09:00", "timeZone": "Asia/Seoul",
+                                           "date": None},
+                                 "end": {"dateTime": "2026-10-30T14:30:00+09:00", "timeZone": "Asia/Seoul",
+                                         "date": None}})
+    assert f.events["e1"]["start"] == {"dateTime": "2026-10-30T14:00:00+09:00", "timeZone": "Asia/Seoul"}
+
+
+def test_patch_with_both_date_and_datetime_is_400():
+    f = FakeGoogle()
+    f.calendar_insert("t", {"id": "e1", "start": {"date": "2026-10-30"}, "end": {"date": "2026-10-31"}})
+    with pytest.raises(GoogleError):
+        f.calendar_patch("t", "e1", {"start": {"dateTime": "2026-10-30T14:00:00+09:00"}})
+    assert f.events["e1"]["start"] == {"date": "2026-10-30"}  # 실패하면 바뀌지 않는다
