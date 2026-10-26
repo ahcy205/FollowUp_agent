@@ -19,8 +19,11 @@ from app.agent.audit import log_action
 from app.agent.orchestrator import CLOSED_TASK_STATUSES
 from app.agent.guard import detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
+from app.config import get_settings
 from app.mail.calendar_sync import mark_calendar_dirty
-from app.mail.deadline import Deadline, earliest, normalize_deadline
+from app.mail.deadline import USER_DEADLINE_SOURCE, Deadline, earliest, normalize_deadline
+from app.mail.inbox import is_snoozed
+from app.mail.merge import resolve_merged
 from app.models import Email, EmailDirection, RiskLevel, Task, TaskStatus
 
 log = logging.getLogger(__name__)
@@ -217,6 +220,11 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
     task_id, email_id = task.id, email.id
     try:
         data = _validate(llm.structured(INTAKE_SYSTEM, _build_prompt(email, tz), INTAKE_SCHEMA))
+        db.flush()  # 아직 쓰지 않은 변경을 refresh가 버리지 않게
+        db.refresh(task)  # 분석하는 동안 사용자가 닫았거나 합쳤을 수 있다. 그런 업무를 다시 열지 않는다.
+        if task.status in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
+            log.info("mail intake: task %s was closed or merged during analysis; result dropped", task_id)
+            return True
         _apply(db, task, email, data, tz)
     except LLMError as e:
         log.warning("mail intake analysis for task %s email %s postponed: %s", task_id, email_id, type(e).__name__)
@@ -257,6 +265,15 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
             item["due_note"] = t["due_text"][:NOTE_CHARS]  # 과거 날짜 등은 기한 대신 메모로 남긴다 (명세 4.5)
         plan.append(item)
     best: Deadline | None = earliest(candidates)
+    # 사용자가 직접 넣은 할 일은 다시 분석해도 남긴다(체크 · 메모 · 합쳐 온 표시 그대로). 번호가 겹치면 새 번호.
+    used = {p["id"] for p in plan}
+    for p in task.plan or []:
+        if isinstance(p, dict) and p.get("source") == "user":
+            item = dict(p)
+            if not isinstance(item.get("id"), int) or isinstance(item.get("id"), bool) or item["id"] in used:
+                item["id"] = max(used, default=0) + 1
+            used.add(item["id"])
+            plan.append(item)
 
     summary = data["summary"]
     brief = {"analysis": "done", "email_id": email.id, "summary": summary, "requests": requests,
@@ -269,8 +286,11 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
     task.goal = "\n".join(requests) or summary or task.title or PENDING_GOAL
     task.plan = plan
     task.brief = brief
-    task.priority = data["priority"]
-    if best:
+    if task.priority_source != "user":  # 사용자가 직접 정한 중요도는 분석이 덮지 않는다
+        task.priority = data["priority"]
+    if task.deadline_source == USER_DEADLINE_SOURCE:
+        pass  # 사용자가 직접 정한 기한은 분석이 덮지 않는다
+    elif best:
         task.deadline_at, task.deadline_all_day = best.at, best.all_day
         task.deadline_kind, task.deadline_source = best.kind, best.source
     else:
@@ -300,19 +320,33 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
 
 # ---------------------------------------------------------------- 접수 주기
 
-def _attach(db: Session, task: Task, email: Email, result: IntakeResult) -> None:
+def link_email(db: Session, task: Task, email: Email) -> None:
+    """메일을 기존 업무에 붙인다. 스누즈 중이던 업무는 바로 다시 나타난다. 커밋하지 않는다.
+
+    이미 풀린 스누즈(snoozed_until만 남은 것)에는 '다시 표시됨'을 새로 찍지 않는다.
+    """
     email.task_id = task.id
     email.processed = True
+    now = datetime.now(timezone.utc)
+    if is_snoozed(task, now, get_settings().user_timezone):
+        task.snoozed_until = None
+        task.snooze_returned_at = now
     log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="MAIL_ATTACHED",
                output_data={"email_id": email.id}, reason=ATTACHED_REASON)
+
+
+def _attach(db: Session, task: Task, email: Email, result: IntakeResult) -> None:
+    link_email(db, task, email)
     db.commit()
     result.attached += 1
 
 
 def _thread_task(db: Session, user_id: int, thread_id: str | None) -> Task | None:
+    """스레드의 업무. 합쳐진 업무면 합쳐진 대상을 돌려준다."""
     if not thread_id:
         return None
-    return db.scalar(select(Task).where(Task.user_id == user_id, Task.gmail_thread_id == thread_id))
+    task = db.scalar(select(Task).where(Task.user_id == user_id, Task.gmail_thread_id == thread_id))
+    return resolve_merged(db, task) if task is not None else None
 
 
 def _create_task(db: Session, user_id: int, email: Email) -> Task | None:
@@ -331,6 +365,14 @@ def _create_task(db: Session, user_id: int, email: Email) -> Task | None:
     except IntegrityError:
         db.rollback()
         return None
+    return task
+
+
+def create_pending_task(db: Session, email: Email) -> Task | None:
+    """메일 하나로 분석 대기 업무를 만들고 커밋한다. 같은 스레드에 업무가 먼저 생겼으면 그 업무를 돌려준다."""
+    task = _create_task(db, email.user_id, email)
+    if task is None:
+        task = _thread_task(db, email.user_id, email.gmail_thread_id)
     return task
 
 

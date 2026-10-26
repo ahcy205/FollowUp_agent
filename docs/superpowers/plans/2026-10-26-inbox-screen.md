@@ -239,7 +239,7 @@ def test_api_ownership_and_limits(client): ...  # 다른 사용자 404, 에이�
 ### Task 4: 업무 합치기
 
 **Files:**
-- Create: `backend/app/mail/merge.py`
+- Create: `backend/app/mail/merge.py` (→ 변경 #1)
 - Modify: `backend/app/mail/intake.py` (`_thread_task`), `backend/app/api/tasks.py`
 - Test: `backend/tests/test_merge.py`
 
@@ -249,12 +249,12 @@ def test_api_ownership_and_limits(client): ...  # 다른 사용자 404, 에이�
   - `resolve_merged(db, task) -> Task`: `merged_into_id`를 따라간다. 최대 5단계, 순환이면 멈춘다.
   - `merge(db, user, source: Task, target: Task, now) -> None` (설계 4.3절)
     - 거절 조건(409): 서로 같은 업무, 합쳐진 업무, 닫힌 원본, 다른 사용자, 메일 업무가 아닌 경우
-    - `target.merge_undo`에 기록하는 것
+    - `target.merge_undo`에 기록하는 것 (→ 변경 #2)
       - `{"source_id", "at", "moved_email_ids", "added_todo_ids", "added_requests"}`
       - `"before"`: target의 deadline_at · all_day · kind · source · priority · priority_source
       - `"after"`: 합친 직후 같은 값
-      - `"source_before"`: source의 status · current_step · completed_at · snoozed_until
-  - `undo_merge(db, user, target: Task, now) -> Task` (설계 4.3절)
+      - `"source_before"`: source의 status · current_step · completed_at · snoozed_until (→ 변경 #2)
+  - `undo_merge(db, user, target: Task, now) -> Task` (설계 4.3절) (→ 변경 #2)
     - 10분이 지났거나 기록이 없으면 409를 돌려준다.
     - 옮긴 메일, 그리고 합친 뒤 source 스레드로 들어온 메일(`gmail_thread_id == source.gmail_thread_id`)을 source로 돌려보낸다.
     - 추가한 할 일은 현재 체크 상태 그대로 돌려보내고, 추가한 요청은 target에서 뺀다.
@@ -417,24 +417,24 @@ def test_fingerprint_changes_on_snooze(): ... # snooze 후 fingerprint 달라짐
 
 ### Task 8: 상위 설계 반영, 브라우저 점검, 문서, 병합
 
-- [ ] **Step 1: 상위 설계 수정** (`2026-10-10-gmail-calendar-design.md`)
+- [x] **Step 1: 상위 설계 수정** (`2026-10-10-gmail-calendar-design.md`)
   - 4.9절: "답장 보냄 3일 → 자동 완료"를 "3일 후 다시 연락할지 물어보기(6단계)"로 바꾼다.
   - 5절: 정렬을 묶음 기준으로 바꾸고, 스누즈 · 넛지 · 합치기를 추가한다. 5단계 설계 문서 링크를 단다.
   - 12.2절: "확정됨 — 5단계 설계 4.3절"로 표시한다.
 - [ ] **Step 2: 로컬 점검** (테스트 계정이 아니라 실제 연결된 사용자 계정 화면이 필요하므로 사용자와 함께 진행한다)
-  - [ ] 첫 화면에 기존 메일 업무가 묶음으로 보이고, 탭 건수가 맞다.
-  - [ ] 기한 수정 → 카드 배지 · 묶음이 바뀌고, 캘린더 일정 날짜가 바뀐다(종일 ↔ 시각 전환 포함).
-  - [ ] 할 일 추가 · 체크 · 메모 · 삭제 · 되돌리기
-  - [ ] 스누즈 "내일 오전 9시" → 목록에서 빠지고 "나중에 보기"에 보인다. "지금 보기"로 돌아온다.
-  - [ ] 다른 계정으로 같은 상대 새 메일 → 합치기 제안 → 합치기 → 되돌리기 → 다시 합치기
+  - [x] 첫 화면에 기존 메일 업무가 묶음으로 보이고, 탭 건수가 맞다.
+  - [x] 기한 수정 → 카드 배지 · 묶음이 바뀌고, 캘린더 일정 날짜가 바뀐다(종일 ↔ 시각 전환 포함).
+  - [x] 할 일 추가 · 체크 · 메모 · 삭제 · 되돌리기
+  - [x] 스누즈 "내일 오전 9시" → 목록에서 빠지고 "나중에 보기"에 보인다. "지금 보기"로 돌아온다.
+  - [x] 다른 계정으로 같은 상대 새 메일 → 합치기 제안 → 합치기 → 되돌리기 → 다시 합치기
   - [ ] "업무로 처리"로 업무 아님 메일을 업무로 만든다.
   - [ ] 브라우저 알림 허용 → 기한 알림 하나가 한 번만 뜬다. 탭 제목에 건수가 보인다.
   - [ ] 휴대폰 너비에서 첫 화면이 깨지지 않는다.
-- [ ] **Step 3: 문서**
+- [x] **Step 3: 문서**
   - `CHANGELOG.md`, `docs/decisions.md`(묶음 기준, 점 표시, 합치기 방식, 넛지 한계)
   - `docs/troubleshooting.md`(알림이 안 뜰 때)
   - 이 계획의 "계획 대비 변경 이력", README 진행 상황 표
-- [ ] **Step 4: 브랜치 push → CI 통과 → `main` 병합 · push**
+- [x] **Step 4: 브랜치 push → CI 통과 → `main` 병합 · push**
 
 ---
 
@@ -442,6 +442,15 @@ def test_fingerprint_changes_on_snooze(): ... # snooze 후 fingerprint 달라짐
 
 | # | 날짜 | 작업 | 계획 | 실제 구현 | 이유 | 영향 |
 |---|---|---|---|---|---|---|
+| 1 | 2026-10-26 | Task 4 | `merge.py`를 새로 만든다 | `resolve_merged`는 Task 3 리뷰 수정 때 먼저 만들어져 있어 같은 파일에 합치기 · 되돌리기를 더했다. `ActionError`는 `app/mail/errors.py`로 옮기고 `task_actions`가 다시 내보낸다 | `task_actions → intake → merge` 순환 import를 피하려고 | 없음 (`task_actions.ActionError` 그대로 쓸 수 있음) |
+| 2 | 2026-10-26 | Task 4 | `merge_undo`는 기록 하나, `/merge/undo`는 본문 없음, `undo_merge(db, user, target, now)` | `merge_undo`를 `{str(원본 번호): 기록}` 맵으로 바꾸고, 쓸 때마다 10분 지난 기록을 지운다. 되돌리기는 `POST /api/tasks/{A}/merge/undo` `{"source_id"}`(extra=forbid), `undo_merge(db, user, target, source_id, now)`로 원본 하나만 되돌리고 그 기록만 지운다. `undoable_sources(task, now)`(최근 것부터)를 더했다. 옮긴 할 일에는 `merged_from: 원본 번호`를 붙이고 되돌릴 때 번호가 아니라 이 표시로 찾는다(돌려보낼 때 표시를 지운다). 각 기록에 `source_before.next_action`과 `added_todo_from`(A 번호 → B 원래 번호)을 더했다. 옮긴 할 일은 B의 plan에서 빼고(같은 제목이라 건너뛴 것은 B에 남김), 되돌릴 때 원래 번호로 돌려놓는다(겹치면 새 번호). 분석 대기(`analysis=pending`) 업무는 원본으로 합칠 수 없고, `analyze_into_task`는 분석 결과를 쓰기 전에 업무를 다시 읽어 닫혔거나 합쳐졌으면 결과를 버린다 | 리뷰: 10분 안에 두 업무를 합치면 앞 기록이 덮여 되돌릴 수 없었다. 번호로 고르면 사용자가 새로 만든 할 일이 B로 갈 수 있었다. 분석 워커가 합쳐진 업무를 다시 열 수 있었다 | 프론트(Task 5 · 6)는 되돌릴 때 `source_id`를 보내고 `can_undo_merge`를 `undoable_sources`로 만든다 |
+| 3 | 2026-10-27 | 전체 리뷰 | 스누즈 해제 시각 = min(정한 시각, 기한 전날 09:00)을 그때그때 계산 | `inbox.finalize_snooze`를 더해, 기한을 바꾸기 전(`set_deadline` · `undo_merge`)에 이미 풀린 스누즈를 끝낸다(`snoozed_until` 비움, 해제 시각을 `snooze_returned_at`에). 새 메일 연결은 실제로 스누즈 중일 때만 "다시 표시됨"을 찍는다 | 풀린 뒤 기한을 늦추면 업무가 다시 숨고 "다시 표시" 알림이 또 울렸다. 오래전에 끝난 스누즈에도 새 메일이 "다시 표시됨"을 찍었다 | 화면: 늦춘 기한 때문에 업무가 다시 숨지 않는다. 알림 키는 그대로 |
+| 4 | 2026-10-27 | 전체 리뷰 | 분석 결과로 할 일 · 기한을 채운다 | 다시 분석할 때 사용자가 넣은 할 일(`source=user`)은 체크 · 메모 · `merged_from`과 함께 분석 할 일 뒤에 남기고(번호가 겹치면 새 번호), 기한 근거가 "사용자가 직접 정함"이면 기한을 덮지 않는다. 상수 `USER_DEADLINE_SOURCE`는 `deadline.py`로 옮겼다(`task_actions`가 다시 내보냄) | 다시 분석이 사용자 편집을 지웠다 | 화면: 다시 분석 후에도 직접 넣은 할 일 · 기한이 남는다. [판단 기록](../../decisions.md#다시-분석은-사용자-편집을-덮지-않는다) |
+| 5 | 2026-10-27 | 전체 리뷰 | 합치기 후보 · 알림 · 스누즈 · 업무로 처리 규칙 | 분석 대기 업무에는 합치기 후보를 내지 않는다. 기한 알림을 낸 업무에는 같은 응답에서 "다시 표시" 알림을 빼고, 브라우저는 한 주기에 새 알림 3개까지만 띄운다(나머지는 띄운 것으로 기록). 스누즈는 처리할 일 탭 업무만(그 밖은 409, 버튼 숨김). 참고용 업무 스레드의 메일을 업무로 처리하면 그 업무를 처리할 일로 옮긴다. Demo Reset 뒤 `/tasks`로 간다 | 리뷰: 합치기 제안 뒤 409, 알림 중복 · 첫 허용 때 몰림, 보낸 업무 · 참고용 스누즈, 업무로 처리했는데 참고용에 남음 | 화면 동작 변경. `test_alerts_keys` 기대값 갱신 |
+| 6 | 2026-10-27 | 전체 리뷰 | 기한을 없애면 캘린더 반영 대기(`mark_calendar_dirty`) | 일정은 지우지 않고 그대로 둔다. 캘린더에 올라간 업무(`calendar_state=synced`)의 기한을 없애면 요약 카드에 "캘린더 일정은 그대로 남습니다. 필요하면 캘린더에서 지워 주세요."를 보인다 | 기한 없는 업무의 일정 처리는 6단계에서 정한다 | 사용자가 캘린더에서 직접 지워야 한다. 설계 10절 남은 위험에 추가 |
+| 7 | 2026-10-27 | 브라우저 점검 | 캘린더 반영은 동기화 주기(90초)마다 | 사용자 동작(`_done`) 뒤 `calendar_state=pending`이면 `mail_sync.wake()`로 바로 동기화한다 | 점검 중 캘린더에는 일정이 있는데 상세 화면이 "캘린더 반영 대기 중"으로 오래 남아 오류처럼 보였다 | 화면: 기한 · 중요도를 바꾸면 몇 초 안에 반영 완료로 바뀐다. `test_api_actions` wake 기대값 갱신 |
+| 8 | 2026-10-27 | 브라우저 점검 (사용자 결정) | 합친 대상(A)에는 B의 메일 · 할 일 · 요청만 옮겨지고 A의 요약은 그대로 | A 상세 응답에 `mail.merged_sources`(A로 바로 합쳐진 업무의 번호 · 제목 · 요약 · 합친 시각)를 더하고, 요약 카드에 "합쳐진 업무 N건" 칸으로 각 요약을 따로 보인다. 되돌리기 시간이 지나도 남고, 되돌리면 사라진다 | 사용자: 합쳤는데 내용이 하나만 보여 무엇이 합쳐졌는지 알 수 없었다. 선택지 (가) 합쳐진 메일 칸 / (나) B를 목록에 남기기 중 (가) | 화면 동작 변경(사용자 승인). 요약은 다시 만들지 않는다 |
+| 9 | 2026-10-27 | 브라우저 점검 | `TodoChecklist` · `MailActions`에 `key={task.id}` | 형제 부품의 key를 `todos-{id}` · `actions-{id}`로 나눴다 | 같은 key라서 합치기 뒤 다른 업무 화면으로 바뀔 때 이전 업무의 할 일 카드가 남아 "할 일" 카드가 두 개 보였다 | 없음 (버그 수정) |
 
 ## 이 계획 다음
 

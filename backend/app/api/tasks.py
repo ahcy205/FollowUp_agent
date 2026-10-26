@@ -29,19 +29,32 @@ from app.schemas import (
     ApprovalDecision,
     ApprovalOut,
     CancelTaskIn,
+    CloseTaskIn,
     CompleteTaskIn,
     CustomerOut,
     DashboardOut,
+    DeadlineIn,
     DocumentOut,
     EmailOut,
     GoalIn,
     GoalUpdateIn,
+    MailExtras,
+    MergeIn,
+    MergeUndoIn,
+    PriorityIn,
+    PromoteOut,
     RunOut,
+    SnoozeIn,
     TaskBrief,
     TaskDetail,
+    TodoOpIn,
 )
+from app.mail import inbox as mail_inbox
+from app.mail import merge as mail_merge
 from app.mail import sync as mail_sync
-from app.security import agent_limiter, calendar_retry_limiter, get_current_user
+from app.mail import task_actions
+from app.mail.task_actions import ActionError
+from app.security import agent_limiter, ai_action_limiter, calendar_retry_limiter, get_current_user
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
@@ -111,6 +124,44 @@ def build_task_detail(db: Session, task: Task, user: User) -> TaskDetail:
         approvals=approvals_out, runs=[RunOut.model_validate(r) for r in runs[:10]],
         active_run=RunOut.model_validate(active) if active else None, max_steps=get_settings().max_agent_steps,
         can_simulate_reply=has_sent and active is None and task.agent_enabled and task.status not in orchestrator.CLOSED_TASK_STATUSES,
+        mail=_mail_extras(db, task, emails) if task.origin == "mail" else None,
+    )
+
+
+def _merged_sources(db: Session, task: Task) -> list[dict]:
+    """이 업무로 바로 합쳐진 원본 업무들. 합친 순서대로."""
+    sources = db.scalars(select(Task).where(Task.user_id == task.user_id, Task.merged_into_id == task.id)
+                         .order_by(Task.completed_at, Task.id)).all()
+    out = []
+    for s in sources:
+        summary = (s.brief or {}).get("summary")
+        out.append({"task_id": s.id, "title": s.title, "summary": summary if isinstance(summary, str) else "",
+                    "merged_at": s.completed_at})
+    return out
+
+
+def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
+    now = mail_inbox.now_utc()
+    tz = get_settings().user_timezone
+    inbound = [e for e in emails if e.direction == EmailDirection.INBOUND]
+    latest = max(inbound, key=lambda e: (mail_inbox._utc(e.received_at or e.created_at), e.id), default=None)
+    latest_at = mail_inbox._utc(latest.received_at or latest.created_at) if latest else None
+    wake = mail_inbox.snooze_wake_at(task, tz)
+    candidates = mail_inbox.merge_candidates(db, task, now)
+    source_ids = mail_merge.undoable_sources(task, now)
+    titles = {}
+    if source_ids:
+        titles = dict(db.execute(select(Task.id, Task.title).where(Task.user_id == task.user_id,
+                                                                    Task.id.in_(source_ids))).all())
+    return MailExtras(
+        is_snoozed=mail_inbox.is_snoozed(task, now, tz), wake_at=wake,
+        returned=mail_inbox.returned_at(task, now, tz) is not None,
+        nudge_days=mail_inbox.nudge_days(task, latest_at, now, tz),
+        merge_candidates=[{"task_id": c.id, "title": c.title} for c in candidates],
+        undoable_merges=[{"source_id": i, "title": titles.get(i, "")} for i in source_ids],
+        merged_sources=_merged_sources(db, task),
+        merged_into_id=task.merged_into_id, deadline_badge=mail_inbox.deadline_badge(task, now, tz),
+        priority_source=task.priority_source,
     )
 
 
@@ -120,7 +171,11 @@ def task_fingerprint(db: Session, task: Task) -> tuple:
     last_log = db.scalar(select(func.max(AgentActionLog.id)).where(AgentActionLog.task_id == task.id))
     runs = db.execute(select(AgentRun.id, AgentRun.status, AgentRun.steps, AgentRun.updated_at)
                       .where(AgentRun.task_id == task.id).order_by(AgentRun.id.desc()).limit(1)).first()
-    return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None)
+    mail_count = db.scalar(select(func.count()).select_from(Email).where(Email.task_id == task.id))
+    snoozed = task.snoozed_until.isoformat() if task.snoozed_until else ""
+    undo = len(task.merge_undo) if isinstance(task.merge_undo, dict) else 0
+    return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None,
+            snoozed, undo, mail_count or 0)
 
 
 SSE_POLL_SECONDS = 0.4
@@ -205,6 +260,128 @@ def cancel_task(task_id: int, body: CancelTaskIn, user: User = Depends(get_curre
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     db.refresh(task)
     return task
+
+
+# ------------------------------------------------------------------ 받은 업무: 메일 업무 동작
+
+def _mail_task(db: Session, task_id: int, user: User) -> Task:
+    task = get_owned(db, Task, task_id, user)
+    if task.origin != "mail":
+        raise HTTPException(status.HTTP_409_CONFLICT, "메일 업무에서만 쓸 수 있습니다.")
+    return task
+
+
+def _act(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except ActionError as e:
+        raise HTTPException(e.status, str(e))
+
+
+def _done(db: Session, task: Task, user: User) -> TaskDetail:
+    db.commit()
+    db.refresh(task)
+    if task.calendar_state == "pending":
+        mail_sync.wake()  # 캘린더 반영이 필요해졌으면 다음 주기(90초)를 기다리지 않는다
+    return build_task_detail(db, task, user)
+
+
+@router.post("/tasks/{task_id}/snooze", response_model=TaskDetail)
+def snooze_task(task_id: int, body: SnoozeIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.snooze, task, preset=body.preset, until=body.until, now=datetime.now(timezone.utc),
+         tz=get_settings().user_timezone)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/unsnooze", response_model=TaskDetail)
+def unsnooze_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.unsnooze, task)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/priority", response_model=TaskDetail)
+def set_task_priority(task_id: int, body: PriorityIn, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.set_priority, task, body.priority)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/deadline", response_model=TaskDetail)
+def set_task_deadline(task_id: int, body: DeadlineIn, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.set_deadline, task, date=body.date, time=body.time, clear=body.clear, confirm=body.confirm,
+         tz=get_settings().user_timezone)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/todos", response_model=TaskDetail)
+def edit_task_todos(task_id: int, body: TodoOpIn, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.edit_todos, task, body.model_dump(exclude_none=True))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/close", response_model=TaskDetail)
+def close_task(task_id: int, body: CloseTaskIn, user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)):
+    """답장 필요 없음으로 닫기."""
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.close_without_reply, db, user, task, body.reason)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reanalyze", response_model=TaskDetail)
+def reanalyze_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.ensure_reanalyzable, task)
+    ai_action_limiter.check(f"ai:{user.id}")  # after the checks above so rejected calls cost nothing
+    _act(task_actions.request_reanalyze, task)
+    detail = _done(db, task, user)
+    mail_sync.wake()
+    return detail
+
+
+@router.post("/tasks/{task_id}/merge", response_model=TaskDetail)
+def merge_task(task_id: int, body: MergeIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """이 업무(B)를 같은 상대의 기존 업무(A)에 합친다. 응답은 A."""
+    source = _mail_task(db, task_id, user)
+    target = get_owned(db, Task, body.into_task_id, user)
+    _act(mail_merge.merge, db, user, source, target, datetime.now(timezone.utc))
+    return _done(db, target, user)
+
+
+@router.post("/tasks/{task_id}/merge/undo", response_model=TaskDetail)
+def undo_merge_task(task_id: int, body: MergeUndoIn, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    """합친 대상(A)에서 10분 안에 원본 하나(source_id)의 합치기를 되돌린다."""
+    target = _mail_task(db, task_id, user)
+    _act(mail_merge.undo_merge, db, user, target, body.source_id, datetime.now(timezone.utc))
+    return _done(db, target, user)
+
+
+@router.post("/tasks/{task_id}/merge/dismiss", response_model=TaskDetail)
+def dismiss_merge_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """합치기 제안 '따로 두기'."""
+    task = _mail_task(db, task_id, user)
+    _act(mail_merge.dismiss_merge, task)
+    return _done(db, task, user)
+
+
+@router.post("/emails/{email_id}/promote", response_model=PromoteOut)
+def promote_email(email_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """'업무 아님' · '자동 필터' 메일을 업무로 처리한다. 분석은 워커가 이어서 한다."""
+    email = get_owned(db, Email, email_id, user)
+    _act(task_actions.ensure_promotable, user, email)
+    ai_action_limiter.check(f"ai:{user.id}")
+    task = _act(task_actions.promote_email, db, user, email)
+    db.commit()
+    mail_sync.wake()
+    return PromoteOut(task_id=task.id)
 
 
 @router.post("/tasks/{task_id}/goal", response_model=TaskBrief)

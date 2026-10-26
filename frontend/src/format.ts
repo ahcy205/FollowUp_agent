@@ -60,3 +60,33 @@ export function relative(iso: string) {
 export function tokens(n: number | undefined) {
   return (n ?? 0).toLocaleString('ko-KR')
 }
+
+const WEEKDAYS = '일월화수목금토'
+
+// "10/30(금)" 또는 "10/30(금) 15:00". withTime이면 시각을 붙이되, exact가 아니면 00:00(하루 종일로 보임)은 뺀다.
+export function shortDate(iso: string, withTime = true, exact = false) {
+  const d = parseDate(iso)
+  const day = `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`
+  if (!withTime || (!exact && d.getHours() === 0 && d.getMinutes() === 0)) return day
+  return `${day} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// <input type="date"> · <input type="time"> 값 (브라우저 시간대)
+export function localDateValue(iso: string) {
+  const d = parseDate(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function localTimeValue(iso: string) {
+  const d = parseDate(iso)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// datetime-local 값("2026-10-27T09:00")을 브라우저 시간대 오프셋을 붙인 ISO로 바꾼다.
+export function withLocalOffset(value: string) {
+  const d = new Date(value)
+  const off = -d.getTimezoneOffset()
+  const sign = off >= 0 ? '+' : '-'
+  const abs = Math.abs(off)
+  return `${localDateValue(d.toISOString())}T${localTimeValue(d.toISOString())}:00${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
+}

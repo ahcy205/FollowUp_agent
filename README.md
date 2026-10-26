@@ -24,7 +24,8 @@
 | Gmail 연결 · 메일 동기화 (설계 1 · 2단계) | 완료 (로컬 기준) |
 | 업무 메일 판별과 접수 (설계 3단계) | 완료 (실제 계정 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-mail-triage-and-intake.md) |
 | Google 캘린더 연동 (설계 4단계) | 완료 (실제 캘린더 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-calendar-sync.md) |
-| 받은 업무 화면 · 답장 · 정리 (설계 5~7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
+| 받은 업무 화면 (설계 5단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-26-inbox-screen-design.md) · [구현 계획](docs/superpowers/plans/2026-10-26-inbox-screen.md) |
+| 답장 · 정리 (설계 6~7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
 | RAG (검색 증강 생성) | 설계 중, 구현 전 — [설계 문서](docs/superpowers/specs/2026-10-26-rag-design.md) |
 
 **문서** · [변경 이력](CHANGELOG.md) · [결정 기록](docs/decisions.md) · [데이터 · 개인정보 흐름](docs/privacy.md) · [문제 해결](docs/troubleshooting.md) · [설계 문서 · 구현 계획](docs/superpowers/)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import ApprovalCard from '../components/ApprovalCard'
 import CompleteFollowupCard from '../components/CompleteFollowupCard'
@@ -8,11 +8,16 @@ import CancelTaskPanel from '../components/CancelTaskPanel'
 import ReplySimulator from '../components/ReplySimulator'
 import StatusBadge from '../components/StatusBadge'
 import Timeline from '../components/Timeline'
+import MailActions from '../components/mail/MailActions'
+import MailBanners from '../components/mail/MailBanners'
+import SummaryCard from '../components/mail/SummaryCard'
+import TodoChecklist from '../components/mail/TodoChecklist'
 import { dateTime, STATUS_META, tokens, TOOL_LABELS } from '../format'
 import type { Run, TaskDetail, TokenUsage } from '../types'
 
 export default function TaskDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [data, setData] = useState<TaskDetail | null>(null)
   const [error, setError] = useState('')
   const [retrying, setRetrying] = useState(false)
@@ -29,6 +34,26 @@ export default function TaskDetailPage() {
       setError((e as Error).message)
     }
   }, [id])
+
+  // 메일 업무 동작: 응답(TaskDetail)으로 화면을 바꾼다. 실패하면 ApiError를 그대로 던져 부품이 문구를 보여준다.
+  const act = useCallback(
+    async (path: string, body?: unknown) => {
+      const d = await api.post<TaskDetail>(`/tasks/${id}${path}`, body)
+      setData(d)
+      setError('')
+      return d
+    },
+    [id],
+  )
+
+  // 합치기 응답은 합친 대상의 상세다. 그 화면을 먼저 보여주고 주소를 옮긴다.
+  const onMerged = useCallback(
+    (target: TaskDetail) => {
+      setData(target)
+      navigate(`/tasks/${target.task.id}`)
+    },
+    [navigate],
+  )
 
   // Live updates: the server pushes the whole task view immediately on connect and then whenever it changes (SSE).
   useEffect(() => {
@@ -93,7 +118,7 @@ export default function TaskDetailPage() {
   if (!data) {
     return error ? (
       <div className="alert alert-red">
-        {error} <Link to="/">← 내 업무로</Link>
+        {error} <Link to="/tasks">← 전체 업무로</Link>
       </div>
     ) : (
       <p className="muted">불러오는 중…</p>
@@ -115,6 +140,54 @@ export default function TaskDetailPage() {
     { total: 0, turns: 0 },
   )
   const lastLog = data.logs[data.logs.length - 1]
+  const isMail = task.origin === 'mail'
+
+  const calendarLine = task.calendar_state !== 'none' && (
+    <div className="calendar-line small">
+      {task.calendar_state === 'synced' && (
+        <>
+          <span>캘린더에 등록됨</span>
+          {task.calendar_event_url.startsWith("https://") && (
+            <a href={task.calendar_event_url} target="_blank" rel="noopener noreferrer">
+              캘린더에서 열기
+            </a>
+          )}
+        </>
+      )}
+      {task.calendar_state === 'pending' && <span className="muted">캘린더 반영 대기 중</span>}
+      {task.calendar_state === 'deleted_by_user' && (
+        <span className="muted">캘린더에서 삭제된 일정입니다 (다시 만들지 않음)</span>
+      )}
+      {task.calendar_state === 'error' && (
+        <>
+          <span className="text-red">{task.calendar_error}</span>
+          <button className="btn btn-sm" onClick={retryCalendar} disabled={calRetrying}>
+            {calRetrying ? '요청 중…' : '다시 시도'}
+          </button>
+        </>
+      )}
+    </div>
+  )
+
+  const mailThread = (
+    <ul className="mail-thread">
+      {data.emails.map((e) => (
+        <li key={e.id} className={`mail mail-${e.direction.toLowerCase()}`}>
+          <div className="mail-meta">
+            <span className={`tag ${e.direction === 'INBOUND' ? 'tag-blue' : e.direction === 'DRAFT' ? '' : 'tag-green'}`}>
+              {e.direction === 'INBOUND' ? '받은 메일' : e.direction === 'DRAFT' ? '초안' : '보낸 메일'}
+            </span>
+            <b>{e.subject}</b>
+            <span className="muted small nowrap">{dateTime(e.created_at)}</span>
+          </div>
+          <div className="muted small">
+            {e.sender} → {e.receiver}
+          </div>
+          <div className="mail-body">{e.content}</div>
+        </li>
+      ))}
+    </ul>
+  )
 
   let live: string | undefined
   if (run?.status === 'RUNNING') {
@@ -125,7 +198,7 @@ export default function TaskDetailPage() {
   return (
     <div className="stack-lg">
       <div className="crumbs">
-        <Link to="/">← 내 업무</Link>
+        {task.origin === 'mail' ? <Link to="/">← 받은 업무</Link> : <Link to="/tasks">← 전체 업무</Link>}
         {data.parent && (
           <>
             <span>/</span>
@@ -138,6 +211,8 @@ export default function TaskDetailPage() {
 
       <div className="detail-grid">
         <div className="stack">
+          {isMail && <MailBanners key={task.id} data={data} act={act} onMerged={onMerged} />}
+
           <section className="card">
             <div className="detail-title">
               <div>
@@ -150,7 +225,7 @@ export default function TaskDetailPage() {
               </div>
               <div className="detail-title-right">
                 <StatusBadge status={task.status} large />
-                {!closed && <CancelTaskPanel taskId={task.id} onCancelled={load} />}
+                {!closed && !isMail && <CancelTaskPanel taskId={task.id} onCancelled={load} />}
               </div>
             </div>
 
@@ -161,59 +236,36 @@ export default function TaskDetailPage() {
               </div>
             )}
 
-            <dl className="facts">
-              <div>
-                <dt>목표</dt>
-                <dd>
-                  <GoalEditor taskId={task.id} goal={task.goal} editable={!closed && !run} onSaved={load} />
-                </dd>
-              </div>
-              <div>
-                <dt>현재 상태</dt>
-                <dd>
-                  <b className={`text-${STATUS_META[task.status].tone}`}>{STATUS_META[task.status].label}</b>
-                  {task.waiting_for && ` — ${task.waiting_for}`}
-                </dd>
-              </div>
-              {task.current_step && (
+            {isMail ? (
+              <SummaryCard key={task.id} data={data} act={act} calendarLine={calendarLine} />
+            ) : (
+              <dl className="facts">
                 <div>
-                  <dt>현재 단계</dt>
-                  <dd>{task.current_step}</dd>
+                  <dt>목표</dt>
+                  <dd>
+                    <GoalEditor taskId={task.id} goal={task.goal} editable={!closed && !run} onSaved={load} />
+                  </dd>
                 </div>
-              )}
-              {task.next_action && task.status !== 'COMPLETED' && (
                 <div>
-                  <dt>다음 행동</dt>
-                  <dd>{task.next_action}</dd>
+                  <dt>현재 상태</dt>
+                  <dd>
+                    <b className={`text-${STATUS_META[task.status].tone}`}>{STATUS_META[task.status].label}</b>
+                    {task.waiting_for && ` — ${task.waiting_for}`}
+                  </dd>
                 </div>
-              )}
-            </dl>
-
-            {task.origin === 'mail' && task.calendar_state !== 'none' && (
-              <div className="calendar-line small">
-                {task.calendar_state === 'synced' && (
-                  <>
-                    <span>캘린더에 등록됨</span>
-                    {task.calendar_event_url.startsWith("https://") && (
-                      <a href={task.calendar_event_url} target="_blank" rel="noopener noreferrer">
-                        캘린더에서 열기
-                      </a>
-                    )}
-                  </>
+                {task.current_step && (
+                  <div>
+                    <dt>현재 단계</dt>
+                    <dd>{task.current_step}</dd>
+                  </div>
                 )}
-                {task.calendar_state === 'pending' && <span className="muted">캘린더 반영 대기 중</span>}
-                {task.calendar_state === 'deleted_by_user' && (
-                  <span className="muted">캘린더에서 삭제된 일정입니다 (다시 만들지 않음)</span>
+                {task.next_action && task.status !== 'COMPLETED' && (
+                  <div>
+                    <dt>다음 행동</dt>
+                    <dd>{task.next_action}</dd>
+                  </div>
                 )}
-                {task.calendar_state === 'error' && (
-                  <>
-                    <span className="text-red">{task.calendar_error}</span>
-                    <button className="btn btn-sm" onClick={retryCalendar} disabled={calRetrying}>
-                      {calRetrying ? '요청 중…' : '다시 시도'}
-                    </button>
-                  </>
-                )}
-              </div>
+              </dl>
             )}
           </section>
 
@@ -235,7 +287,14 @@ export default function TaskDetailPage() {
             <CompleteFollowupCard taskId={task.id} onDone={load} />
           )}
 
-          {task.plan.length > 0 && (
+          {isMail && (
+            <>
+              <TodoChecklist key={`todos-${task.id}`} task={task} act={act} />
+              <MailActions key={`actions-${task.id}`} task={task} act={act} onCancelled={load} emphasizeReply={task.plan.length > 0 && doneCount === task.plan.length} />
+            </>
+          )}
+
+          {!isMail && task.plan.length > 0 && (
             <section className="card">
               <div className="section-head">
                 <h2>진행 체크리스트</h2>
@@ -289,28 +348,18 @@ export default function TaskDetailPage() {
             </section>
           )}
 
-          {data.emails.length > 0 && (
-            <section className="card">
-              <h2>이 업무의 메일</h2>
-              <ul className="mail-thread">
-                {data.emails.map((e) => (
-                  <li key={e.id} className={`mail mail-${e.direction.toLowerCase()}`}>
-                    <div className="mail-meta">
-                      <span className={`tag ${e.direction === 'INBOUND' ? 'tag-blue' : e.direction === 'DRAFT' ? '' : 'tag-green'}`}>
-                        {e.direction === 'INBOUND' ? '받은 메일' : e.direction === 'DRAFT' ? '초안' : '보낸 메일'}
-                      </span>
-                      <b>{e.subject}</b>
-                      <span className="muted small nowrap">{dateTime(e.created_at)}</span>
-                    </div>
-                    <div className="muted small">
-                      {e.sender} → {e.receiver}
-                    </div>
-                    <div className="mail-body">{e.content}</div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          {data.emails.length > 0 &&
+            (isMail ? (
+              <details className="card mail-fold">
+                <summary>원본 메일 {data.emails.length}통</summary>
+                {mailThread}
+              </details>
+            ) : (
+              <section className="card">
+                <h2>이 업무의 메일</h2>
+                {mailThread}
+              </section>
+            ))}
         </div>
 
         <aside className="stack sidebar">
