@@ -71,8 +71,18 @@
 - **해결:**
   ```bash
   cd backend
-  cp dev.db dev.db.bak-$(date +%Y%m%d)        # 백업 (git에는 올라가지 않음)
+  cp dev.db dev.db.bak-$(date +%Y%m%d)        # 백업 (git에는 올라가지 않음). 서버가 떠 있으면 아래 항목처럼 백업
   ../.venv/Scripts/python -m alembic upgrade head
+  ```
+
+### 서버가 떠 있을 때 `cp dev.db`로 만든 백업이 최신이 아니다
+- **원인:** SQLite가 WAL 모드로 동작하면 최근 변경이 `dev.db-wal`에 먼저 쌓이고, 나중에 `dev.db`로 옮겨진다. 서버가 떠 있는 동안 `dev.db`만 복사하면 최근 변경이 빠진 복사본이 생긴다(`dev.db-wal`·`dev.db-shm`을 따로 복사해도 순간이 어긋날 수 있다).
+- **해결:** 서버를 먼저 끄고 복사하거나, SQLite 백업 기능으로 복사합니다. 백업 기능은 서버가 떠 있어도 일관된 복사본을 만든다.
+  ```bash
+  cd backend
+  sqlite3 dev.db ".backup dev.db.bak-YYYYMMDD"
+  # sqlite3 명령이 없으면 Python으로
+  ../.venv/Scripts/python -c "import sqlite3; s=sqlite3.connect('dev.db'); d=sqlite3.connect('dev.db.bak-YYYYMMDD'); s.backup(d); d.close(); s.close()"
   ```
 
 ### 서버를 띄우면 "address already in use" / 8000 포트 사용 중
