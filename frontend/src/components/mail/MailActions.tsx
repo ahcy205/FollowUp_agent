@@ -5,6 +5,13 @@ import CancelTaskPanel from '../CancelTaskPanel'
 
 type Panel = 'none' | 'snooze' | 'close'
 
+/** 처리할 일 탭 업무인지 (backend inbox.tab_of와 같은 규칙). 나중에 보기는 이 업무에만 보인다. */
+function isTodoTab(task: Task) {
+  if (task.status === 'ACTION_REQUIRED' || task.status === 'IN_PROGRESS' || task.status === 'BLOCKED') return true
+  const analysis = task.brief?.analysis
+  return task.status === 'PENDING' && (analysis === 'pending' || analysis === 'failed')
+}
+
 /** 버튼 줄 (설계 3.4절): 나중에 보기 · 답장 필요 없음으로 닫기 · 업무 취소 · 답장 초안 만들기(6단계). */
 export default function MailActions({
   task,
@@ -72,9 +79,11 @@ export default function MailActions({
           </button>
           <span className="muted small">6단계에서 제공</span>
         </span>
-        <button type="button" className="btn btn-ghost btn-sm" aria-expanded={panel === 'snooze'} onClick={() => toggle('snooze')}>
-          나중에 보기
-        </button>
+        {isTodoTab(task) && (
+          <button type="button" className="btn btn-ghost btn-sm" aria-expanded={panel === 'snooze'} onClick={() => toggle('snooze')}>
+            나중에 보기
+          </button>
+        )}
         <button type="button" className="btn btn-ghost btn-sm" aria-expanded={panel === 'close'} onClick={() => toggle('close')}>
           답장 필요 없음으로 닫기
         </button>
@@ -83,7 +92,7 @@ export default function MailActions({
         </span>
       </div>
 
-      {panel === 'snooze' && (
+      {panel === 'snooze' && isTodoTab(task) && (
         <div className="inline-panel">
           <b>언제 다시 볼까요?</b>
           <div className="snooze-choices">

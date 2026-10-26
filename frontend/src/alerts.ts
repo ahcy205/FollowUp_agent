@@ -4,6 +4,7 @@ import type { InboxAlerts } from './types'
 const STORAGE_KEY = 'followup.shownAlerts'
 const MAX_KEYS = 500
 const INTERVAL_MS = 60_000
+const MAX_PER_POLL = 3 // 한 번에 띄우는 알림 수. 알림을 처음 허용했을 때 한꺼번에 쏟아지지 않게
 const BASE_TITLE = 'FollowUp Agent'
 
 function loadShown(): string[] {
@@ -45,8 +46,16 @@ export function startAlerts(navigate: (path: string) => void): () => void {
     const shown = loadShown()
     const seen = new Set(shown)
     let changed = false
+    let notified = 0
     for (const alert of data.alerts) {
       if (seen.has(alert.key)) continue
+      if (notified >= MAX_PER_POLL) {
+        // 넘친 알림은 띄우지 않고 띄운 것으로 기록한다. 같은 알림이 다음 주기에 다시 몰려오지 않게.
+        seen.add(alert.key)
+        shown.push(alert.key)
+        changed = true
+        continue
+      }
       try {
         const n = new Notification(alert.text, { tag: alert.key })
         n.onclick = () => {
@@ -60,6 +69,7 @@ export function startAlerts(navigate: (path: string) => void): () => void {
       seen.add(alert.key)
       shown.push(alert.key)
       changed = true
+      notified += 1
     }
     if (changed) saveShown(shown)
   }

@@ -74,7 +74,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           onDone={() => {
             setResetOpen(false)
             bumpRefresh()
-            navigate('/')
+            navigate('/tasks')
           }}
         />
       )}
