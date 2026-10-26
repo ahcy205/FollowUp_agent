@@ -7,8 +7,8 @@ from email.message import EmailMessage
 from urllib.parse import urlencode
 
 from app.google.client import (
-    REQUIRED_SCOPES, AccessToken, GmailProfile, GoogleAuthError, GoogleError, GoogleHistoryGone,
-    GoogleTransientError, IdPage, RawMessage, TokenGrant,
+    REQUIRED_SCOPES, AccessToken, CalendarEvent, GmailProfile, GoogleAuthError, GoogleConflict, GoogleError,
+    GoogleHistoryGone, GoogleNotFound, GoogleTransientError, IdPage, RawMessage, TokenGrant,
 )
 
 
@@ -51,6 +51,11 @@ class FakeGoogle:
         self.revoked: list[str] = []
         self.revoke_fails = False
         self.get_calls: list[str] = []
+        self.events: dict[str, dict] = {}
+        self.deleted_events: set[str] = set()
+        self.calendar_fail: GoogleError | None = None
+        self.calendar_fail_times: int = 0
+        self.calendar_calls: list[tuple[str, str]] = []
         self._seq = 0
         self._tokens = 0
 
@@ -114,3 +119,47 @@ class FakeGoogle:
         if message_id not in self.mailbox:
             raise GoogleError(f"message not found: {message_id}")
         return self.mailbox[message_id]
+
+    # --- Calendar ---
+    def _calendar_enter(self, method: str, event_id: str) -> None:
+        self.calendar_calls.append((method, event_id))
+        if self.calendar_fail is not None:
+            err = self.calendar_fail
+            if self.calendar_fail_times > 1:
+                self.calendar_fail_times -= 1
+            else:
+                self.calendar_fail = None
+                self.calendar_fail_times = 0
+            raise err
+
+    def _event(self, event_id: str, status: str = "confirmed") -> CalendarEvent:
+        return CalendarEvent(id=event_id, html_link=f"https://calendar.example/event/{event_id}", status=status)
+
+    def calendar_insert(self, access_token: str, body: dict) -> CalendarEvent:
+        self._seq += 1
+        event_id = body.get("id") or f"evt{self._seq:04d}"
+        self._calendar_enter("insert", event_id)
+        if event_id in self.events or event_id in self.deleted_events:
+            raise GoogleConflict("event id already exists")
+        self.events[event_id] = {**body, "id": event_id}
+        return self._event(event_id)
+
+    def calendar_get(self, access_token: str, event_id: str) -> CalendarEvent:
+        self._calendar_enter("get", event_id)
+        if event_id in self.deleted_events:
+            return self._event(event_id, "cancelled")
+        if event_id not in self.events:
+            raise GoogleNotFound("event not found")
+        return self._event(event_id, self.events[event_id].get("status", "confirmed"))
+
+    def calendar_patch(self, access_token: str, event_id: str, body: dict) -> CalendarEvent:
+        self._calendar_enter("patch", event_id)
+        if event_id in self.deleted_events or event_id not in self.events:
+            raise GoogleNotFound("event not found")
+        self.events[event_id].update(body)
+        return self._event(event_id, self.events[event_id].get("status", "confirmed"))
+
+    def delete_event(self, event_id: str) -> None:
+        """Simulate the user deleting the event in Google Calendar."""
+        self.events.pop(event_id, None)
+        self.deleted_events.add(event_id)
