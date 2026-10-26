@@ -117,8 +117,10 @@ def reset_user_data(db: Session, user: User) -> None:
     # Kept rows must not point at rows about to go.
     db.execute(update(Task).where(Task.user_id == uid, Task.parent_task_id.in_(demo_tasks)).values(parent_task_id=None))
     db.execute(update(Task).where(Task.user_id == uid, Task.merged_into_id.in_(demo_tasks)).values(merged_into_id=None))
-    db.execute(update(Task).where(Task.user_id == uid).values(customer_id=None))
-    db.execute(update(Email).where(Email.user_id == uid, Email.gmail_message_id.is_not(None))
+    # Only rows that actually point somewhere: an UPDATE bumps Task.updated_at, which orders the task lists.
+    db.execute(update(Task).where(Task.user_id == uid, Task.customer_id.is_not(None)).values(customer_id=None))
+    db.execute(update(Email).where(Email.user_id == uid, Email.gmail_message_id.is_not(None),
+                                   or_(Email.customer_id.is_not(None), Email.document_id.is_not(None)))
                .values(customer_id=None, document_id=None))
     db.execute(update(Email).where(Email.user_id == uid, Email.gmail_message_id.is_not(None),
                                    Email.task_id.in_(demo_tasks)).values(task_id=None))

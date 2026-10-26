@@ -95,6 +95,11 @@ def test_on_reset_keeps_mail_tasks(client):
                    reason="사용자가 기한을 바꿨습니다")
         db.commit()
         mail_id, gmail_id = mail_task.id, gmail.id
+        plain = Task(user_id=uid, title="연결 없는 메일 업무", goal="확인", status=TaskStatus.ACTION_REQUIRED,
+                     origin="mail", agent_enabled=False, gmail_thread_id="thr-2")
+        db.add(plain)
+        db.commit()
+        plain_id, plain_updated = plain.id, plain.updated_at
         demo_emails_before = db.scalar(select(func.count()).select_from(Email).where(
             Email.user_id == uid, Email.gmail_message_id.is_(None)))
 
@@ -104,6 +109,7 @@ def test_on_reset_keeps_mail_tasks(client):
         kept = db.get(Task, mail_id)
         assert kept is not None and kept.plan[0]["title"] == "견적서 보내기" and kept.deadline_at is not None
         assert kept.customer_id is None and kept.parent_task_id is None
+        assert db.get(Task, plain_id).updated_at.replace(tzinfo=None) == plain_updated.replace(tzinfo=None)  # 손대지 않은 메일 업무는 수정 시각도 그대로
         g = db.get(Email, gmail_id)
         assert g is not None and g.task_id == mail_id and g.customer_id is None and g.document_id is None
         from app.models import AgentActionLog
