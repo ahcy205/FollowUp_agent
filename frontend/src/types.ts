@@ -131,3 +131,20 @@ export interface Dashboard {
   agent_configured: boolean
   model: string
 }
+
+export interface GoogleRecentMail {
+  subject: string
+  sender: string
+  received_at: string | null
+}
+
+export interface GoogleStatus {
+  enabled: boolean
+  status: 'disconnected' | 'connected' | 'reauth_required'
+  google_email: string | null
+  scopes: string[]
+  last_synced_at: string | null
+  last_sync_error: string
+  mail_count: number
+  recent: GoogleRecentMail[]
+}
