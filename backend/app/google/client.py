@@ -105,7 +105,7 @@ def _is_rate_limited(resp: httpx.Response) -> bool:
         details = err.get("errors") or []
         return isinstance(details, list) and any(
             isinstance(d, dict) and d.get("reason") in _TRANSIENT_403_REASONS for d in details)
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, TypeError):
         return False
 
 

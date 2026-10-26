@@ -100,6 +100,7 @@ def test_403_rate_limit_is_transient(body):
     httpx.Response(403, json={"error": "access_denied"}),
     httpx.Response(403, json={"error": {"errors": "rateLimitExceeded"}}),
     httpx.Response(403, json=["rateLimitExceeded"]),
+    httpx.Response(403, json={"error": {"errors": [{"reason": ["rateLimitExceeded"]}]}}),
     httpx.Response(403, text="<html>rateLimitExceeded</html>"),
 ])
 def test_403_other_is_plain_google_error(resp):
