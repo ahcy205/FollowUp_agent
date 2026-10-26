@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- 권한(scope)은 정확히 `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.send`, `https://www.googleapis.com/auth/calendar.events`, `openid`, `email`. 삭제 · 수정 권한은 요청하지 않는다.
+- 권한(scope)은 정확히 `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.send`, `https://www.googleapis.com/auth/calendar.events`, `openid`, `email`. 삭제 · 수정 권한은 요청하지 않는다. (→ 변경 #1)
 - 갱신 토큰은 `GOOGLE_TOKEN_KEY`(32바이트, base64)로 AES-GCM 암호화해서만 저장한다. 접근 토큰은 메모리에만 둔다.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_TOKEN_KEY` 중 하나라도 없으면 Google 기능 전체를 끈다(`google_enabled=False`). API는 503 대신 `{"enabled": false}` 상태를 돌려준다.
 - OAuth state는 로그인한 사용자 id에 묶인 1회용 값, 10분 만료. 콜백 주소는 `{PUBLIC_URL}/api/google/callback`으로 고정한다.
@@ -164,7 +164,7 @@ class RawMessage: id: str; thread_id: str; label_ids: list[str]; internal_date_m
 class GoogleError(Exception)            # 기본
 class GoogleAuthError(GoogleError)      # invalid_grant / 401 → 재연결 필요
 class GoogleHistoryGone(GoogleError)    # history.list 404
-class GoogleTransientError(GoogleError) # 429, 5xx, 네트워크 오류
+class GoogleTransientError(GoogleError) # 429, 5xx, 네트워크 오류  (→ 변경 #8)
 
 class GoogleClient(Protocol):
     def authorization_url(self, *, state: str, code_challenge: str, redirect_uri: str) -> str
@@ -280,10 +280,10 @@ def test_status_requires_login(): ...                        # 401
   2. 쿠키를 읽고 `uid`가 현재 세션 사용자와 같은지, `state`가 같은지 비교한다 (`hmac.compare_digest`).
   3. 쿠키를 지운다.
   4. `exchange_code`를 호출한다.
-  5. scope를 검사한다.
+  5. scope를 검사한다. (→ 변경 #1, #2)
   6. refresh_token이 있는지 확인한다.
   7. `gmail_profile`로 이메일을 가져온다.
-  8. upsert한다 (재연결이면 `history_id`는 유지).
+  8. upsert한다 (재연결이면 `history_id`는 유지). (→ 변경 #7)
   9. `wake()`를 호출한다.
 
   콜백은 GET이라 CSRF 미들웨어 대상이 아니다. 세션 쿠키가 없으면 `/login`으로 302한다.
@@ -401,7 +401,7 @@ def test_parse_failure_skips_one_mail(): ...           # raw가 깨진 메일 1�
 
   - **첫 동기화** (`history_id`가 없을 때)
     1. 먼저 `gmail_profile`로 history_id를 받아 둔다.
-    2. `gmail_list(f"after:{epoch(now - backfill_days)} -in:spam -in:trash")`를 페이지 끝까지 돈다.
+    2. `gmail_list(f"after:{epoch(now - backfill_days)} -in:spam -in:trash")`를 페이지 끝까지 돈다. (→ 변경 #4)
   - **이후 동기화**
     - `gmail_history`를 페이지 끝까지 돌고, 마지막 페이지의 `history_id`를 새 지점으로 쓴다.
     - `GoogleHistoryGone`이 나면 첫 동기화처럼 처리한다. 이때 기준은 `last_synced_at - 1일`이다.
@@ -412,12 +412,12 @@ def test_parse_failure_skips_one_mail(): ...           # raw가 깨진 메일 1�
   2. 남은 것 중 앞에서부터 `mail_sync_max_per_cycle`개만 `gmail_get_raw`로 가져온다.
   3. 라벨을 거른다. `INBOX`가 있고 `SENT`가 없는 메일만 남긴다.
   4. `parse_raw` 후 `Email` 행을 만든다. `receiver`에는 `to`를 쉼표로 이어 255자로 자른 값을 넣는다.
-  5. 메일 1통마다 `IntegrityError`가 나면 롤백 후 건너뛴다 (savepoint 사용).
+  5. 메일 1통마다 `IntegrityError`가 나면 롤백 후 건너뛴다 (savepoint 사용). (→ 변경 #5)
 
   **끝**
 
   - 남은 ID가 없을 때만 `history_id`를 전진시키고 `complete=True`로 둔다.
-  - 성공하면 `last_synced_at=now`, `last_sync_error=""`로 바꾼다.
+  - 성공하면 `last_synced_at=now`, `last_sync_error=""`로 바꾼다. (→ 변경 #3)
   - `GoogleTransientError`가 나면 지금까지 저장한 것은 커밋하고, `last_sync_error`에 짧은 한국어 문구를 남긴다.
   - `GoogleAuthError`가 나면 `access_token_for`가 상태를 바꿔 두었으므로 그대로 반환한다.
 - [ ] **Step 4: 통과 확인**
@@ -539,6 +539,24 @@ def test_worker_wake_runs_cycle(): ...              # interval 3600으로 start 
 - [ ] **Step 4: 커밋 후 push** — `README: 로컬 Google 연결 준비 절차`
 
 ---
+
+## 계획 대비 변경 이력
+
+구현 중 계획과 달라진 점입니다. 본문은 원래 계획 그대로 두고, 해당 줄에 `(→ 변경 #n)`을 붙였습니다. 앞으로도 쓰일 판단은 [`docs/decisions.md`](../../decisions.md)에도 있습니다.
+
+| # | 날짜 | 작업 | 계획 | 실제 구현 | 이유 | 영향 |
+|---|---|---|---|---|---|---|
+| 1 | 10-26 | Task 4 | 받은 권한을 요청한 5개 이름과 그대로 비교 | Google이 돌려주는 긴 이름(`.../auth/userinfo.email`)을 `email`과 같은 것으로 인정 | 실제 Google은 긴 이름을 돌려줘서, 그대로 비교하면 모든 연결이 실패 | 없음 |
+| 2 | 10-26 | Task 4 | 권한 부족 · 장기 토큰 없음이면 거절만 | 처음 연결일 때만 방금 받은 권한을 Google에서 취소. 이미 연결된 상태의 재연결 실패는 취소하지 않음. 1회용 값은 서버에서도 한 번만 쓰게 함 | 재연결 실패 때 취소하면 같은 권한을 쓰는 기존 연결까지 끊김 | 쓰이지 않는 부분 권한이 Google에 남을 수 있음 |
+| 3 | 10-26 | Task 6 | 성공하면 마지막 확인 시각 갱신 | 한 주기를 끝까지 처리했을 때만 갱신 | 변경 기록 만료 시 다시 훑는 기준점이 앞당겨지면 메일을 놓침 | 밀린 메일이 많으면 화면의 시각이 늦게 보임 |
+| 4 | 10-26 | Task 6 | 첫 동기화는 스팸 · 휴지통만 제외하고 조회 | 받은편지함(`in:inbox`)만 조회. 건너뛴 메일 번호를 서버 메모리에 기억 | 보낸 · 보관 메일이 한도 이상 쌓이면 동기화가 같은 자리에 멈춤 | 서버 재시작 후 건너뛴 메일을 한 번 더 조회 |
+| 5 | 10-26 | Task 6 | 메일 1통의 오류는 건너뜀 | 사라진 메일 · 해석 실패는 건너뛰고, DB 오류는 주기를 멈추고 동기화 지점을 전진시키지 않음 | DB 오류까지 건너뛰면 메일이 영구히 빠짐 | 같은 DB 오류가 반복되면 동기화가 멈추고 오류 표시 |
+| 6 | 10-26 | Task 8 | 오류 상태 하나 | 불러오기 오류(카드 안, 다시 시도 버튼)와 버튼 동작 오류(빨간 안내)를 분리 | 30초 새로고침이 한 번 실패하면 빨간 안내가 계속 남음 | 없음 |
+| 7 | 10-26 | 최종 검토 | 재연결이면 동기화 지점 유지 | 다른 Gmail 주소로 재연결하면 동기화 지점 초기화 · 이전 토큰 폐기. 이전 계정 메일은 남김 | 다른 메일함의 동기화 지점을 쓰면 새 메일함의 최근 메일을 놓침 | 두 계정 메일이 목록에 섞일 수 있음 |
+| 8 | 10-26 | 최종 검토 | 429 · 5xx · 네트워크만 일시 오류 | Gmail 403 사용량 한도(`rateLimitExceeded` 등)도 일시 오류 | 403 한도 오류가 영구 건너뛰기로 처리되어 메일이 빠짐 | 없음 |
+| 9 | 10-26 | 최종 검토 | (계획에 없음) | 데모 초기화는 Gmail 메일과 Google 연결을 지우지 않음 | 버튼 한 번에 실제 메일이 사라지고 다시 가져올 수 없음 | 없음 |
+| 10 | 10-26 | 최종 검토 | (계획에 없음) | 재연결 필요 상태에서도 연결 해제 가능, 메일 본문의 NUL 문자 제거, DB 백업 파일 git 제외 | 실사용 중 막히는 지점과 PostgreSQL 저장 오류 예방 | 없음 |
+| 11 | 10-26 | 실계정 확인 후 | (계획에 없음) | 테스트가 실제 `.env` 값을 읽지 않도록 환경 고정 | 실제 Google 값을 넣자 "미설정" 가정 테스트 3개가 실패 | 없음 |
 
 ## 이 계획 다음
 
