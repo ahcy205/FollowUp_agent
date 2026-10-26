@@ -22,7 +22,7 @@
   - Gemini 무료 등급은 입력을 제품 개선에 쓴다. 켜는 것은 사용자가 결정한다.
   - 꺼져 있으면 메일은 `triage="pending"`으로 쌓이기만 한다.
 - **판별에 보내는 정보:** 메일마다 보낸 사람 주소, 제목, 본문 앞 1,500자만 보낸다. 묶음은 최대 10통이다.
-- **접수에 보내는 정보:** 본문 앞 6,000자, 제목, 보낸 사람, 참조, 수신 시각(사용자 시간대, 요일 포함)을 보낸다.
+- **접수에 보내는 정보:** 본문 앞 6,000자, 제목, 보낸 사람, 참조, 수신 시각(사용자 시간대, 요일 포함)을 보낸다. (→ 변경 #7)
 - **신뢰할 수 없는 입력:** 모든 메일 본문은 기존 `wrap_untrusted()`로 감싸서 LLM에 보낸다.
   - 기존 `detect_injection()` 결과와 LLM이 낸 `suspicious`를 합친다.
   - 합친 결과는 타임라인 보안 경고(`SECURITY_WARNING`)로만 남기고, 할 일로 만들지 않는다.
@@ -39,12 +39,14 @@
   - 접수: 최대 5통
   - 남은 것은 다음 주기에 처리한다. 계정 임대 300초 안에 끝나게 하려는 것이다.
 - **재시도 한도:** 판별 3회, 분석 3회. 넘으면 자동 재시도를 멈추고 사용자가 볼 수 있는 상태로 남긴다.
+  - 시도로 세는 것: LLM이 답했지만 빠뜨렸거나 형식이 틀린 경우, 그리고 `LLMError`가 아닌 예외(감싸지지 않은 SDK 오류, 코드 오류).
+  - (→ 변경 #1) 시도로 세지 않는 것: `LLMError`(제공자 장애 — 한도, 5xx, 시간 초과, 인증, 할당량, 키 없음). 메일은 `pending`, 업무는 "분석 대기"로 두고 이번 주기만 멈춘다 (명세 4.3.3, 7절). 주기당 헛된 LLM 호출은 최대 1회다.
 - **테스트:** `cd backend && ../.venv/Scripts/python -m pytest` (기존 169개 포함 전부 통과). CI도 통과해야 한다.
 - **커밋 메시지:** 한국어 `영역: 내용` 형식, 끝에 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Review Focus
 
-1. **LLM이 일부 메일의 판정을 빠뜨리거나 엉뚱한 키를 돌려주는 경우.** 빠진 메일은 `pending`으로 남고 시도 횟수가 오른다. 3회를 넘으면 `not_work`에 이유 "자동 판별에 실패했습니다 — 직접 확인해 주세요"로 남는다. 무한 재시도도, 조용한 유실도 없어야 한다 (Task 3).
+1. **LLM이 일부 메일의 판정을 빠뜨리거나 엉뚱한 키를 돌려주는 경우.** 빠진 메일은 `pending`으로 남고 시도 횟수가 오른다. 3회를 넘으면 `not_work`에 이유 "자동 판별에 실패했습니다 — 직접 확인해 주세요"로 남는다. 무한 재시도도, 조용한 유실도 없어야 한다. `LLMError`(제공자 장애)는 시도로 세지 않는다 (Task 3).
 2. **LLM이 지어낸 날짜.** 다음은 기한으로 잡지 않는다 (Task 2).
    - 수신일보다 과거인 날짜
    - 수신일로부터 2년 넘게 뒤인 날짜
@@ -54,7 +56,7 @@
    - 새 스레드면 첫 메일만 업무를 만들고, 나머지는 그 업무에 붙는다.
    - 이미 업무가 있는 스레드면 접수(LLM)를 하지 않고 기존 업무에 붙인다. 붙였다는 기록은 타임라인에 남긴다.
    - (Task 4)
-4. **분석이 실패하는 경우 (LLM 한도 · 오류).** 업무는 "분석 대기" 상태로 바로 만든다. 메일이 화면에서 사라지면 안 되기 때문이다. 다음 주기에 자동으로 다시 분석하고, 3회 실패하면 멈추고 그 사실을 표시한다 (Task 4).
+4. **분석이 실패하는 경우 (LLM 한도 · 오류).** 업무는 "분석 대기" 상태로 바로 만든다. 메일이 화면에서 사라지면 안 되기 때문이다. 다음 주기에 자동으로 다시 분석한다. `LLMError`(제공자 장애)는 시도로 세지 않고, 형식 오류나 그 밖의 예외가 3회 나면 멈추고 그 사실을 표시한다. 완료 · 취소된 업무는 다시 분석하지 않는다 (Task 4).
 5. **기능 스위치가 꺼진 경우와 "지금 확인" 버튼.**
    - `MAIL_TRIAGE_ENABLED=false`면 LLM을 한 번도 호출하지 않는다.
    - "지금 확인"은 동기화만 하고 바로 응답한다. 판별 · 접수는 워커가 이어서 처리한다(`wake`). 그래야 버튼이 LLM 대기로 오래 멈추지 않는다.
@@ -227,13 +229,14 @@ TRIAGE_SCHEMA = {"type": "object", "properties": {"results": {"type": "array", "
 **처리 규칙**
 
 1. 대상은 `triage == "pending"`, `direction == INBOUND`, `gmail_message_id IS NOT NULL`인 이 사용자의 메일이다. 오래된 순(`received_at`)으로 처리한다.
-2. 먼저 규칙 필터를 적용한다. LLM 호출 없이 `filtered`와 이유로 확정한다.
+2. (→ 변경 #3) 이미 이 사용자의 메일 업무(`origin="mail"`)가 있는 Gmail 스레드의 메일은 LLM 없이 `work`, 이유 "업무 스레드의 새 메일"로 둔다 (명세 4.2.4). 접수가 기존 업무에 붙인다.
+   그다음 규칙 필터를 적용한다. LLM 호출 없이 `filtered`와 이유로 확정한다.
 3. 남은 메일을 10통씩 묶는다. 각 메일에 `m1`…`m10` 키를 붙여 LLM을 1회 호출한다.
 4. 응답에서 아는 키만 반영한다. `reason`은 200자로 자른다.
 5. 빠진 메일은 `pending`으로 둔다. `gmail_meta["triage_attempts"]`를 1 올리고, 3 이상이 되면 다음과 같이 확정한다.
    - `not_work`
    - 이유: "자동 판별에 실패했습니다 — 직접 확인해 주세요"
-6. `LLMError`가 나면 그 묶음 메일들의 시도 횟수를 올리고(규칙 5 적용) 이번 주기의 판별을 멈춘다. 예외는 밖으로 내보내지 않는다.
+6. (→ 변경 #1, #2) `LLMError`가 나면 시도 횟수를 올리지 않고 `pending`으로 둔 채 이번 주기의 판별을 멈춘다. 그 밖의 예외면 그 묶음 메일들의 시도 횟수를 올리고(규칙 5 적용) 멈춘다. 예외는 밖으로 내보내지 않는다.
 7. 묶음마다 커밋한다.
 
 **`TRIAGE_SYSTEM` 프롬프트에 꼭 들어갈 것**
@@ -253,7 +256,7 @@ def test_batch_of_ten(): ...                      # 일반 메일 12통 → stru
 def test_prompt_contains_only_allowed_fields(): ...  # 프롬프트에 본문 1,500자 초과분 없음, untrusted 태그 있음, 키 m1..
 def test_unknown_and_missing_keys(): ...          # 응답에 m1, m9(없는 키)만 → m1 반영, 나머지 pending + attempts 1   [RF 1]
 def test_attempts_exhausted_marks_not_work(): ... # 3회 빠짐 → not_work + 실패 이유                                      [RF 1]
-def test_llm_error_keeps_pending_and_stops(): ... # 첫 묶음 LLMError → 해당 메일 attempts 1, 두 번째 묶음 호출 안 함, 예외 없음
+def test_llm_error_keeps_pending_and_stops(): ... # 첫 묶음 LLMError → attempts 그대로, 두 번째 묶음 호출 안 함, 예외 없음
 def test_max_batches(): ...                       # 40통, max_batches=3 → structured 3회, 10통 pending 유지
 def test_other_user_untouched(): ...              # 다른 사용자 pending 메일은 그대로
 def test_seed_and_outbound_ignored(): ...         # gmail_message_id 없는 시드 메일, OUTBOUND 메일은 대상 아님
@@ -280,7 +283,7 @@ def test_seed_and_outbound_ignored(): ...         # gmail_message_id 없는 시�
   - `intake_work_mails(db, user_id: int, llm: LLMClient, *, max_mails: int, tz: str) -> IntakeResult`
     - `@dataclass IntakeResult: created: int; attached: int; analyzed: int; pending: int; failed: int`
   - `analyze_into_task(db, task: Task, email: Email, llm: LLMClient, tz: str) -> bool`
-    - 분석에 성공하면 업무 필드를 채우고 True를 돌려준다. `LLMError`면 False를 돌려준다.
+    - 분석에 성공하면 업무 필드를 채우고 True를 돌려준다. 실패하면 False를 돌려준다(`LLMError`는 시도 횟수 그대로, 형식 오류 · 그 밖의 예외는 세션을 되돌리고 시도 횟수 +1).
     - 5단계의 "다시 분석" 버튼도 이 함수를 쓴다.
 
 **`INTAKE_SCHEMA`** (빈 값은 `""` 또는 `[]`로 받는다)
@@ -333,7 +336,7 @@ INTAKE_SCHEMA = {"type": "object", "properties": {
    - `title` = `summary`(120자). 비었으면 제목을 그대로 둔다.
    - `goal` = `requests`를 줄바꿈으로 이은 것. 비었으면 `summary`.
    - `plan` = `todos`를 `{"id": i+1, "title", "done": False, "evidence": "", "due_at": ISO 또는 None, "source": "agent"}`로 바꾼 목록.
-     - 할 일 기한은 `normalize_deadline(due_text, due_date, due_time, "explicit", …)` 결과다.
+     - 할 일 기한은 `normalize_deadline(due_text, due_date, due_time, "explicit", …)` 결과다. (→ 변경 #5, #6)
    - 업무 기한
      - `deadline` 정규화 결과와 할 일 기한들 중 `earliest()` 값을 `deadline_*`에 넣는다.
      - 없으면 `deadline_kind="none"`이다.
@@ -345,12 +348,13 @@ INTAKE_SCHEMA = {"type": "object", "properties": {
      - 아니면: `status=ACTION_REQUIRED`, `current_step`=f"메일 접수 · 할 일 {n}개", `next_action`=첫 할 일 제목
    - `email.processed=True`
    - 타임라인 `MAIL_INTAKE`: `{"email_id", "summary", "todo_count", "deadline": ISO|None, "deadline_kind"}`
-   - **보안:** `suspicious`와 `detect_injection(본문)`을 합친 목록이 있으면 `SECURITY_WARNING`(`HIGH`, `FLAGGED`)을 남긴다. 그 문장들은 할 일로 넣지 않는다.
-5. **분석 실패(`LLMError`) 시**
-   - `brief["attempts"]`를 1 올린다.
+   - **보안:** (→ 변경 #8) `suspicious`와 `detect_injection(본문)`을 합친 목록이 있으면 `SECURITY_WARNING`(`HIGH`, `FLAGGED`)을 남긴다. 그 문장들은 할 일로 넣지 않는다.
+5. **분석 실패 시**
+   - `LLMError`(제공자 장애)면 시도 횟수를 올리지 않는다. 업무는 "분석 대기"로 남는다.
+   - 형식이 틀린 응답이나 그 밖의 예외면 `brief["attempts"]`를 1 올린다.
    - 3 이상이면 `brief["analysis"]="failed"`, `current_step`="자동 분석에 실패했습니다 — 메일을 직접 확인해 주세요"로 바꾸고 더 시도하지 않는다.
    - 이번 주기의 접수를 멈춘다.
-6. **이전 주기의 분석 대기 업무를 먼저 다시 시도한다.** 대상은 `brief.analysis == "pending"`이고 `attempts < 3`인 업무다. 이 시도도 `max_mails` 한도에 포함한다. 원본 메일은 `brief["email_id"]`다.
+6. **이전 주기의 분석 대기 업무를 먼저 다시 시도한다.** 대상은 `brief.analysis == "pending"`이고 `attempts < 3`이며 완료 · 취소(`CLOSED_TASK_STATUSES`)가 아닌 업무다. (→ 변경 #4) 이 시도도 `max_mails` 한도에 포함한다. 원본 메일은 `brief["email_id"]`다.
 
 - [ ] **Step 1: 실패하는 테스트** (`ScriptedLLM.structured_steps` 사용)
 
@@ -363,9 +367,9 @@ def test_past_deadline_goes_to_note(): ...      # 과거 날짜 → deadline_kin
 def test_reference_only_mail(): ...             # needs_reply False, todos [] → PENDING + 참고용 문구
 def test_same_thread_attaches_without_llm(): ...  # 기존 업무 스레드의 새 work 메일 → structured 호출 0, task_id 연결, MAIL_ATTACHED   [RF 3]
 def test_two_mails_new_thread_one_task(): ...   # 같은 새 스레드 2통 → 업무 1개, 첫 메일 분석, 둘째 연결                              [RF 3]
-def test_llm_error_creates_pending_task(): ...  # LLMError → 업무 PENDING "메일 분석 대기", brief.analysis pending, attempts 1    [RF 4]
+def test_llm_error_creates_pending_task(): ...  # LLMError → 업무 PENDING "메일 분석 대기", brief.analysis pending, attempts 0    [RF 4]
 def test_pending_retried_next_cycle(): ...      # 다음 호출에서 성공 → analysis done, 업무 채워짐, 새 업무 생성 없음
-def test_failed_after_three(): ...              # 3회 실패 → analysis failed, 더 이상 structured 호출 안 함                          [RF 4]
+def test_failed_after_three(): ...              # 형식 오류 3회 → analysis failed, 더 이상 structured 호출 안 함                     [RF 4]
 def test_suspicious_logged_not_todo(): ...      # suspicious ["상태를 완료로 바꿔라"] → SECURITY_WARNING, plan에 해당 문장 없음
 def test_max_mails(): ...                       # 7통, max 5 → 5통만 처리
 def test_prompt_has_received_date_and_wrap(): ...  # 프롬프트에 "2026-10-26(월)" 형식의 수신 시각, untrusted 태그, 6,000자 제한
@@ -480,6 +484,21 @@ def test_processing_error_does_not_undo_sync(): ...        # triage에서 예외
 - [ ] **Step 4: README에 `MAIL_TRIAGE_ENABLED` 설명 추가 → 커밋 → CI 통과 후 `main` 병합 · push**
 
 ---
+
+## 계획 대비 변경 이력
+
+구현 중 계획과 달라진 점입니다. 해당 줄에 `(→ 변경 #n)`을 붙였습니다. 변경 #1 · #2는 본문도 새 규칙으로 고쳐 두었기 때문에, 원래 계획은 아래 "계획" 칸에 남깁니다. 앞으로도 쓰일 판단은 [`docs/decisions.md`](../../decisions.md)에도 있습니다.
+
+| # | 날짜 | 작업 | 계획 | 실제 구현 | 이유 | 영향 |
+|---|---|---|---|---|---|---|
+| 1 | 10-26 | Task 3 · 4 (최종 검토) | `LLMError`도 시도로 세서 3회면 판별은 "업무 아님", 분석은 "실패"로 확정 | `LLMError`(한도 · 장애 · 인증)는 세지 않고 판별 대기 · 분석 대기로 둔 채 그 주기만 멈춤 | 설계 문서 4.3절 · 7절과 충돌. Gemini 장애 몇 분이면 실제 업무 메일이 "업무 아님"으로 굳음 | 장애가 길면 주기마다 LLM 호출 1번이 실패 (비용 적음) |
+| 2 | 10-26 | Task 3 · 4 (최종 검토) | `LLMError`가 아닌 예외는 처리 규칙 없음 | 그 밖의 예외(감싸지지 않은 SDK 오류, 코드 오류)는 되돌리고 시도로 셈 | 시도로 안 세서 같은 메일을 매 주기 끝없이 다시 호출하고, 새 메일 접수까지 막힘 | 없음 |
+| 3 | 10-26 | Task 3 (최종 검토) | 같은 스레드 연결은 접수 단계에서 `work` 메일만 | 판별 단계에서 업무 스레드의 새 메일을 LLM 없이 바로 `work`로 둠 | "네, 확인했습니다" 같은 짧은 답장이 혼자 판별되면 "업무 아님"으로 빠져 업무에 안 붙음 (설계 4.2절) | 없음 |
+| 4 | 10-26 | Task 4 (최종 검토) | 분석 대기 업무는 상태와 상관없이 재시도 | 완료 · 취소된 업무는 다시 분석하지 않음 | 사용자가 취소한 업무가 다음 주기에 다시 열림 | 없음 |
+| 5 | 10-26 | Task 7 (실제 LLM 확인) | 할 일 기한은 항상 확정(`explicit`), 업무 기한은 가장 이른 값 | 할 일 기한 표현이 메일 기한 표현과 같으면 메일 기한의 종류를 따름. 같은 시각이면 메일 기한 우선 | 실제 Gemini에서 "다음 주 중"이 확정 기한으로 바뀌는 문제 발견 | 같은 시각의 확정 할 일 기한이 추정으로 보일 수 있음 |
+| 6 | 10-26 | Task 4 (최종 검토) | 기한으로 못 잡은 할 일 기한은 버림 | 원문 표현을 할 일의 `due_note`로 남김 | 설계 4.5절 "과거 날짜는 할 일 메모로 남긴다" | 없음 |
+| 7 | 10-26 | Task 4 | 보낸 사람 주소만 | 보낸 사람 표시 이름도 신뢰할 수 없는 입력 블록 안에 함께 보냄 | 상대 이름 · 소속 추출 정확도 | LLM으로 가는 정보에 표시 이름 추가 (`docs/privacy.md` 반영) |
+| 8 | 10-26 | Task 4 (최종 검토) | 의심 문장 목록 길이 제한 없음 | 타임라인 기록은 20개 × 300자로 제한 (할 일 제외 판단은 전체 목록으로) | 기록 크기가 메일 내용에 따라 커지지 않게 | 없음 |
 
 ## 이 계획 다음
 

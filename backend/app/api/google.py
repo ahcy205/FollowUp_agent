@@ -62,11 +62,18 @@ def build_status(db: Session, user: User) -> GoogleStatusOut:
     recent = db.scalars(
         select(Email).where(*where).order_by(Email.received_at.desc().nulls_last(), Email.id.desc()).limit(RECENT_LIMIT)
     ).all()
+    counts = {"pending": 0, "work": 0, "not_work": 0, "filtered": 0}
+    for key, n in db.execute(select(Email.triage, func.count()).where(*where).group_by(Email.triage)):
+        if key in counts:
+            counts[key] = n
+    settings = get_settings()
     out = GoogleStatusOut(
-        enabled=get_settings().google_enabled,
+        enabled=settings.google_enabled,
         status="disconnected",
         mail_count=mail_count,
         recent=[RecentMailOut.model_validate(e) for e in recent],
+        triage_counts=counts,
+        triage_enabled=settings.mail_triage_enabled,
     )
     if acc is not None:
         out.status = "reauth_required" if acc.status == GoogleAccountStatus.REAUTH_REQUIRED else "connected"
@@ -236,7 +243,8 @@ async def sync_now(user: User = Depends(get_current_user), db: Session = Depends
     if acc is None or acc.status != GoogleAccountStatus.CONNECTED:
         raise HTTPException(status.HTTP_409_CONFLICT, "Gmail이 연결되어 있지 않습니다.")
     google_sync_limiter.check(f"gsync:{user.id}")
-    await run_in_threadpool(mail_sync.run_sync_cycle, user_id=user.id)
+    await run_in_threadpool(mail_sync.run_sync_cycle, user_id=user.id, process=False)
+    mail_sync.wake()  # the worker triages and takes in the new mail; this request never waits on the LLM
     db.expire_all()  # the cycle ran in other sessions
     return build_status(db, user)
 

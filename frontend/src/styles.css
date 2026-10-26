@@ -298,6 +298,10 @@ tr:last-child td { border-bottom: none; }
 .settings-list dd { margin: 0; word-break: break-all; }
 .recent-mails { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .recent-mails li { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.recent-mails .tag { margin-right: 0; }
+.tag-amber { background: var(--amber-50); color: var(--amber); border-color: #fde68a; }
+a.tag:hover { text-decoration: underline; }
+.triage-summary { margin: 8px 0 0; }
 .disconnect-confirm { margin-top: 16px; padding: 14px; border: 1px solid var(--border-strong); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
 .check-row { display: flex; align-items: center; gap: 8px; }
 .check-row input { width: auto; }

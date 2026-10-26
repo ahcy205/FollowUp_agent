@@ -136,6 +136,9 @@ export interface GoogleRecentMail {
   subject: string
   sender: string
   received_at: string | null
+  triage: 'pending' | 'work' | 'not_work' | 'filtered' | null
+  triage_reason: string
+  task_id: number | null
 }
 
 export interface GoogleStatus {
@@ -147,4 +150,6 @@ export interface GoogleStatus {
   last_sync_error: string
   mail_count: number
   recent: GoogleRecentMail[]
+  triage_counts: Record<'pending' | 'work' | 'not_work' | 'filtered', number>
+  triage_enabled: boolean
 }

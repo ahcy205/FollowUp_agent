@@ -65,6 +65,11 @@ class TaskBrief(ORM):
     customer_id: int | None
     plan: list
     result_summary: str
+    brief: dict
+    deadline_at: datetime | None
+    deadline_all_day: bool
+    deadline_kind: str
+    deadline_source: str
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
@@ -164,6 +169,9 @@ class RecentMailOut(ORM):
     subject: str
     sender: str
     received_at: datetime | None
+    triage: str | None = None
+    triage_reason: str = ""
+    task_id: int | None = None
 
 
 class GoogleStatusOut(BaseModel):
@@ -175,6 +183,8 @@ class GoogleStatusOut(BaseModel):
     last_sync_error: str = ""
     mail_count: int = 0
     recent: list[RecentMailOut] = []
+    triage_counts: dict[str, int] = {}
+    triage_enabled: bool = False
 
 
 class GoogleDisconnect(BaseModel):

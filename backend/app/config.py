@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     mail_sync_max_per_cycle: int = 200
     mail_sync_enabled: bool = True
     user_timezone: str = "Asia/Seoul"
+    # Sends mail text to the LLM provider, so it stays off until the user opts in.
+    mail_triage_enabled: bool = False
+    mail_triage_batches_per_cycle: int = Field(default=3, ge=1, le=10)
+    mail_intake_per_cycle: int = Field(default=5, ge=1, le=20)
 
     # Injected automatically by Railway
     railway_public_domain: str = ""
