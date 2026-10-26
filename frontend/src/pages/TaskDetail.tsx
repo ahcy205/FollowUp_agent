@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
+import { useAuth } from '../App'
 import ApprovalCard from '../components/ApprovalCard'
 import CompleteFollowupCard from '../components/CompleteFollowupCard'
 import GoalEditor from '../components/GoalEditor'
@@ -18,6 +19,7 @@ import type { Run, TaskDetail, TokenUsage } from '../types'
 export default function TaskDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const demo = useAuth().user?.demo_mode === true
   const [data, setData] = useState<TaskDetail | null>(null)
   const [error, setError] = useState('')
   const [retrying, setRetrying] = useState(false)
@@ -69,7 +71,7 @@ export default function TaskDetailPage() {
       })
       source.addEventListener('gone', () => {
         source?.close()
-        setError('이 업무를 더 이상 찾을 수 없습니다. 데모 데이터가 초기화되었을 수 있습니다.')
+        setError('이 업무를 더 이상 찾을 수 없습니다. 삭제되었거나 다른 계정의 업무일 수 있습니다.')
       })
       source.onerror = () => {
         // The browser retries network drops by itself; an HTTP error (session expired, 404) closes the stream,
@@ -322,7 +324,7 @@ export default function TaskDetailPage() {
             </section>
           )}
 
-          {(data.can_simulate_reply || task.status === 'WAITING') && task.agent_enabled && !closed && (
+          {demo && (data.can_simulate_reply || task.status === 'WAITING') && task.agent_enabled && !closed && (
             <ReplySimulator taskId={task.id} enabled={data.can_simulate_reply} onSent={load} />
           )}
 

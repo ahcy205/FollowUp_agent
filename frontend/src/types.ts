@@ -3,6 +3,7 @@ export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'WAITING' | 'ACTION_REQUIRE
 export interface User {
   id: number
   email: string
+  demo_mode?: boolean // 서버 DEMO_MODE. 없으면 꺼짐으로 본다
 }
 
 export interface PlanStep {
