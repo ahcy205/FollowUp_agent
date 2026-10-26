@@ -123,7 +123,7 @@ def build_task_detail(db: Session, task: Task, user: User) -> TaskDetail:
         task=task, customer=task.customer, parent=parent, followups=followups, emails=emails, logs=logs,
         approvals=approvals_out, runs=[RunOut.model_validate(r) for r in runs[:10]],
         active_run=RunOut.model_validate(active) if active else None, max_steps=get_settings().max_agent_steps,
-        can_simulate_reply=has_sent and active is None and task.agent_enabled and task.status not in orchestrator.CLOSED_TASK_STATUSES,
+        can_simulate_reply=get_settings().demo_mode and has_sent and active is None and task.agent_enabled and task.status not in orchestrator.CLOSED_TASK_STATUSES,
         mail=_mail_extras(db, task, emails) if task.origin == "mail" else None,
     )
 

@@ -25,7 +25,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 def _ensure_demo_user() -> None:
     s = get_settings()
-    if not s.demo_user_password:
+    if not s.demo_mode or not s.demo_user_password:
         return
     with SessionLocal() as db:
         email = s.demo_user_email.lower()

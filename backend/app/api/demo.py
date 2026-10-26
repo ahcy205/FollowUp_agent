@@ -7,13 +7,20 @@ from sqlalchemy.orm import Session
 from app.agent import orchestrator
 from app.agent.audit import log_action
 from app.api.tasks import get_owned
+from app.config import get_settings
 from app.db import get_db
 from app.models import Customer, Email, EmailDirection, Task, TaskStatus, User
 from app.schemas import EmailOut, SimulateReplyIn
 from app.security import agent_limiter, get_current_user
 from app.seed import REPLY_PRESETS, reset_user_data
 
-router = APIRouter(prefix="/api/demo", tags=["demo"])
+def require_demo_mode() -> None:
+    """데모 모드가 꺼져 있으면 데모 API는 없는 것처럼 404."""
+    if not get_settings().demo_mode:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "찾을 수 없습니다.")
+
+
+router = APIRouter(prefix="/api/demo", tags=["demo"], dependencies=[Depends(require_demo_mode)])
 
 
 @router.post("/tasks/{task_id}/simulate-reply", response_model=EmailOut, status_code=201)

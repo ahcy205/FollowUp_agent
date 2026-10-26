@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     public_url: str = "http://localhost:5173"
     allowed_hosts: str = "localhost,127.0.0.1"
 
+    demo_mode: bool = False  # 가상 데이터 · 회신 시뮬레이터 · Demo Reset
     demo_user_email: str = "demo@example.com"
     demo_user_password: str = ""
     allow_registration: bool = True
