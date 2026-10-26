@@ -5,11 +5,12 @@ The background worker (wake) arrives in a later task.
 """
 
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -70,6 +71,33 @@ def release_lease(db: Session, account_id: int) -> None:
     db.commit()
 
 
+# --- ids fetched but deliberately not stored (sent/draft/vanished/unparseable) ---
+# Without this, such ids are never in the DB, stay at the front of the list every cycle and, once there
+# are >= cap of them, the cycle never completes. In memory only: after a restart each cycle re-adds what
+# it fetches, so progress is still guaranteed. Cleared when the account's history point advances.
+
+_skipped: dict[int, set[str]] = {}
+_skipped_lock = threading.Lock()
+
+
+def _skipped_ids(account_id: int) -> set[str]:
+    with _skipped_lock:
+        return set(_skipped.get(account_id, ()))
+
+
+def _mark_skipped(account_id: int, message_id: str) -> None:
+    with _skipped_lock:
+        _skipped.setdefault(account_id, set()).add(message_id)
+
+
+def clear_skipped(account_id: int | None = None) -> None:
+    with _skipped_lock:
+        if account_id is None:
+            _skipped.clear()
+        else:
+            _skipped.pop(account_id, None)
+
+
 # --- id listing ---
 
 def _list_all(client: GoogleClient, token: str, query: str) -> list[str]:
@@ -99,7 +127,7 @@ def _history_all(client: GoogleClient, token: str, start: str) -> tuple[list[str
 
 def _backfill(client: GoogleClient, token: str, since: datetime) -> tuple[list[str], str]:
     hid = client.gmail_profile(token).history_id  # take the point first so nothing arriving now is missed
-    return _list_all(client, token, f"after:{int(since.timestamp())} -in:spam -in:trash"), hid
+    return _list_all(client, token, f"after:{int(since.timestamp())} in:inbox -in:spam -in:trash"), hid
 
 
 def _collect_ids(account: GoogleAccount, client: GoogleClient, token: str,
@@ -145,15 +173,18 @@ def _build_email(user_id: int, msg) -> Email:
 
 
 def _store(db: Session, user_id: int, msg) -> bool:
-    """Insert one mail inside a savepoint. False if it was skipped (duplicate or bad data)."""
+    """Insert one mail inside a savepoint. False if it was skipped (unparseable, or a concurrent sync
+    stored it first). Other database errors propagate: the cycle must stop without advancing history."""
+    try:
+        row = _build_email(user_id, msg)
+    except Exception as e:  # noqa: BLE001 - one unparseable mail must not stop the cycle
+        log.warning("gmail message %s skipped: %s", msg.id, type(e).__name__)
+        return False
     try:
         with db.begin_nested():  # on error only this savepoint is rolled back
-            db.add(_build_email(user_id, msg))
-    except IntegrityError:
-        log.info("gmail message %s already stored; skipped", msg.id)  # a concurrent sync won the race
-        return False
-    except Exception as e:  # noqa: BLE001 - one bad mail must not stop the cycle
-        log.warning("gmail message %s skipped: %s", msg.id, type(e).__name__)
+            db.add(row)
+    except IntegrityError as e:  # unique (user_id, gmail_message_id): a concurrent sync won the race
+        log.info("gmail message %s skipped: %s", msg.id, type(e).__name__)
         return False
     db.commit()  # commit per mail so an interrupted cycle keeps its progress
     return True
@@ -162,10 +193,14 @@ def _store(db: Session, user_id: int, msg) -> bool:
 # --- sync ---
 
 def _fail(db: Session, account: GoogleAccount, message: str, result: SyncResult) -> SyncResult:
-    db.rollback()
-    account.last_sync_error = message
-    db.commit()
     result.complete = False
+    try:
+        db.rollback()
+        account.last_sync_error = message
+        db.commit()
+    except SQLAlchemyError as e:  # the database itself is unavailable; nothing more to record
+        db.rollback()
+        log.warning("gmail sync for account %s: could not record error: %s", account.id, type(e).__name__)
     return result
 
 
@@ -178,12 +213,19 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
         token = access_token_for(db, account, client)
     except GoogleAuthError:
         return result  # access_token_for already marked the account reauth_required
+    except GoogleTransientError:
+        log.info("gmail sync for account %s: token refresh failed (transient)", account.id)
+        return _fail(db, account, TRANSIENT_MESSAGE, result)
+    except GoogleError as e:
+        log.warning("gmail sync for account %s: token refresh failed: %s", account.id, type(e).__name__)
+        return _fail(db, account, ERROR_MESSAGE, result)
     try:
         ids, new_hid = _collect_ids(account, client, token, now)
         ids = list(dict.fromkeys(ids))
         result.listed = len(ids)
         have = _already_stored(db, account.user_id, ids)
-        remaining = [i for i in ids if i not in have]
+        skipped = _skipped_ids(account.id)
+        remaining = [i for i in ids if i not in have and i not in skipped]
         cap = max(1, get_settings().mail_sync_max_per_cycle)
         batch, deferred = remaining[:cap], remaining[cap:]
         for mid in batch:
@@ -193,12 +235,16 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
                 raise
             except GoogleError:
                 log.info("gmail message %s could not be fetched; skipped", mid)
+                _mark_skipped(account.id, mid)
                 continue
             if "INBOX" not in msg.label_ids or "SENT" in msg.label_ids:
                 result.skipped_sent += 1
+                _mark_skipped(account.id, mid)
                 continue
             if _store(db, account.user_id, msg):
                 result.stored += 1
+            else:
+                _mark_skipped(account.id, mid)
     except GoogleTransientError:
         log.info("gmail sync for account %s interrupted (transient); stored %d", account.id, result.stored)
         return _fail(db, account, TRANSIENT_MESSAGE, result)
@@ -209,6 +255,10 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
     except GoogleError as e:
         log.warning("gmail sync for account %s failed: %s", account.id, type(e).__name__)
         return _fail(db, account, ERROR_MESSAGE, result)
+    except SQLAlchemyError as e:  # e.g. database locked / connection lost: keep history so nothing is lost
+        log.warning("gmail sync for account %s stopped by database error: %s; stored %d",
+                    account.id, type(e).__name__, result.stored)
+        return _fail(db, account, ERROR_MESSAGE, result)
 
     account.last_sync_error = ""
     if not deferred:
@@ -216,6 +266,8 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
         account.last_synced_at = now
         result.complete = True
     db.commit()
+    if result.complete:
+        clear_skipped(account.id)
     log.info("gmail sync for account %s: listed %d, stored %d, skipped %d, deferred %d",
              account.id, result.listed, result.stored, result.skipped_sent, len(deferred))
     return result

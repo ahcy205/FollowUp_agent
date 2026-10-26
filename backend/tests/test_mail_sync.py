@@ -2,11 +2,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import event, select
+from sqlalchemy.exc import OperationalError
 
 from app.config import get_settings
-from app.db import SessionLocal
-from app.google.client import GoogleTransientError
+from app.db import SessionLocal, engine
+from app.google.client import AccessToken, GoogleTransientError
 from app.google.crypto import encrypt_token
 from app.mail import sync
 from app.mail.sync import SyncResult, acquire_lease, release_lease, sync_account
@@ -185,7 +186,7 @@ def test_history_gone_falls_back_to_query(account, google_fake, monkeypatch):
     google_fake.get_calls.clear()
     res = _run(account, google_fake, now=now)
     expected_after = int((synced_at - timedelta(days=1)).timestamp())
-    assert queries == [f"after:{expected_after} -in:spam -in:trash"]
+    assert queries == [f"after:{expected_after} in:inbox -in:spam -in:trash"]
     assert google_fake.get_calls == [new]
     assert sorted(e.gmail_message_id for e in _gmail_rows()) == sorted([old, new])
     assert res.complete is True
@@ -322,3 +323,76 @@ def test_parse_failure_skips_one_mail(account, google_fake, monkeypatch, caplog)
     assert res.complete is True
     assert bad in caplog.text
     assert "깨진" not in caplog.text and "비밀" not in caplog.text and "hong@acme" not in caplog.text
+
+
+# --- fix round 1 ---
+
+def test_transient_token_refresh_recorded(account, google_fake, monkeypatch):
+    """No cached token and the token endpoint is down: recorded, not raised."""
+    def down(refresh_token: str) -> AccessToken:
+        raise GoogleTransientError("Google 일시 오류(503)")
+
+    monkeypatch.setattr(google_fake, "refresh_access_token", down)
+    res = _run(account, google_fake)
+    acc = _acc(account)
+    assert res.complete is False and res.stored == 0
+    assert acc.last_sync_error == sync.TRANSIENT_MESSAGE
+    assert acc.status == GoogleAccountStatus.CONNECTED
+    assert acc.history_id is None
+
+
+def test_skipped_ids_do_not_block_cap(account, google_fake, monkeypatch):
+    """cap=2 with 2 SENT mails listed ahead of 1 INBOX mail: the cycle still completes."""
+    _run(account, google_fake)  # empty mailbox: sets the history point
+    _mail(google_fake, "s1", labels=("SENT",))
+    _mail(google_fake, "s2", labels=("SENT",))
+    ok = _mail(google_fake, "inbox")
+    monkeypatch.setattr(get_settings(), "mail_sync_max_per_cycle", 2)
+    google_fake.get_calls.clear()
+    results = []
+    for _ in range(3):
+        results.append(_run(account, google_fake))
+        if results[-1].complete:
+            break
+    assert results[-1].complete is True
+    assert [e.gmail_message_id for e in _gmail_rows()] == [ok]
+    assert len(google_fake.get_calls) == len(set(google_fake.get_calls))  # nothing fetched twice
+    assert _acc(account).history_id == str(google_fake.history_id)
+
+
+def test_capped_first_backfill_completes_later(account, google_fake, monkeypatch):
+    for i in range(3):
+        _mail(google_fake, f"m{i}")
+    monkeypatch.setattr(get_settings(), "mail_sync_max_per_cycle", 2)
+    r1 = _run(account, google_fake)
+    assert (r1.stored, r1.complete) == (2, False)
+    assert _acc(account).history_id is None
+    r2 = _run(account, google_fake)
+    assert (r2.stored, r2.complete) == (1, True)
+    assert _acc(account).history_id == str(google_fake.history_id)
+    assert len(_gmail_rows()) == 3
+
+
+def test_database_error_stops_cycle_without_advancing(account, google_fake):
+    _run(account, google_fake)
+    hid = _acc(account).history_id
+    first = _mail(google_fake, "a")
+    locked = _mail(google_fake, "b")
+
+    def fail_insert(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("INSERT INTO emails") and locked in str(parameters):
+            raise OperationalError(statement, parameters, Exception("database is locked"))
+
+    event.listen(engine, "before_cursor_execute", fail_insert)
+    try:
+        res = _run(account, google_fake)
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_insert)
+    acc = _acc(account)
+    assert res.complete is False and res.stored == 1
+    assert acc.history_id == hid
+    assert acc.last_sync_error == sync.ERROR_MESSAGE
+    assert [e.gmail_message_id for e in _gmail_rows()] == [first]
+    res2 = _run(account, google_fake)  # the lost insert is retried, not skipped forever
+    assert res2.complete is True and res2.stored == 1
+    assert sorted(e.gmail_message_id for e in _gmail_rows()) == sorted([first, locked])

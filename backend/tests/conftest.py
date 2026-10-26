@@ -21,6 +21,7 @@ from app.agent.llm import LLMResponse, set_llm_override  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.google import oauth  # noqa: E402
 from app.google.client import set_google_override  # noqa: E402
+from app.mail import sync as mail_sync  # noqa: E402
 from app.db import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.security import agent_limiter, login_limiter  # noqa: E402
@@ -77,10 +78,12 @@ def _fresh_db():
     login_limiter.reset()
     agent_limiter.reset()
     oauth.clear_access_token_cache()
+    mail_sync.clear_skipped()
     yield
     set_llm_override(None)
     set_google_override(None)
     oauth.clear_access_token_cache()
+    mail_sync.clear_skipped()
 
 
 def make_client() -> TestClient:
