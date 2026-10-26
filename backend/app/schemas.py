@@ -129,6 +129,13 @@ class UndoableMergeOut(BaseModel):
     title: str
 
 
+class MergedSourceOut(BaseModel):
+    task_id: int
+    title: str
+    summary: str
+    merged_at: datetime | None
+
+
 class MailExtras(BaseModel):
     is_snoozed: bool
     wake_at: datetime | None
@@ -136,6 +143,7 @@ class MailExtras(BaseModel):
     nudge_days: int | None
     merge_candidates: list[MergeCandidateOut]
     undoable_merges: list[UndoableMergeOut]
+    merged_sources: list[MergedSourceOut]
     merged_into_id: int | None
     deadline_badge: dict
     priority_source: str

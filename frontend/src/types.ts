@@ -161,6 +161,7 @@ export interface MailExtras {
   nudge_days: number | null
   merge_candidates: { task_id: number; title: string }[]
   undoable_merges: { source_id: number; title: string }[]
+  merged_sources: { task_id: number; title: string; summary: string; merged_at: string | null }[]
   merged_into_id: number | null
   deadline_badge: DeadlineBadge
   priority_source: string

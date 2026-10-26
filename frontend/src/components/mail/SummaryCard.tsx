@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { localDateValue, localTimeValue, shortDate } from '../../format'
 import type { MailAct, Priority, TaskDetail } from '../../types'
 
@@ -79,6 +80,23 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
         {sender || source?.sender || '보낸 사람 모름'}
         {source && ` · ${shortDate(source.created_at, false)} 받음`}
       </div>
+
+      {(mail?.merged_sources.length ?? 0) > 0 && (
+        <div className="summary-block">
+          <b className="small">합쳐진 업무 {mail!.merged_sources.length}건</b>
+          <ul className="merged-sources">
+            {mail!.merged_sources.map((m) => (
+              <li key={m.task_id}>
+                <div className="muted small">
+                  <Link to={`/tasks/${m.task_id}`}>#{m.task_id} {m.title}</Link>
+                  {m.merged_at && ` · ${shortDate(m.merged_at, false)} 합침`}
+                </div>
+                {m.summary && <p className="summary-text">{m.summary}</p>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {requests.length > 0 && (
         <div className="summary-block">

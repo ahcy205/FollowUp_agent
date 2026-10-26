@@ -128,6 +128,18 @@ def build_task_detail(db: Session, task: Task, user: User) -> TaskDetail:
     )
 
 
+def _merged_sources(db: Session, task: Task) -> list[dict]:
+    """이 업무로 바로 합쳐진 원본 업무들. 합친 순서대로."""
+    sources = db.scalars(select(Task).where(Task.user_id == task.user_id, Task.merged_into_id == task.id)
+                         .order_by(Task.completed_at, Task.id)).all()
+    out = []
+    for s in sources:
+        summary = (s.brief or {}).get("summary")
+        out.append({"task_id": s.id, "title": s.title, "summary": summary if isinstance(summary, str) else "",
+                    "merged_at": s.completed_at})
+    return out
+
+
 def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
     now = mail_inbox.now_utc()
     tz = get_settings().user_timezone
@@ -147,6 +159,7 @@ def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
         nudge_days=mail_inbox.nudge_days(task, latest_at, now, tz),
         merge_candidates=[{"task_id": c.id, "title": c.title} for c in candidates],
         undoable_merges=[{"source_id": i, "title": titles.get(i, "")} for i in source_ids],
+        merged_sources=_merged_sources(db, task),
         merged_into_id=task.merged_into_id, deadline_badge=mail_inbox.deadline_badge(task, now, tz),
         priority_source=task.priority_source,
     )

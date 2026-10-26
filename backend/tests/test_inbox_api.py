@@ -190,3 +190,29 @@ def test_action_wakes_calendar_sync_only_when_pending(client, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json()["task"]["calendar_state"] == "pending"
     assert woke == [1]
+
+
+def test_detail_merged_sources(client, monkeypatch):
+    """합친 대상(A) 상세에 합쳐진 업무(B)의 요약을 따로 보여준다. 10분이 지나도 남고, 되돌리면 사라진다."""
+    _fix_now(monkeypatch)
+    me = register(client)
+    with SessionLocal() as db:
+        from app.models import User
+        a, b, _ = _pair(db, me["id"])
+        assert client.get(f"/api/tasks/{a.id}").json()["mail"]["merged_sources"] == []
+        merge.merge(db, db.get(User, me["id"]), b, a, NOW)
+        db.commit()
+        a_id, b_id = a.id, b.id
+    m = client.get(f"/api/tasks/{a_id}").json()["mail"]
+    assert [(s["task_id"], s["title"], s["summary"]) for s in m["merged_sources"]] == [(b_id, "견적 요청", "추가 요청")]
+    assert m["merged_sources"][0]["merged_at"]
+    assert client.get(f"/api/tasks/{b_id}").json()["mail"]["merged_sources"] == []
+
+    _fix_now(monkeypatch, NOW + timedelta(hours=1))  # 되돌리기 시간이 지나도 칸은 남는다
+    assert len(client.get(f"/api/tasks/{a_id}").json()["mail"]["merged_sources"]) == 1
+
+    with SessionLocal() as db:
+        from app.models import User
+        merge.undo_merge(db, db.get(User, me["id"]), db.get(Task, a_id), b_id, NOW + timedelta(minutes=5))
+        db.commit()
+    assert client.get(f"/api/tasks/{a_id}").json()["mail"]["merged_sources"] == []
