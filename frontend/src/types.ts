@@ -10,6 +10,24 @@ export interface PlanStep {
   title: string
   done: boolean
   evidence: string
+  due_at?: string | null
+  source?: 'agent' | 'user'
+  due_note?: string
+  merged_from?: number
+}
+
+export type Priority = 'HIGH' | 'NORMAL' | 'LOW'
+
+// 메일 업무의 분석 결과(task.brief). 다른 업무는 빈 객체다.
+export interface MailBrief {
+  analysis?: 'pending' | 'done' | 'failed'
+  email_id?: number
+  summary?: string
+  requests?: string[]
+  counterpart?: { name?: string; organization?: string }
+  needs_reply?: boolean
+  priority?: string
+  deadline_note?: string
 }
 
 export interface Task {
@@ -27,6 +45,14 @@ export interface Task {
   customer_id: number | null
   plan: PlanStep[]
   result_summary: string
+  brief: MailBrief
+  deadline_at: string | null
+  deadline_all_day: boolean
+  deadline_kind: string
+  deadline_source: string
+  snoozed_until: string | null
+  priority_source: string
+  merged_into_id: number | null
   created_at: string
   updated_at: string
   completed_at: string | null
@@ -125,7 +151,23 @@ export interface TaskDetail {
   active_run: Run | null
   max_steps: number
   can_simulate_reply: boolean
+  mail?: MailExtras | null
 }
+
+export interface MailExtras {
+  is_snoozed: boolean
+  wake_at: string | null
+  returned: boolean
+  nudge_days: number | null
+  merge_candidates: { task_id: number; title: string }[]
+  undoable_merges: { source_id: number; title: string }[]
+  merged_into_id: number | null
+  deadline_badge: DeadlineBadge
+  priority_source: string
+}
+
+// 메일 업무 동작 하나를 보내고 응답(TaskDetail)으로 화면을 바꾼다. 실패하면 ApiError를 던진다.
+export type MailAct = (path: string, body?: unknown) => Promise<TaskDetail>
 
 export interface Dashboard {
   counts: Record<TaskStatus, number>

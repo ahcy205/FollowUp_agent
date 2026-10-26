@@ -356,3 +356,80 @@ a.tag:hover { text-decoration: underline; }
   .nav { order: 3; width: 100%; overflow-x: auto; }
   .nav a { white-space: nowrap; }
 }
+
+/* ---------- task detail: mail */
+.alert-blue { background: var(--blue-50); color: #1e40af; border-color: #bfdbfe; }
+.alert-slate { background: var(--slate-50); color: var(--slate); border-color: #cbd5e1; }
+.mail-banners { display: flex; flex-direction: column; gap: 8px; }
+.mail-banners .alert-action > span { min-width: 0; overflow-wrap: anywhere; }
+.mail-banner-title { font-weight: 600; margin-bottom: 6px; }
+.mail-banner-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.merge-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.merge-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.merge-title { min-width: 0; overflow-wrap: anywhere; }
+.merge-list .btn, .mail-banners .alert-action .btn { flex: none; }
+.summary { display: flex; flex-direction: column; gap: 12px; }
+.summary-text { margin: 0; font-size: 1.02rem; font-weight: 600; overflow-wrap: anywhere; }
+.summary-block { display: flex; flex-direction: column; gap: 4px; }
+.summary-requests { margin: 0; padding-left: 20px; overflow-wrap: anywhere; }
+.priority-row { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.priority-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.priority-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); background: var(--surface); border-radius: 999px; padding: 4px 12px 4px 8px; font-size: 0.85rem; cursor: pointer; }
+.priority-btn:hover:not(:disabled) { background: var(--bg); }
+.priority-btn.active { border-color: var(--primary); background: var(--primary-50); font-weight: 700; }
+.priority-btn:disabled { cursor: not-allowed; }
+.priority-btn:disabled:not(.active) { opacity: 0.55; }
+.deadline-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.deadline-box.late { background: var(--red-50); border-color: #fecaca; }
+.deadline-box.late .deadline-head > b { color: #d93025; }
+.deadline-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.deadline-head .tag { margin-right: 0; }
+.deadline-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.deadline-box .calendar-line { margin-top: 2px; }
+.deadline-edit { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.deadline-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.deadline-inputs input { padding: 7px 10px; }
+.inline-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.todo-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.todo-list li { padding: 8px 0; }
+.todo-list li + li { border-top: 1px solid var(--border); }
+.todo-row { display: flex; align-items: flex-start; gap: 10px; }
+.todo-check { width: 18px; height: 18px; margin: 3px 0 0; flex: none; accent-color: var(--green); cursor: pointer; }
+.todo-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.todo-list li.done .todo-title { color: var(--muted); text-decoration: line-through; }
+.todo-memo { color: #344054; background: var(--bg); border-radius: 6px; padding: 2px 8px; margin-top: 4px; white-space: pre-wrap; }
+.todo-buttons { display: flex; gap: 2px; flex: none; }
+.todo-memo-edit { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 0 28px; }
+.todo-undo { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 8px 12px; border-radius: 9px; background: var(--slate-50); }
+.todo-error, .todo-all-done { margin-top: 10px; }
+.todo-add { display: flex; gap: 8px; margin-top: 12px; }
+.todo-add input { padding: 7px 10px; }
+.todo-add .btn { flex: none; }
+.mail-actions { display: flex; flex-direction: column; gap: 12px; }
+.mail-action-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reply-draft { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; }
+.mail-cancel { position: relative; }
+.mail-cancel .cancel-panel { position: static; width: 100%; margin-top: 0; }
+.mail-cancel:has(.cancel-panel) { flex-basis: 100%; }
+.inline-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 10px; }
+.snooze-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.snooze-custom { display: flex; gap: 8px; align-items: center; }
+.snooze-custom input { padding: 7px 10px; max-width: 260px; }
+.snooze-custom .btn { flex: none; }
+.mail-fold summary { cursor: pointer; font-weight: 600; }
+.mail-fold[open] summary { margin-bottom: 12px; }
+@media (max-width: 480px) {
+  .mail-banners .alert-action, .merge-list li { flex-direction: column; align-items: stretch; }
+  .deadline-buttons { margin-left: 0; }
+  .deadline-inputs { grid-template-columns: 1fr; }
+  .mail-action-row { flex-direction: column; align-items: stretch; }
+  .mail-action-row > .btn { width: 100%; }
+  .reply-draft { margin-right: 0; }
+  .mail-cancel .btn-link { width: 100%; text-align: left; }
+  .snooze-choices { flex-direction: column; }
+  .snooze-custom { flex-direction: column; align-items: stretch; }
+  .snooze-custom input { max-width: none; }
+  .todo-row { flex-wrap: wrap; }
+  .todo-buttons { width: 100%; padding-left: 28px; }
+  .todo-memo-edit { margin-left: 0; }
+}
