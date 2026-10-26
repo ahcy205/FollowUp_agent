@@ -1,5 +1,7 @@
 """Application settings. Every secret comes from the environment — nothing is hardcoded."""
 
+import base64
+import binascii
 import logging
 import secrets
 from functools import lru_cache
@@ -44,12 +46,29 @@ class Settings(BaseSettings):
 
     session_hours: int = 12
 
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_token_key: str = ""  # base64 of 32 random bytes; encrypts refresh tokens (AES-GCM)
+    mail_sync_interval_seconds: int = Field(default=90, ge=30)
+    mail_backfill_days: int = Field(default=3, ge=1, le=30)
+    mail_sync_max_per_cycle: int = 200
+    mail_sync_enabled: bool = True
+    user_timezone: str = "Asia/Seoul"
+
     # Injected automatically by Railway
     railway_public_domain: str = ""
 
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret and self.google_token_key)
+
+    @property
+    def google_redirect_uri(self) -> str:
+        return self.public_url.rstrip("/") + "/api/google/callback"
 
     @property
     def allowed_host_list(self) -> list[str]:
@@ -71,6 +90,20 @@ class Settings(BaseSettings):
     @classmethod
     def _strip_key(cls, v: str) -> str:
         return v.strip().strip('"').strip("'")
+
+    @field_validator("google_token_key")
+    @classmethod
+    def _check_token_key(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            return v
+        try:
+            ok = len(base64.b64decode(v, validate=True)) == 32
+        except (binascii.Error, ValueError):
+            ok = False
+        if not ok:
+            raise ValueError("GOOGLE_TOKEN_KEY must be 32 bytes, base64-encoded")
+        return v
 
     @field_validator("database_url")
     @classmethod

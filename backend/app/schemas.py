@@ -158,3 +158,24 @@ class DashboardOut(BaseModel):
     pending_approvals: int
     agent_configured: bool
     model: str
+
+
+class RecentMailOut(ORM):
+    subject: str
+    sender: str
+    received_at: datetime | None
+
+
+class GoogleStatusOut(BaseModel):
+    enabled: bool
+    status: Literal["disconnected", "connected", "reauth_required"]
+    google_email: str | None = None
+    scopes: list[str] = []
+    last_synced_at: datetime | None = None
+    last_sync_error: str = ""
+    mail_count: int = 0
+    recent: list[RecentMailOut] = []
+
+
+class GoogleDisconnect(BaseModel):
+    delete_mail: bool = False

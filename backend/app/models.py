@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -48,6 +48,12 @@ class RiskLevel(StrEnum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
+
+
+class GoogleAccountStatus(StrEnum):
+    CONNECTED = "connected"
+    REAUTH_REQUIRED = "reauth_required"
+    # No "disconnected": disconnecting deletes the row; the status API reports a missing row as disconnected.
 
 
 Timestamp = DateTime(timezone=True)
@@ -115,8 +121,26 @@ class Task(Base):
     customer: Mapped[Customer | None] = relationship()
 
 
+class GoogleAccount(Base):
+    __tablename__ = "google_accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    google_email: Mapped[str] = mapped_column(String(255))
+    refresh_token_enc: Mapped[str] = mapped_column(Text)  # AES-GCM encrypted; never stored in plain text
+    scopes: Mapped[list] = mapped_column(JSON, default=list)
+    history_id: Mapped[str | None] = mapped_column(String(40))
+    last_synced_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    last_sync_error: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default=GoogleAccountStatus.CONNECTED)
+    sync_lease_until: Mapped[datetime | None] = mapped_column(Timestamp)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
+
+
 class Email(Base):
     __tablename__ = "emails"
+    __table_args__ = (UniqueConstraint("user_id", "gmail_message_id", name="uq_emails_user_gmail_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -131,6 +155,17 @@ class Email(Base):
     processed: Mapped[bool] = mapped_column(Boolean, default=False)  # inbound: seen by the agent
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     sent_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    # Gmail sync fields (null / empty for seed and agent-written mail)
+    gmail_message_id: Mapped[str | None] = mapped_column(String(64))
+    gmail_thread_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    rfc_message_id: Mapped[str | None] = mapped_column(String(500))
+    cc: Mapped[list] = mapped_column(JSON, default=list)
+    received_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    triage: Mapped[str | None] = mapped_column(String(20), index=True)
+    triage_reason: Mapped[str] = mapped_column(Text, default="")
+    attachments: Mapped[list] = mapped_column(JSON, default=list)
+    # Values the rule filter needs: labels, list_unsubscribe, precedence, sender_name. Not raw headers.
+    gmail_meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
     customer: Mapped[Customer | None] = relationship()
 

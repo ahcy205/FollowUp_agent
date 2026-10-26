@@ -11,15 +11,35 @@ os.environ["SECRET_KEY"] = "test-secret-key-that-is-long-enough-1234567890"
 os.environ["LLM_API_KEY"] = ""
 os.environ["DEMO_USER_PASSWORD"] = ""
 os.environ["MAX_AGENT_STEPS"] = "10"
+os.environ["MAIL_SYNC_ENABLED"] = "false"  # no background sync thread in tests
+# Real values in backend/.env must never reach tests: environment variables beat env_file in pydantic-settings.
+os.environ["GOOGLE_CLIENT_ID"] = ""
+os.environ["GOOGLE_CLIENT_SECRET"] = ""
+os.environ["GOOGLE_TOKEN_KEY"] = ""
+os.environ["PUBLIC_URL"] = "http://localhost:5173"  # Origin/CSRF checks, redirect URI
+os.environ["ALLOWED_HOSTS"] = "localhost,127.0.0.1"
+os.environ["LLM_PROVIDER"] = "gemini"
+os.environ["LLM_MODEL"] = ""
+os.environ["LLM_ANALYSIS_MODEL"] = ""
+os.environ["LLM_RPM_LIMIT"] = "0"  # no client-side pacing sleeps
+os.environ["MAIL_BACKFILL_DAYS"] = "3"
+os.environ["USER_TIMEZONE"] = "Asia/Seoul"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.agent import orchestrator  # noqa: E402
 from app.agent.llm import LLMResponse, set_llm_override  # noqa: E402
+from app.config import get_settings  # noqa: E402
+from app.google import oauth  # noqa: E402
+from app.google.client import set_google_override  # noqa: E402
+from app.mail import sync as mail_sync  # noqa: E402
 from app.db import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.security import agent_limiter, login_limiter  # noqa: E402
+from app.security import agent_limiter, google_sync_limiter, login_limiter  # noqa: E402
+from tests.fake_google import FakeGoogle  # noqa: E402
+
+TEST_GOOGLE_TOKEN_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="  # base64 of 32 bytes
 
 
 class ScriptedLLM:
@@ -69,12 +89,30 @@ def _fresh_db():
     orchestrator.set_dispatcher(orchestrator.execute_run)  # run the agent inline
     login_limiter.reset()
     agent_limiter.reset()
+    google_sync_limiter.reset()
+    oauth.clear_access_token_cache()
+    mail_sync.clear_skipped()
     yield
     set_llm_override(None)
+    set_google_override(None)
+    oauth.clear_access_token_cache()
+    mail_sync.clear_skipped()
 
 
 def make_client() -> TestClient:
     return TestClient(app, headers={"X-Requested-With": "XMLHttpRequest"})
+
+
+@pytest.fixture
+def google_fake(monkeypatch) -> FakeGoogle:
+    """Turn Google on (fake credentials) and route every Google call to a fresh FakeGoogle."""
+    s = get_settings()
+    monkeypatch.setattr(s, "google_client_id", "test-client-id")
+    monkeypatch.setattr(s, "google_client_secret", "test-client-secret")
+    monkeypatch.setattr(s, "google_token_key", TEST_GOOGLE_TOKEN_KEY)
+    fake = FakeGoogle()
+    set_google_override(fake)
+    return fake
 
 
 @pytest.fixture

@@ -289,3 +289,17 @@ tr:last-child td { border-bottom: none; }
   .nav a { padding: 6px 8px; }
   .task-row .mini-progress { display: none; }
 }
+
+.alert-green { background: var(--green-50); color: #166534; border-color: #bbf7d0; }
+.google-banner { background: var(--red-50); color: #991b1b; border-bottom: 1px solid #fecaca; font-size: 0.9rem; }
+.google-banner-inner { max-width: 1240px; margin: 0 auto; padding: 9px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.settings-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.settings-list dt { color: var(--muted); }
+.settings-list dd { margin: 0; word-break: break-all; }
+.recent-mails { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.recent-mails li { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.disconnect-confirm { margin-top: 16px; padding: 14px; border: 1px solid var(--border-strong); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
+.check-row { display: flex; align-items: center; gap: 8px; }
+.check-row input { width: auto; }
+.settings-gap { margin-top: 12px; }
+.settings-actions { margin-top: 16px; }
