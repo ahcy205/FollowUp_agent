@@ -26,7 +26,6 @@ export default function Inbox() {
   const navigate = useNavigate()
   const [data, setData] = useState<InboxData | null>(null)
   const [google, setGoogle] = useState<GoogleStatus | null>(null)
-  const [googleLoaded, setGoogleLoaded] = useState(false)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<Tab>('todo')
   const [syncing, setSyncing] = useState(false)
@@ -46,7 +45,6 @@ export default function Inbox() {
       .get<GoogleStatus>('/google/status')
       .then(setGoogle)
       .catch(() => {})
-      .finally(() => setGoogleLoaded(true))
   }, [])
 
   useEffect(() => {
@@ -102,45 +100,35 @@ export default function Inbox() {
     }
   }
 
-  const notConnected = !!google && (!google.enabled || google.status === 'disconnected')
-  if (googleLoaded && notConnected) {
-    return (
-      <div className="stack-lg">
-        <section className="card">
-          <h2>Gmail이 연결되어 있지 않습니다</h2>
-          <p className="muted">설정에서 Google 계정을 연결하면 받은 메일 중 업무가 여기에 정리됩니다.</p>
-          <Link to="/settings" className="btn btn-primary btn-sm">
-            설정으로 이동
-          </Link>
-        </section>
-      </div>
-    )
-  }
+  const notConnected = !!google && (!google.enabled || google.status !== 'connected')
 
   const counts = data?.counts
   const errorFor = (key: string) => (rowError?.key === key ? <div className="alert alert-red small">{rowError.message}</div> : null)
 
   return (
     <div className="stack-lg">
-      <div className="inbox-status small">
-        {google?.status === 'connected' ? (
-          <>
-            <span>
-              <span className="dot dot-green" /> Gmail 연결됨 · {google.google_email}
-            </span>
-            <span className="muted">
-              마지막 확인 {google.last_synced_at ? relative(google.last_synced_at) : '아직 없음'}
-            </span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={sync} disabled={syncing}>
-              {syncing ? '확인 중…' : '지금 확인'}
-            </button>
-          </>
-        ) : google?.status === 'reauth_required' ? (
+      {notConnected && (
+        <section className="card">
+          <h2>{google.enabled && google.status === 'reauth_required' ? 'Gmail 연결이 만료되었습니다' : 'Gmail이 연결되어 있지 않습니다'}</h2>
+          <p className="muted">설정에서 Google 계정을 연결하면 받은 메일 중 업무가 여기에 정리됩니다. 이미 만든 업무는 아래에서 계속 볼 수 있습니다.</p>
+          <Link to="/settings" className="btn btn-primary btn-sm">
+            설정으로 이동
+          </Link>
+        </section>
+      )}
+      {google?.enabled && google.status === 'connected' && (
+        <div className="inbox-status small">
           <span>
-            <span className="dot dot-red" /> Google 연결이 만료되어 새 메일을 가져오지 못합니다.
+            <span className="dot dot-green" /> Gmail 연결됨 · {google.google_email}
           </span>
-        ) : null}
-      </div>
+          <span className="muted">
+            마지막 확인 {google.last_synced_at ? relative(google.last_synced_at) : '아직 없음'}
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={sync} disabled={syncing}>
+            {syncing ? '확인 중…' : '지금 확인'}
+          </button>
+        </div>
+      )}
       {syncError && <div className="alert alert-red">{syncError}</div>}
       {google?.status === 'connected' && google.last_sync_error && (
         <div className="alert alert-red">{google.last_sync_error}</div>
@@ -169,7 +157,7 @@ export default function Inbox() {
               aria-pressed={tab === t.key}
               onClick={() => setTab(t.key)}
             >
-              {t.label} {counts ? counts[t.key] : ''}
+              {counts ? `${t.label} ${counts[t.key]}` : t.label}
             </button>
           ))}
         </div>

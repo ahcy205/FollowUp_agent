@@ -315,7 +315,6 @@ a.tag:hover { text-decoration: underline; }
 .pdot-mid { border-color: #e0a800; background: linear-gradient(90deg, #e0a800 50%, transparent 50%); }
 .pdot-low { border-color: #1e8e3e; background: transparent; }
 .inbox-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
-.inbox-status:empty { display: none; }
 .inbox-status .dot { vertical-align: 1px; }
 .inbox-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .inbox-now { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
