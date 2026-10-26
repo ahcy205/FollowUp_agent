@@ -115,6 +115,34 @@ cd backend && RUN_LLM_SMOKE=1 ../.venv/Scripts/python -m pytest smoke -v -s
 
 `DEMO_USER_PASSWORD`를 설정하면 기동 시 `DEMO_USER_EMAIL` 계정이 생성됩니다. 회원가입하는 모든 계정도 자기 전용 가상 데이터를 받습니다.
 
+### Google 연결 준비 (로컬)
+
+Gmail을 연결하려면 본인 Google Cloud 프로젝트에 OAuth 클라이언트를 만들어야 합니다. 설정하지 않으면 Google 기능만 꺼지고 나머지는 그대로 동작합니다.
+
+1. [Google Cloud Console](https://console.cloud.google.com/)에서 새 프로젝트를 만들고 **Gmail API**와 **Google Calendar API**를 사용 설정합니다.
+2. Google Auth Platform → **대상(Audience)**: 사용자 유형 **외부**, 게시 상태 **테스트**로 두고, 테스트 사용자에 본인 Gmail 주소를 추가합니다.
+3. **데이터 액세스**에 다음 권한을 추가합니다.
+   - `.../auth/gmail.readonly`
+   - `.../auth/gmail.send`
+   - `.../auth/calendar.events`
+   - `openid`
+   - `.../auth/userinfo.email`
+4. **클라이언트** → 클라이언트 만들기 → 유형 **웹 애플리케이션**. 승인된 리디렉션 URI에 다음 두 개를 넣습니다.
+   - `http://localhost:5173/api/google/callback`
+   - `http://localhost:8000/api/google/callback`
+5. `backend/.env`에 값을 넣습니다. 비밀값이므로 커밋하지 마세요.
+   ```
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   GOOGLE_TOKEN_KEY=...   # python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
+   PUBLIC_URL=http://localhost:5173   # 빌드본을 8000에서 볼 때는 http://localhost:8000
+   ```
+6. `alembic upgrade head` 후 서버를 다시 띄우고, 앱의 **설정** 화면에서 "Google 계정 연결"을 누릅니다. 연결되면 최근 3일치 받은편지함 메일을 가져오고, 이후 90초마다 새 메일을 확인합니다.
+
+- 브라우저 주소는 `PUBLIC_URL`과 같은 호스트(`localhost`)로 여세요. `127.0.0.1`로 열면 로그인 쿠키가 달라 연결이 실패합니다.
+- 테스트 상태 앱은 Google 정책상 갱신 토큰이 **7일 뒤 만료**됩니다. 만료되면 앱 상단 빨간 배너에서 다시 연결하세요.
+- 메일 판별 · 요약 · 캘린더 · 답장은 다음 단계에서 추가됩니다. 지금은 메일을 가져와 저장하는 것까지입니다.
+
 ## Railway 배포
 
 1. GitHub에 push → Railway에서 **New Project → Deploy from GitHub repo** (루트의 `Dockerfile`, `railway.json` 사용).
