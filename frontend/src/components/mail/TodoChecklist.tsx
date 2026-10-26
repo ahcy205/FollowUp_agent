@@ -4,6 +4,21 @@ import type { MailAct, PlanStep, Task } from '../../types'
 
 const UNDO_MS = 5000
 
+// 되돌리기로 보내는 항목은 서버 TodoItemIn 필드만 담는다(extra 필드는 422).
+function restorable(p: PlanStep) {
+  const item: Record<string, unknown> = {
+    id: p.id,
+    title: p.title,
+    done: p.done,
+    evidence: p.evidence ?? '',
+    due_at: p.due_at ?? null,
+    source: p.source === 'agent' ? 'agent' : 'user',
+  }
+  if (p.due_note) item.due_note = p.due_note
+  if (typeof p.merged_from === 'number') item.merged_from = p.merged_from
+  return item
+}
+
 /** 할 일 체크리스트 (설계 3.3절). 화면 상태(메모 편집 · 되돌리기)는 data가 바뀌어도(SSE) 유지된다. */
 export default function TodoChecklist({ task, act }: { task: Task; act: MailAct }) {
   const closed = task.status === 'COMPLETED' || task.status === 'CANCELLED'
@@ -47,7 +62,7 @@ export default function TodoChecklist({ task, act }: { task: Task; act: MailAct 
     if (!undo) return
     clearTimeout(undoTimer.current)
     const { item, index } = undo
-    await run('restore', () => act('/todos', { op: 'restore', item, index }))
+    await run('restore', () => act('/todos', { op: 'restore', item: restorable(item), index }))
     setUndo(null)
   }
 

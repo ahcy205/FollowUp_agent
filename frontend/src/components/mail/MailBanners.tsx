@@ -88,7 +88,7 @@ export default function MailBanners({
       {mail.undoable_merges.map((m) => (
         <div key={m.source_id} className="alert alert-green alert-action">
           <span>
-            업무 #{m.source_id} '{m.title}'를 합쳤습니다
+            업무 #{m.source_id} '{m.title}'이(가) 합쳐졌습니다
           </span>
           <button
             type="button"

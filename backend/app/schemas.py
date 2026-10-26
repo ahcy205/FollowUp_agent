@@ -201,6 +201,7 @@ class TodoItemIn(_Strict):
     due_at: str | None = Field(default=None, max_length=40)
     source: Literal["agent", "user"] = "user"
     due_note: str | None = Field(default=None, max_length=2000)
+    merged_from: int | None = None  # 합쳐 온 할 일 표시. 지웠다 되살려도 합치기 되돌리기가 원래 업무로 보낸다
 
 
 class TodoOpIn(_Strict):

@@ -63,11 +63,11 @@ export function tokens(n: number | undefined) {
 
 const WEEKDAYS = '일월화수목금토'
 
-// "10/30(금)" 또는 "10/30(금) 15:00". 시각이 없는(하루 종일) 기한은 날짜만 쓴다.
-export function shortDate(iso: string, withTime = true) {
+// "10/30(금)" 또는 "10/30(금) 15:00". withTime이면 시각을 붙이되, exact가 아니면 00:00(하루 종일로 보임)은 뺀다.
+export function shortDate(iso: string, withTime = true, exact = false) {
   const d = parseDate(iso)
   const day = `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`
-  if (!withTime || (d.getHours() === 0 && d.getMinutes() === 0)) return day
+  if (!withTime || (!exact && d.getHours() === 0 && d.getMinutes() === 0)) return day
   return `${day} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 

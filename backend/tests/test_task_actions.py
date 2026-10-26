@@ -594,3 +594,16 @@ def test_api_lenient_inputs(client):
     assert client.post(f"/api/tasks/{tid}/deadline", json={"date": future, "time": "09:00:00"}).status_code == 200
     r = client.post(f"/api/tasks/{tid}/deadline", json={"date": future, "time": "9 o'clock!"})
     assert r.status_code == 400 and "HH:MM" in r.json()["detail"]
+
+
+def test_api_restore_keeps_merged_from(client):
+    """합쳐 온 할 일(merged_from)을 지웠다 되살려도 표시가 남아야 합치기를 되돌릴 때 원래 업무로 간다."""
+    me = register(client)
+    item = {"id": 3, "title": "납기 확인", "done": False, "evidence": "", "due_at": None, "source": "agent",
+            "merged_from": 42}
+    tid = _api_task(me["id"], plan=[item])
+    r = client.post(f"/api/tasks/{tid}/todos", json={"op": "delete", "id": 3})
+    assert r.status_code == 200 and r.json()["task"]["plan"] == []
+    r = client.post(f"/api/tasks/{tid}/todos", json={"op": "restore", "item": item, "index": 0})
+    assert r.status_code == 200, r.text
+    assert r.json()["task"]["plan"] == [item]

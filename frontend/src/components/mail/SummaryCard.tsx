@@ -108,7 +108,7 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
       <div className={`deadline-box${badge?.late ? ' late' : ''}`}>
         {task.deadline_at ? (
           <div className="deadline-head">
-            <b>기한 {shortDate(task.deadline_at, !task.deadline_all_day)}</b>
+            <b>기한 {shortDate(task.deadline_at, !task.deadline_all_day, true)}</b>
             {badge && <span className={`deadline-badge${badge.late ? ' late' : ''}`}>{badge.text}</span>}
             {estimated && <span className="tag tag-amber">확인 필요</span>}
             {!closed && !editing && (
