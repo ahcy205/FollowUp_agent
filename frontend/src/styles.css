@@ -301,3 +301,5 @@ tr:last-child td { border-bottom: none; }
 .disconnect-confirm { margin-top: 16px; padding: 14px; border: 1px solid var(--border-strong); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
 .check-row { display: flex; align-items: center; gap: 8px; }
 .check-row input { width: auto; }
+.settings-gap { margin-top: 12px; }
+.settings-actions { margin-top: 16px; }

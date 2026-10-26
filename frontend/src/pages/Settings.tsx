@@ -19,7 +19,8 @@ const connect = () => {
 export default function Settings() {
   const [params] = useSearchParams()
   const [status, setStatus] = useState<GoogleStatus | null>(null)
-  const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [deleteMail, setDeleteMail] = useState(false)
@@ -28,8 +29,11 @@ export default function Settings() {
   const load = useCallback(() => {
     api
       .get<GoogleStatus>('/google/status')
-      .then(setStatus)
-      .catch((e: Error) => setError(e.message))
+      .then((s) => {
+        setStatus(s)
+        setLoadError('')
+      })
+      .catch((e: Error) => setLoadError(e.message))
   }, [])
 
   useEffect(() => {
@@ -45,11 +49,11 @@ export default function Settings() {
 
   const sync = async () => {
     setSyncing(true)
-    setError('')
+    setActionError('')
     try {
       setStatus(await api.post<GoogleStatus>('/google/sync'))
     } catch (e) {
-      setError((e as Error).message)
+      setActionError((e as Error).message)
     } finally {
       setSyncing(false)
     }
@@ -57,14 +61,14 @@ export default function Settings() {
 
   const disconnect = async () => {
     setDisconnecting(true)
-    setError('')
+    setActionError('')
     try {
       await api.post('/google/disconnect', { delete_mail: deleteMail })
       setConfirming(false)
       setDeleteMail(false)
       load()
     } catch (e) {
-      setError((e as Error).message)
+      setActionError((e as Error).message)
     } finally {
       setDisconnecting(false)
     }
@@ -81,11 +85,22 @@ export default function Settings() {
       </div>
       {g === 'connected' && <div className="alert alert-green">연결되었습니다. 첫 메일을 가져오는 중입니다.</div>}
       {g === 'error' && <div className="alert alert-red">{REASONS[reason] ?? REASONS.exchange}</div>}
-      {error && <div className="alert alert-red">{error}</div>}
+      {actionError && <div className="alert alert-red">{actionError}</div>}
       <div className="card">
         <h2>Google 계정</h2>
         {!status ? (
-          <div className="muted">불러오는 중…</div>
+          loadError ? (
+            <div className="stack-lg">
+              <div className="muted">상태를 불러오지 못했습니다. {loadError}</div>
+              <div>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={load}>
+                  다시 시도
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="muted">불러오는 중…</div>
+          )
         ) : !status.enabled ? (
           <div className="muted">서버에 Google 설정이 없습니다. README의 Google 연결 준비를 따라 주세요.</div>
         ) : status.status === 'disconnected' ? (
@@ -112,10 +127,9 @@ export default function Settings() {
               <dd>{status.mail_count}통</dd>
             </dl>
             {status.last_sync_error && (
-              <div className="alert alert-red" style={{ marginTop: 12 }}>
-                {status.last_sync_error}
-              </div>
+              <div className="alert alert-red settings-gap">{status.last_sync_error}</div>
             )}
+            {loadError && <div className="muted small settings-gap">상태를 새로 불러오지 못했습니다. {loadError}</div>}
             {status.recent.length > 0 && (
               <ul className="recent-mails">
                 {status.recent.slice(0, 5).map((m, i) => (
@@ -127,7 +141,7 @@ export default function Settings() {
                 ))}
               </ul>
             )}
-            <div className="approval-actions" style={{ marginTop: 16 }}>
+            <div className="approval-actions settings-actions">
               <button type="button" className="btn btn-sm" onClick={sync} disabled={syncing}>
                 {syncing ? '확인 중…' : '지금 확인'}
               </button>
