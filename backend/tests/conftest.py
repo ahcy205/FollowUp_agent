@@ -24,6 +24,7 @@ os.environ["LLM_ANALYSIS_MODEL"] = ""
 os.environ["LLM_RPM_LIMIT"] = "0"  # no client-side pacing sleeps
 os.environ["MAIL_BACKFILL_DAYS"] = "3"
 os.environ["USER_TIMEZONE"] = "Asia/Seoul"
+os.environ["MAIL_TRIAGE_ENABLED"] = "false"  # mail text must never reach an LLM unless a test turns it on
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

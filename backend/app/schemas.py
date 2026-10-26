@@ -65,6 +65,11 @@ class TaskBrief(ORM):
     customer_id: int | None
     plan: list
     result_summary: str
+    brief: dict
+    deadline_at: datetime | None
+    deadline_all_day: bool
+    deadline_kind: str
+    deadline_source: str
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

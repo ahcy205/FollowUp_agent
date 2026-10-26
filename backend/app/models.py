@@ -97,6 +97,7 @@ class Document(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (UniqueConstraint("user_id", "gmail_thread_id", name="uq_tasks_user_gmail_thread"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -114,6 +115,12 @@ class Task(Base):
     priority: Mapped[str] = mapped_column(String(10), default="NORMAL")
     origin: Mapped[str] = mapped_column(String(20), default="user")  # user | agent | seed
     agent_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    gmail_thread_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    brief: Mapped[dict] = mapped_column(JSON, default=dict)
+    deadline_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    deadline_all_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    deadline_kind: Mapped[str] = mapped_column(String(10), default="none")  # explicit | estimated | none
+    deadline_source: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(Timestamp)
