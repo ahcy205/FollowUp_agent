@@ -39,10 +39,10 @@ def test_wrong_key_raises():
 
 
 def test_google_disabled_without_key():
-    s = Settings(google_client_id="id", google_client_secret="secret", google_token_key="")
+    s = Settings(_env_file=None, google_client_id="id", google_client_secret="secret", google_token_key="")
     assert s.google_enabled is False
     k = base64.b64encode(_key()).decode()
-    s2 = Settings(google_client_id="id", google_client_secret="secret", google_token_key=k)
+    s2 = Settings(_env_file=None, google_client_id="id", google_client_secret="secret", google_token_key=k)
     assert s2.google_enabled is True
     assert s2.google_redirect_uri == s2.public_url.rstrip("/") + "/api/google/callback"
 
@@ -50,4 +50,4 @@ def test_google_disabled_without_key():
 def test_invalid_key_length_rejected():
     short = base64.b64encode(os.urandom(16)).decode()
     with pytest.raises(ValueError):
-        Settings(google_token_key=short)
+        Settings(_env_file=None, google_token_key=short)

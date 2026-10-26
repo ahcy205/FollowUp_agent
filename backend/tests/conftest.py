@@ -12,6 +12,18 @@ os.environ["LLM_API_KEY"] = ""
 os.environ["DEMO_USER_PASSWORD"] = ""
 os.environ["MAX_AGENT_STEPS"] = "10"
 os.environ["MAIL_SYNC_ENABLED"] = "false"  # no background sync thread in tests
+# Real values in backend/.env must never reach tests: environment variables beat env_file in pydantic-settings.
+os.environ["GOOGLE_CLIENT_ID"] = ""
+os.environ["GOOGLE_CLIENT_SECRET"] = ""
+os.environ["GOOGLE_TOKEN_KEY"] = ""
+os.environ["PUBLIC_URL"] = "http://localhost:5173"  # Origin/CSRF checks, redirect URI
+os.environ["ALLOWED_HOSTS"] = "localhost,127.0.0.1"
+os.environ["LLM_PROVIDER"] = "gemini"
+os.environ["LLM_MODEL"] = ""
+os.environ["LLM_ANALYSIS_MODEL"] = ""
+os.environ["LLM_RPM_LIMIT"] = "0"  # no client-side pacing sleeps
+os.environ["MAIL_BACKFILL_DAYS"] = "3"
+os.environ["USER_TIMEZONE"] = "Asia/Seoul"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
