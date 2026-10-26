@@ -73,6 +73,9 @@ class TaskBrief(ORM):
     calendar_state: str
     calendar_event_url: str
     calendar_error: str
+    snoozed_until: datetime | None
+    priority_source: str
+    merged_into_id: int | None
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None

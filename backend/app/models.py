@@ -127,6 +127,13 @@ class Task(Base):
     calendar_state: Mapped[str] = mapped_column(String(20), default="none", index=True)
     calendar_error: Mapped[str] = mapped_column(Text, default="")
     calendar_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # 받은 업무 화면: 스누즈 · 중요도 출처(llm | user) · 합치기
+    snoozed_until: Mapped[datetime | None] = mapped_column(Timestamp)
+    snooze_returned_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    priority_source: Mapped[str] = mapped_column(String(10), default="llm")
+    merged_into_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
+    merge_dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
+    merge_undo: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(Timestamp)
