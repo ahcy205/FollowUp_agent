@@ -106,6 +106,8 @@ def _parse(raw, keys: set[str]) -> dict[str, tuple[str, str]]:
         if not isinstance(item, dict):
             continue
         key, label, reason = item.get("key"), item.get("label"), item.get("reason")
+        if not isinstance(key, str) or not isinstance(label, str):
+            continue  # 리스트 · 딕셔너리 값은 해시가 안 되므로 집합 검사 전에 거른다
         if key not in keys or key in out or label not in ("work", "not_work"):
             continue
         out[key] = (label, reason[:REASON_CHARS] if isinstance(reason, str) else "")
