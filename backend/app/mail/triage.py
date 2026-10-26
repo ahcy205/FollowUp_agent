@@ -1,7 +1,10 @@
 """업무 메일 판별: 규칙 필터(LLM 없음) 다음에 최대 10통 묶음마다 LLM을 한 번 부른다.
 
-LLM이 빠뜨린 메일은 pending으로 남기고 시도 횟수를 올린다. 3회째에는 not_work로 확정해
-무한 재시도도, 조용한 유실도 없게 한다. 로그에는 건수와 메일 번호만 남긴다.
+이미 업무가 있는 Gmail 스레드에 온 메일은 판별하지 않고 바로 work로 둔다(명세 4.2.4). 접수가 업무에 붙인다.
+
+LLM 제공자 장애(LLMError: 한도 · 5xx · 시간 초과 · 인증 · 키 없음)면 pending으로 남기고 시도 횟수는 올리지 않는다
+(명세 4.3.3). LLM이 답했는데 메일을 빠뜨렸거나 형식이 틀렸거나, 그 밖의 예외가 났으면 시도 횟수를 올린다.
+3회째에는 not_work로 확정해 무한 재시도도, 조용한 유실도 없게 한다. 로그에는 건수와 메일 번호만 남긴다.
 """
 import logging
 import re
@@ -12,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.guard import wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
-from app.models import Email, EmailDirection
+from app.models import Email, EmailDirection, Task
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +25,7 @@ BODY_CHARS = 1500
 HEADER_CHARS = 200
 REASON_CHARS = 200
 FAILED_REASON = "자동 판별에 실패했습니다 — 직접 확인해 주세요"
+THREAD_REASON = "업무 스레드의 새 메일"
 
 _LABEL_REASONS = (
     ("CATEGORY_PROMOTIONS", "프로모션 메일"),
@@ -55,6 +59,7 @@ TRIAGE_SYSTEM = """당신은 사용자의 받은 메일을 업무 메일인지 �
 
 @dataclass
 class TriageResult:
+    thread: int = 0  # 이미 업무가 있는 스레드의 메일이라 LLM 없이 work
     filtered: int = 0  # 규칙 필터로 확정
     work: int = 0  # LLM이 work로 판정
     not_work: int = 0  # LLM이 not_work로 판정
@@ -138,8 +143,18 @@ def triage_pending(db: Session, user_id: int, llm: LLMClient, *, max_batches: in
         .order_by(Email.received_at, Email.id)
     ).all()
 
+    thread_ids = {e.gmail_thread_id for e in pending if e.gmail_thread_id}
+    work_threads = set(db.scalars(
+        select(Task.gmail_thread_id)
+        .where(Task.user_id == user_id, Task.origin == "mail", Task.gmail_thread_id.in_(thread_ids))
+    ).all()) if thread_ids else set()
+
     remaining: list[Email] = []
     for email in pending:
+        if email.gmail_thread_id in work_threads:
+            email.triage, email.triage_reason = "work", THREAD_REASON
+            result.thread += 1
+            continue
         reason = rule_filter(email)
         if reason is None:
             remaining.append(email)
@@ -147,7 +162,7 @@ def triage_pending(db: Session, user_id: int, llm: LLMClient, *, max_batches: in
             email.triage = "filtered"
             email.triage_reason = reason
             result.filtered += 1
-    if result.filtered:
+    if result.filtered or result.thread:
         db.commit()
 
     for start in range(0, min(len(remaining), max_batches * BATCH_SIZE), BATCH_SIZE):
@@ -155,15 +170,19 @@ def triage_pending(db: Session, user_id: int, llm: LLMClient, *, max_batches: in
         by_key = {f"m{i}": e for i, e in enumerate(batch, 1)}
         result.llm_calls += 1
         try:
-            raw = llm.structured(TRIAGE_SYSTEM, _build_prompt(batch), TRIAGE_SCHEMA)
-        except LLMError as e:
-            for email in batch:
-                _miss(email, result)
-            db.commit()
+            verdicts = _parse(llm.structured(TRIAGE_SYSTEM, _build_prompt(batch), TRIAGE_SCHEMA), set(by_key))
+        except LLMError as e:  # 제공자 장애: 시도 횟수를 올리지 않고 다음 주기에 다시
             log.warning("mail triage stopped for user %s: %s (%d mails kept pending)",
                         user_id, type(e).__name__, len(batch))
             break
-        verdicts = _parse(raw, set(by_key))
+        except Exception as e:  # noqa: BLE001 - 예상 밖 오류도 시도로 세야 같은 묶음을 끝없이 다시 묻지 않는다
+            db.rollback()
+            for email in batch:
+                _miss(email, result)
+            db.commit()
+            log.warning("mail triage stopped for user %s: unexpected %s (%d mails counted as an attempt)",
+                        user_id, type(e).__name__, len(batch))
+            break
         missing = 0
         for key, email in by_key.items():
             if key not in verdicts:
@@ -181,6 +200,7 @@ def triage_pending(db: Session, user_id: int, llm: LLMClient, *, max_batches: in
             log.info("mail triage for user %s: %d of %d mails missing from the answer",
                      user_id, missing, len(batch))
 
-    log.info("mail triage for user %s: filtered=%d work=%d not_work=%d failed=%d llm_calls=%d",
-             user_id, result.filtered, result.work, result.not_work, result.failed, result.llm_calls)
+    log.info("mail triage for user %s: thread=%d filtered=%d work=%d not_work=%d failed=%d llm_calls=%d",
+             user_id, result.thread, result.filtered, result.work, result.not_work, result.failed,
+             result.llm_calls)
     return result

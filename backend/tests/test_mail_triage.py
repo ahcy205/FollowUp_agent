@@ -6,7 +6,8 @@ from sqlalchemy import select
 from app.agent.llm import LLMError
 from app.db import SessionLocal
 from app.mail.triage import FAILED_REASON, TRIAGE_SCHEMA, TRIAGE_SYSTEM, rule_filter, triage_pending
-from app.models import Email, EmailDirection, User
+from app.mail.intake import intake_work_mails
+from app.models import Email, EmailDirection, Task, User
 from tests.conftest import ScriptedLLM
 
 BASE = datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc)
@@ -22,13 +23,13 @@ def _user(db, email="u@example.com") -> int:
 
 def _mail(uid, *, sender="kim@partner.co.kr", subject="견적 요청", content="견적서를 보내 주세요.",
           labels=None, list_unsubscribe=False, precedence="", direction=EmailDirection.INBOUND,
-          gmail=True, minutes=0, triage="pending", meta_extra=None) -> Email:
+          gmail=True, minutes=0, triage="pending", meta_extra=None, thread=None) -> Email:
     n = next(_seq)
     return Email(
         user_id=uid, sender=sender, receiver="me@example.com", subject=subject, content=content,
         direction=direction, processed=False,
         received_at=BASE + timedelta(minutes=minutes),
-        gmail_message_id=f"msg-{n}" if gmail else None, gmail_thread_id=f"thr-{n}" if gmail else None,
+        gmail_message_id=f"msg-{n}" if gmail else None, gmail_thread_id=(thread or f"thr-{n}") if gmail else None,
         triage=triage,
         gmail_meta={"labels": labels if labels is not None else ["INBOX"],
                     "list_unsubscribe": list_unsubscribe, "precedence": precedence,
@@ -247,19 +248,73 @@ def test_llm_error_keeps_pending_and_stops(client):
         r = triage_pending(db, uid, llm, max_batches=3)
         assert len(llm.structured_prompts) == 1 and r.llm_calls == 1
         es = _get(db, ids)
-        for e in es[:10]:
-            assert e.triage == "pending" and e.gmail_meta["triage_attempts"] == 1
-        for e in es[10:]:
+        # 제공자 장애(한도 · 오류)는 시도 횟수에 넣지 않는다 (명세 4.3.3, 7절)
+        for e in es:
             assert e.triage == "pending" and "triage_attempts" not in e.gmail_meta
+        assert r.failed == 0
 
 
-def test_llm_error_third_time_marks_not_work(client):
+def test_llm_error_never_finalizes(client):
     with SessionLocal() as db:
         uid = _user(db)
         ids = _add(db, [_mail(uid, meta_extra={"triage_attempts": 2})])
-        r = triage_pending(db, uid, ScriptedLLM(structured_steps=[LLMError("x")]), max_batches=3)
+        for _ in range(5):
+            llm = ScriptedLLM(structured_steps=[LLMError("x")])
+            r = triage_pending(db, uid, llm, max_batches=3)
+            assert len(llm.structured_prompts) == 1 and r.failed == 0
         (e,) = _get(db, ids)
-        assert e.triage == "not_work" and e.triage_reason == FAILED_REASON and r.failed == 1
+        assert e.triage == "pending" and e.gmail_meta["triage_attempts"] == 2
+
+
+def test_unexpected_error_counts_as_attempt_and_stops(client):
+    with SessionLocal() as db:
+        uid = _user(db)
+        ids = _add(db, [_mail(uid, minutes=i) for i in range(12)])
+        for i in range(3):
+            llm = ScriptedLLM(structured_steps=[RuntimeError("sdk"), _all_work])
+            r = triage_pending(db, uid, llm, max_batches=3)
+            assert len(llm.structured_prompts) == 1  # 이번 주기는 멈춘다
+            es = _get(db, ids)
+            if i < 2:
+                assert all(e.triage == "pending" and e.gmail_meta["triage_attempts"] == i + 1 for e in es[:10])
+        assert all(e.triage == "not_work" and e.triage_reason == FAILED_REASON for e in es[:10])
+        assert all(e.triage == "pending" and "triage_attempts" not in e.gmail_meta for e in es[10:])
+        assert r.failed == 10
+        # 확정된 10통은 다시 묻지 않는다. 남은 2통만 한 번 판정한다
+        llm = ScriptedLLM(structured_steps=[_all_work])
+        triage_pending(db, uid, llm, max_batches=3)
+        assert [p.count('source="mail:') for p in llm.structured_prompts] == [2]
+
+
+def test_thread_mail_goes_to_work_without_llm(client):
+    with SessionLocal() as db:
+        uid = _user(db)
+        other = _user(db, "o@example.com")
+        db.add_all([
+            Task(user_id=uid, title="기존", goal="기존 업무", origin="mail", agent_enabled=False,
+                 gmail_thread_id="thr-T", brief={"analysis": "done", "email_id": 0}),
+            Task(user_id=other, title="남의 업무", goal="g", origin="mail", agent_enabled=False,
+                 gmail_thread_id="thr-O", brief={"analysis": "done", "email_id": 0}),
+        ])
+        db.commit()
+        (task_id,) = db.scalars(select(Task.id).where(Task.user_id == uid)).all()
+        ids = _add(db, [
+            _mail(uid, thread="thr-T", labels=["INBOX", "CATEGORY_UPDATES"], minutes=0),
+            _mail(uid, thread="thr-T", minutes=1),
+            _mail(uid, thread="thr-O", labels=["CATEGORY_UPDATES"], minutes=2),  # 다른 사용자의 스레드
+        ])
+        llm = ScriptedLLM(structured_steps=[AssertionError("LLM must not be called")])
+        r = triage_pending(db, uid, llm, max_batches=3)
+        assert llm.structured_prompts == [] and r.llm_calls == 0
+        a, b, c = _get(db, ids)
+        for e in (a, b):
+            assert e.triage == "work" and e.triage_reason == "업무 스레드의 새 메일"
+        assert c.triage == "filtered"
+        assert r.thread == 2 and r.filtered == 1
+        intake_work_mails(db, uid, llm, max_mails=5, tz="Asia/Seoul")
+        assert llm.structured_prompts == []
+        a, b, _ = _get(db, ids)
+        assert a.task_id == task_id and b.task_id == task_id
 
 
 def test_max_batches(client):
