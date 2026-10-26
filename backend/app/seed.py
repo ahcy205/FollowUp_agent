@@ -107,10 +107,13 @@ TASKS = [
 
 
 def reset_user_data(db: Session, user: User) -> None:
-    """Delete everything owned by the user, then regenerate fixtures. Scoped strictly by user_id."""
+    """Delete the user's demo data and regenerate fixtures. Scoped by user_id; keeps Gmail mail and Google link."""
     uid = user.id
-    for model in (AgentActionLog, ApprovalRequest, AgentRun, Email):
+    for model in (AgentActionLog, ApprovalRequest, AgentRun):
         db.execute(delete(model).where(model.user_id == uid))
+    # Synced Gmail mail is real mail: history_id has moved past it, so deleting it would lose it for good.
+    # The GoogleAccount row is never touched here; customer/task links on kept mail fall to NULL via the FKs.
+    db.execute(delete(Email).where(Email.user_id == uid, Email.gmail_message_id.is_(None)))
     db.execute(Task.__table__.update().where(Task.user_id == uid).values(parent_task_id=None))
     for model in (Task, Document, Customer):
         db.execute(delete(model).where(model.user_id == uid))
