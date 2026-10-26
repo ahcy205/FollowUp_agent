@@ -46,9 +46,14 @@ TEST_GOOGLE_TOKEN_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="  # base64
 class ScriptedLLM:
     """Deterministic stand-in for Claude. Each step is a function of the conversation so far."""
 
-    def __init__(self, steps: list[Callable[[list[dict]], LLMResponse]] | None = None, analysis: dict | None = None):
+    def __init__(self, steps: list[Callable[[list[dict]], LLMResponse]] | None = None, analysis: dict | None = None,
+                 structured_steps: list | None = None):
         self.steps = list(steps or [])
         self.analysis = analysis or {}
+        # structured() answers in order: a dict is returned, an Exception is raised,
+        # a callable(prompt, schema) is called. Once empty, `analysis` is returned.
+        self.structured_steps = list(structured_steps or [])
+        self.structured_prompts: list[str] = []
         self.calls = 0
         self.seen_messages: list[list[dict]] = []
 
@@ -60,7 +65,15 @@ class ScriptedLLM:
         return self.steps.pop(0)(messages)
 
     def structured(self, system, prompt, schema):
-        return self.analysis
+        self.structured_prompts.append(prompt)
+        if not self.structured_steps:
+            return self.analysis
+        step = self.structured_steps.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        if callable(step):
+            return step(prompt, schema)
+        return step
 
 
 def tool_call(*calls: tuple[str, dict], text: str = "") -> LLMResponse:
