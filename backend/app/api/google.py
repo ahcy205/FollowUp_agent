@@ -90,6 +90,17 @@ def _best_effort_revoke(token: str) -> None:
         log.warning("google revoke failed: %s", type(e).__name__)
 
 
+def _revoke_rejected_grant(db: Session, user_id: int, access_token: str) -> None:
+    """Drop a grant we refuse to store, but only on a first-time connect.
+
+    Google keeps one grant per user+client, so revoking the new token would also kill the refresh
+    token of an existing connection. A reconnect that fails keeps the working connection as is.
+    On a first connect, revoking also clears the lingering consent that withholds a refresh token.
+    """
+    if _account(db, user_id) is None:
+        _best_effort_revoke(access_token)
+
+
 @router.get("/status", response_model=GoogleStatusOut)
 def google_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return build_status(db, user)
@@ -156,13 +167,13 @@ def callback(request: Request, code: str | None = None, state: str | None = None
     # 5. Every required permission must be granted (users can untick boxes on the consent screen).
     if not set(REQUIRED_SCOPES) <= _normalize_scopes(grant.scopes):
         log.info("google callback rejected: missing scopes user=%s", user.id)
-        _best_effort_revoke(grant.access_token)
+        _revoke_rejected_grant(db, user.id, grant.access_token)
         return _settings_redirect(reason="scopes")
 
     # 6. Without a refresh token we cannot sync in the background.
     if not grant.refresh_token:
         log.info("google callback rejected: no refresh token user=%s", user.id)
-        _best_effort_revoke(grant.access_token)  # drop the lingering grant so the next consent issues one
+        _revoke_rejected_grant(db, user.id, grant.access_token)
         return _settings_redirect(reason="no_refresh_token")
 
     # 7. Which Gmail address this is.

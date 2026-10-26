@@ -137,6 +137,7 @@ def test_callback_missing_scope(client, google_fake):
     register(client)
     assert _reason(_callback(client, _connect(client))) == "scopes"
     assert _accounts() == []
+    assert google_fake.revoked == ["at-x"]  # first connect: the unused grant is dropped
 
 
 def test_callback_accepts_userinfo_email_alias(client, google_fake):
@@ -154,6 +155,28 @@ def test_callback_without_refresh_token(client, google_fake):
     register(client)
     assert _reason(_callback(client, _connect(client))) == "no_refresh_token"
     assert _accounts() == []
+    assert google_fake.revoked == ["at-x"]
+
+
+@pytest.mark.parametrize("grant, reason", [
+    (TokenGrant(access_token="at-bad", refresh_token="1//other", expires_in=3600,
+                scopes=[s for s in REQUIRED_SCOPES if not s.endswith("gmail.send")]), "scopes"),
+    (TokenGrant(access_token="at-bad", refresh_token=None, expires_in=3600,
+                scopes=list(REQUIRED_SCOPES)), "no_refresh_token"),
+])
+def test_failed_reconnect_keeps_existing_connection(client, google_fake, grant, reason):
+    # Google keeps one grant per user+client: revoking the new token would kill the stored refresh token.
+    register(client)
+    assert _reason(_callback(client, _connect(client))) is None
+    [before] = _accounts()
+    google_fake.grant = grant
+    assert _reason(_callback(client, _connect(client))) == reason
+    assert google_fake.revoked == []
+    [after] = _accounts()
+    assert after.status == GoogleAccountStatus.CONNECTED
+    assert after.refresh_token_enc == before.refresh_token_enc
+    assert after.scopes == before.scopes and after.last_sync_error == ""
+    assert client.get("/api/google/status").json()["status"] == "connected"
 
 
 def test_callback_user_denied(client, google_fake):
