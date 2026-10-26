@@ -86,5 +86,7 @@ def build_event(task: Task, *, tz: str, public_url: str, salt: str) -> dict:
         "start": start,
         "end": end,
         "reminders": {"useDefault": False, "overrides": overrides},
+        # People the calendar is shared with see only "busy", not the mail-derived details.
+        "visibility": "private",
         "extendedProperties": {"private": {"followupTask": private_marker(task, salt)}},
     }

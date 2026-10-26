@@ -66,6 +66,12 @@ def test_reminders():
     assert day == {"useDefault": False, "overrides": [{"method": "popup", "minutes": 900}]}
 
 
+def test_event_is_private():
+    # Shared calendars must not expose mail-derived details to other viewers.
+    for task in (make_task(), make_task(deadline_all_day=True)):
+        assert build_event(task, tz=TZ, public_url=URL, salt=SALT)["visibility"] == "private"
+
+
 def test_title_variants():
     assert build_event(make_task(), tz=TZ, public_url=URL, salt=SALT)["summary"] == "[업무] 견적서 회신"
     assert build_event(make_task(deadline_kind="estimated"), tz=TZ, public_url=URL, salt=SALT)["summary"] == "(확인 필요) [업무] 견적서 회신"
