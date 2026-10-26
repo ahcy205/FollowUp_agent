@@ -249,12 +249,12 @@ def test_api_ownership_and_limits(client): ...  # 다른 사용자 404, 에이�
   - `resolve_merged(db, task) -> Task`: `merged_into_id`를 따라간다. 최대 5단계, 순환이면 멈춘다.
   - `merge(db, user, source: Task, target: Task, now) -> None` (설계 4.3절)
     - 거절 조건(409): 서로 같은 업무, 합쳐진 업무, 닫힌 원본, 다른 사용자, 메일 업무가 아닌 경우
-    - `target.merge_undo`에 기록하는 것
+    - `target.merge_undo`에 기록하는 것 (→ 변경 #2)
       - `{"source_id", "at", "moved_email_ids", "added_todo_ids", "added_requests"}`
       - `"before"`: target의 deadline_at · all_day · kind · source · priority · priority_source
       - `"after"`: 합친 직후 같은 값
       - `"source_before"`: source의 status · current_step · completed_at · snoozed_until (→ 변경 #2)
-  - `undo_merge(db, user, target: Task, now) -> Task` (설계 4.3절)
+  - `undo_merge(db, user, target: Task, now) -> Task` (설계 4.3절) (→ 변경 #2)
     - 10분이 지났거나 기록이 없으면 409를 돌려준다.
     - 옮긴 메일, 그리고 합친 뒤 source 스레드로 들어온 메일(`gmail_thread_id == source.gmail_thread_id`)을 source로 돌려보낸다.
     - 추가한 할 일은 현재 체크 상태 그대로 돌려보내고, 추가한 요청은 target에서 뺀다.
@@ -443,7 +443,7 @@ def test_fingerprint_changes_on_snooze(): ... # snooze 후 fingerprint 달라짐
 | # | 날짜 | 작업 | 계획 | 실제 구현 | 이유 | 영향 |
 |---|---|---|---|---|---|---|
 | 1 | 2026-10-26 | Task 4 | `merge.py`를 새로 만든다 | `resolve_merged`는 Task 3 리뷰 수정 때 먼저 만들어져 있어 같은 파일에 합치기 · 되돌리기를 더했다. `ActionError`는 `app/mail/errors.py`로 옮기고 `task_actions`가 다시 내보낸다 | `task_actions → intake → merge` 순환 import를 피하려고 | 없음 (`task_actions.ActionError` 그대로 쓸 수 있음) |
-| 2 | 2026-10-26 | Task 4 | `merge_undo` 기록 항목 | `source_before`에 `next_action`을, 기록에 `added_todo_from`(A 번호 → B 원래 번호)을 더했다. 옮긴 할 일은 B의 plan에서 빼고(중복이라 건너뛴 것은 B에 남김), 되돌릴 때 원래 번호로 돌려놓는다(겹치면 새 번호) | B를 닫을 때 다음 행동을 비우므로 복구가 필요하고, 되돌린 뒤 할 일 번호가 원래대로여야 하므로 | 없음 (내부 기록 형식) |
+| 2 | 2026-10-26 | Task 4 | `merge_undo`는 기록 하나, `/merge/undo`는 본문 없음, `undo_merge(db, user, target, now)` | `merge_undo`를 `{str(원본 번호): 기록}` 맵으로 바꾸고, 쓸 때마다 10분 지난 기록을 지운다. 되돌리기는 `POST /api/tasks/{A}/merge/undo` `{"source_id"}`(extra=forbid), `undo_merge(db, user, target, source_id, now)`로 원본 하나만 되돌리고 그 기록만 지운다. `undoable_sources(task, now)`(최근 것부터)를 더했다. 옮긴 할 일에는 `merged_from: 원본 번호`를 붙이고 되돌릴 때 번호가 아니라 이 표시로 찾는다(돌려보낼 때 표시를 지운다). 각 기록에 `source_before.next_action`과 `added_todo_from`(A 번호 → B 원래 번호)을 더했다. 옮긴 할 일은 B의 plan에서 빼고(같은 제목이라 건너뛴 것은 B에 남김), 되돌릴 때 원래 번호로 돌려놓는다(겹치면 새 번호). 분석 대기(`analysis=pending`) 업무는 원본으로 합칠 수 없고, `analyze_into_task`는 분석 결과를 쓰기 전에 업무를 다시 읽어 닫혔거나 합쳐졌으면 결과를 버린다 | 리뷰: 10분 안에 두 업무를 합치면 앞 기록이 덮여 되돌릴 수 없었다. 번호로 고르면 사용자가 새로 만든 할 일이 B로 갈 수 있었다. 분석 워커가 합쳐진 업무를 다시 열 수 있었다 | 프론트(Task 5 · 6)는 되돌릴 때 `source_id`를 보내고 `can_undo_merge`를 `undoable_sources`로 만든다 |
 
 ## 이 계획 다음
 

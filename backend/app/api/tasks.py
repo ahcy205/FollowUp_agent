@@ -39,6 +39,7 @@ from app.schemas import (
     GoalIn,
     GoalUpdateIn,
     MergeIn,
+    MergeUndoIn,
     PriorityIn,
     PromoteOut,
     RunOut,
@@ -309,10 +310,11 @@ def merge_task(task_id: int, body: MergeIn, user: User = Depends(get_current_use
 
 
 @router.post("/tasks/{task_id}/merge/undo", response_model=TaskDetail)
-def undo_merge_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """합친 대상(A)에서 10분 안에 합치기를 되돌린다."""
+def undo_merge_task(task_id: int, body: MergeUndoIn, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    """합친 대상(A)에서 10분 안에 원본 하나(source_id)의 합치기를 되돌린다."""
     target = _mail_task(db, task_id, user)
-    _act(mail_merge.undo_merge, db, user, target, datetime.now(timezone.utc))
+    _act(mail_merge.undo_merge, db, user, target, body.source_id, datetime.now(timezone.utc))
     return _done(db, target, user)
 
 

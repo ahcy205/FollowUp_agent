@@ -199,6 +199,10 @@ class MergeIn(_Strict):
     into_task_id: int
 
 
+class MergeUndoIn(_Strict):
+    source_id: int
+
+
 class PromoteOut(BaseModel):
     task_id: int
 

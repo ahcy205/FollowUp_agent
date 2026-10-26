@@ -218,6 +218,11 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
     task_id, email_id = task.id, email.id
     try:
         data = _validate(llm.structured(INTAKE_SYSTEM, _build_prompt(email, tz), INTAKE_SCHEMA))
+        db.flush()  # 아직 쓰지 않은 변경을 refresh가 버리지 않게
+        db.refresh(task)  # 분석하는 동안 사용자가 닫았거나 합쳤을 수 있다. 그런 업무를 다시 열지 않는다.
+        if task.status in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
+            log.info("mail intake: task %s was closed or merged during analysis; result dropped", task_id)
+            return True
         _apply(db, task, email, data, tz)
     except LLMError as e:
         log.warning("mail intake analysis for task %s email %s postponed: %s", task_id, email_id, type(e).__name__)

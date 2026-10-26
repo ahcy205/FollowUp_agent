@@ -68,7 +68,7 @@ def test_merge_moves_everything():
         for t in (a, b):
             logs = _logs(db, t.id, "TASK_MERGED")
             assert len(logs) == 1 and logs[0].output_data == {"source_id": b.id, "target_id": a.id}
-        rec = a.merge_undo
+        rec = a.merge_undo[str(b.id)]
         assert rec["source_id"] == b.id and rec["at"] == NOW.isoformat()
         assert sorted(rec["moved_email_ids"]) == b_mails
         assert rec["added_todo_ids"] == [4, 5] and rec["added_requests"] == ["샘플 요청"]
@@ -115,7 +115,7 @@ def test_merge_rejects(client):
         with SessionLocal() as db:
             foreign = _task(db, oid).id
         assert other.post(f"/api/tasks/{b_id}/merge", json={"into_task_id": a_id}).status_code == 404
-        assert other.post(f"/api/tasks/{a_id}/merge/undo").status_code == 404
+        assert other.post(f"/api/tasks/{a_id}/merge/undo", json={"source_id": b_id}).status_code == 404
         assert other.post(f"/api/tasks/{a_id}/merge/dismiss").status_code == 404
     assert client.post(f"/api/tasks/{b_id}/merge", json={"into_task_id": foreign}).status_code == 404
     assert client.post(f"/api/tasks/{agent_id}/merge", json={"into_task_id": a_id}).status_code == 409
@@ -126,10 +126,10 @@ def test_merge_rejects(client):
     assert r.status_code == 200, r.text
     assert r.json()["task"]["id"] == a_id
     assert client.post(f"/api/tasks/{b_id}/merge", json={"into_task_id": a_id}).status_code == 409
-    r = client.post(f"/api/tasks/{a_id}/merge/undo")
+    r = client.post(f"/api/tasks/{a_id}/merge/undo", json={"source_id": b_id})
     assert r.status_code == 200, r.text
     assert r.json()["task"]["id"] == a_id
-    r = client.post(f"/api/tasks/{a_id}/merge/undo")
+    r = client.post(f"/api/tasks/{a_id}/merge/undo", json={"source_id": b_id})
     assert r.status_code == 409 and r.json()["detail"] == "되돌릴 수 있는 합치기가 없습니다."
     r = client.post(f"/api/tasks/{b_id}/merge/dismiss")
     assert r.status_code == 200 and r.json()["task"]["id"] == b_id
@@ -171,7 +171,7 @@ def test_undo_restores():
         merge.merge(db, u, b, a, NOW)
         db.commit()
         a.calendar_state = b.calendar_state = "synced"
-        got = merge.undo_merge(db, u, a, NOW + timedelta(minutes=10))
+        got = merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=10))
         db.commit()
         assert got.id == a.id
         assert _thread_mails(db, b.id) == b_mails and not set(b_mails) & set(_thread_mails(db, a.id))
@@ -184,7 +184,7 @@ def test_undo_restores():
         assert a.calendar_state == "pending" and b.calendar_state == "pending"
         assert len(_logs(db, a.id, "TASK_UNMERGED")) == 1 and len(_logs(db, b.id, "TASK_UNMERGED")) == 1
         with pytest.raises(ActionError) as e:
-            merge.undo_merge(db, u, a, NOW + timedelta(minutes=11))
+            merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=11))
         assert e.value.status == 409
 
 
@@ -205,7 +205,7 @@ def test_undo_keeps_user_changes(monkeypatch):
         intake.intake_work_mails(db, u.id, ScriptedLLM(), max_mails=5, tz=TZ)
         assert db.get(Email, m.id).task_id == a.id
 
-        merge.undo_merge(db, u, a, NOW + timedelta(minutes=5))
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=5))
         db.commit()
         db.expire_all()
         a, b = db.get(Task, a.id), db.get(Task, b.id)
@@ -225,7 +225,7 @@ def test_undo_keeps_user_priority():
         a, b, _ = _pair(db, u.id)
         merge.merge(db, u, b, a, NOW)
         task_actions.set_priority(a, "LOW")
-        merge.undo_merge(db, u, a, NOW + timedelta(minutes=1))
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=1))
         assert a.priority == "LOW" and a.priority_source == "user"
         # 기한은 사용자가 안 바꿨으니 이전 값(추정)으로
         assert a.deadline_kind == "estimated" and a.deadline_at.astimezone(UTC) == _kst(2026, 11, 5)
@@ -238,7 +238,7 @@ def test_undo_todo_id_collision():
         merge.merge(db, u, b, a, NOW)
         # 합친 사이 B에 2번이 생겼다 → 돌아오는 2번(샘플 발송)은 새 번호를 받는다
         b.plan = b.plan + [_todo(2, "다른 일")]
-        merge.undo_merge(db, u, a, NOW + timedelta(minutes=1))
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=1))
         ids = [p["id"] for p in b.plan]
         assert len(ids) == len(set(ids))
         assert {p["title"] for p in b.plan} >= {"샘플 발송", "납기 확인", "다른 일"}
@@ -249,11 +249,11 @@ def test_undo_window():
         u = _user(db)
         a, b, _ = _pair(db, u.id)
         with pytest.raises(ActionError) as e:
-            merge.undo_merge(db, u, a, NOW)  # 기록 없음
+            merge.undo_merge(db, u, a, b.id, NOW)  # 기록 없음
         assert e.value.status == 409
         merge.merge(db, u, b, a, NOW)
         with pytest.raises(ActionError) as e:
-            merge.undo_merge(db, u, a, NOW + timedelta(minutes=11))
+            merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=11))
         assert e.value.status == 409 and str(e.value) == "되돌릴 수 있는 합치기가 없습니다."
         assert b.merged_into_id == a.id
 
@@ -267,3 +267,110 @@ def test_dismiss():
         db.commit()
         assert b.merge_dismissed is True
         assert merge_candidates(db, b, NOW) == []
+
+
+# ---------------------------------------------------------------- 리뷰 수정
+
+def test_undo_picks_todos_by_marker_not_id():
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _ = _pair(db, u.id)
+        merge.merge(db, u, b, a, NOW)
+        assert [p.get("merged_from") for p in a.plan] == [None, None, b.id, b.id]
+        # 옮겨 온 5번(납기 확인)을 지우고 새 할 일을 만든다 → 새 할 일이 5번을 받는다
+        task_actions.edit_todos(a, {"op": "delete", "id": 5})
+        mine = task_actions.edit_todos(a, {"op": "add", "title": "내 할 일"})
+        assert mine["id"] == 5
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=1))
+        assert [p["title"] for p in a.plan] == ["견적서 보내기", "납기 회신", "내 할 일"]
+        assert [p["title"] for p in b.plan] == ["견적서 보내기 ", "샘플 발송"]
+        assert all("merged_from" not in p for p in a.plan + b.plan)
+
+
+def test_deleted_and_restored_moved_todo_still_returns():
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _ = _pair(db, u.id)
+        merge.merge(db, u, b, a, NOW)
+        removed = task_actions.edit_todos(a, {"op": "delete", "id": 4})
+        task_actions.edit_todos(a, {"op": "restore", **removed})
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=1))
+        assert [p["id"] for p in b.plan] == [1, 2, 5]
+
+
+def test_two_merges_into_same_target():
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, b_mails = _pair(db, u.id)
+        c = _task(db, u.id, plan=[_todo(1, "계약서 검토")], priority="LOW",
+                  brief={"analysis": "done", "requests": ["계약 검토"]})
+        c_mail = _mail(u.id, thread=c.gmail_thread_id, task_id=c.id)
+        db.add(c_mail)
+        db.commit()
+        merge.merge(db, u, b, a, NOW)
+        merge.merge(db, u, c, a, NOW + timedelta(minutes=2))
+        assert set(a.merge_undo) == {str(b.id), str(c.id)}
+        assert merge.undoable_sources(a, NOW + timedelta(minutes=3)) == [c.id, b.id]
+        assert merge.undoable_sources(a, NOW + timedelta(minutes=11)) == [c.id]
+
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=3))
+        db.commit()
+        assert b.merged_into_id is None and set(a.merge_undo) == {str(c.id)}
+        assert c.merged_into_id == a.id and c_mail.task_id == a.id
+        assert [p["title"] for p in a.plan] == ["견적서 보내기", "납기 회신", "계약서 검토"]
+        assert a.brief["requests"] == ["견적서 송부", "계약 검토"]
+        assert _thread_mails(db, b.id) == b_mails
+        assert merge.undoable_sources(a, NOW + timedelta(minutes=3)) == [c.id]
+
+        merge.undo_merge(db, u, a, c.id, NOW + timedelta(minutes=4))
+        db.commit()
+        assert c.merged_into_id is None and c_mail.task_id == c.id and a.merge_undo == {}
+        assert [p["title"] for p in a.plan] == ["견적서 보내기", "납기 회신"]
+        assert a.brief["requests"] == ["견적서 송부"]
+
+
+def test_old_records_pruned_on_merge():
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _ = _pair(db, u.id)
+        c = _task(db, u.id)
+        merge.merge(db, u, b, a, NOW)
+        merge.merge(db, u, c, a, NOW + timedelta(minutes=30))
+        assert set(a.merge_undo) == {str(c.id)}
+
+
+def test_merge_rejects_pending_source():
+    with SessionLocal() as db:
+        u = _user(db)
+        a = _task(db, u.id)
+        b = _task(db, u.id, status=TaskStatus.PENDING, brief={"analysis": "pending", "attempts": 0})
+        with pytest.raises(ActionError) as e:
+            merge.merge(db, u, b, a, NOW)
+        assert e.value.status == 409 and str(e.value) == "합칠 수 없는 업무입니다."
+
+
+@pytest.mark.parametrize("change", ["closed", "merged"])
+def test_analysis_skips_task_closed_or_merged_meanwhile(change):
+    from sqlalchemy import update
+    from tests.test_task_actions import _analysis
+    with SessionLocal() as db:
+        u = _user(db)
+        a = _task(db, u.id)
+        t = _task(db, u.id, status=TaskStatus.PENDING, plan=[], brief={"analysis": "pending", "attempts": 0})
+        m = _mail(u.id, thread=t.gmail_thread_id, task_id=t.id)
+        db.add(m)
+        db.commit()
+
+        def meanwhile(prompt, schema):  # LLM이 분석하는 사이 사용자가 닫거나 합쳤다
+            values = {"status": TaskStatus.COMPLETED}
+            if change == "merged":
+                values["merged_into_id"] = a.id
+            db.execute(update(Task).where(Task.id == t.id).values(**values))
+            return _analysis("HIGH")
+
+        assert intake.analyze_into_task(db, t, m, ScriptedLLM(structured_steps=[meanwhile]), TZ)
+        db.commit()
+        db.expire_all()
+        t2 = db.get(Task, t.id)
+        assert t2.status == TaskStatus.COMPLETED and t2.plan == []
+        assert t2.brief["analysis"] == "pending"

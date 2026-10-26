@@ -234,6 +234,9 @@ def _clean_item(raw) -> dict:
     note = raw.get("due_note")
     if isinstance(note, str) and note.strip():
         item["due_note"] = note.strip()[:DUE_NOTE_MAX]
+    merged_from = raw.get("merged_from")  # 합쳐 온 할 일 표시. 지웠다 되살려도 합치기를 되돌릴 때 원래 업무로 간다
+    if isinstance(merged_from, int) and not isinstance(merged_from, bool):
+        item["merged_from"] = merged_from
     return item
 
 

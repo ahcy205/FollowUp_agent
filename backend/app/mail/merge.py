@@ -96,6 +96,27 @@ def _log(db: Session, user: User, task: Task, action_type: str, data: dict, reas
                output_data=data, reason=reason)
 
 
+# ---------------------------------------------------------------- 되돌리기 기록
+
+def _live_records(task: Task, now: datetime) -> dict:
+    """merge_undo({원본 번호: 기록}) 중 아직 10분이 지나지 않은 것만 새 dict로 돌려준다."""
+    now = _utc(now)
+    raw = task.merge_undo if isinstance(task.merge_undo, dict) else {}
+    out = {}
+    for key, rec in raw.items():
+        at = _parse(rec.get("at")) if isinstance(rec, dict) else None
+        if at is not None and now - at <= UNDO_WINDOW and isinstance(rec.get("source_id"), int):
+            out[str(key)] = rec
+    return out
+
+
+def undoable_sources(task: Task, now: datetime) -> list[int]:
+    """아직 되돌릴 수 있는 원본 업무 번호. 최근에 합친 것부터."""
+    live = list(_live_records(task, now).values())
+    live.sort(key=lambda r: (_parse(r["at"]), r["source_id"]), reverse=True)
+    return [r["source_id"] for r in live]
+
+
 # ---------------------------------------------------------------- 합치기
 
 def _mergeable(user: User, source: Task, target: Task) -> bool:
@@ -104,11 +125,15 @@ def _mergeable(user: User, source: Task, target: Task) -> bool:
             and source.origin == "mail" and target.origin == "mail"
             and source.merged_into_id is None and target.merged_into_id is None
             and str(source.status) not in _CLOSED
+            and (source.brief or {}).get("analysis") != "pending"  # 분석 중이면 워커가 결과를 덮어쓸 수 있다
             and str(target.status) in MERGE_TARGET_STATUSES)
 
 
 def merge(db: Session, user: User, source: Task, target: Task, now: datetime) -> None:
-    """원본 B(source)를 대상 A(target)에 합친다. 되돌리기용 기록을 target.merge_undo에 남긴다."""
+    """원본 B(source)를 대상 A(target)에 합친다.
+
+    되돌리기용 기록은 target.merge_undo[str(B 번호)]에 남긴다. 10분 안에 여러 업무를 합쳐도 각각 되돌릴 수 있다.
+    """
     if not _mergeable(user, source, target):
         raise ActionError(CANNOT_MERGE, 409)
     now = _utc(now)
@@ -131,7 +156,7 @@ def merge(db: Session, user: User, source: Task, target: Task, now: datetime) ->
             kept.append(dict(p) if isinstance(p, dict) else p)
             continue
         titles.add(title)
-        target_plan.append({**p, "id": next_id})
+        target_plan.append({**p, "id": next_id, "merged_from": source.id})  # 되돌릴 때 번호가 아니라 이 표시로 찾는다
         id_from[str(next_id)] = p.get("id")
         added_ids.append(next_id)
         next_id += 1
@@ -173,11 +198,13 @@ def merge(db: Session, user: User, source: Task, target: Task, now: datetime) ->
     source.next_action = ""
     source.snoozed_until = None
 
-    target.merge_undo = {
+    records = _live_records(target, now)  # 10분 지난 기록은 쓸 때 정리한다
+    records[str(source.id)] = {
         "source_id": source.id, "at": now.isoformat(), "moved_email_ids": moved_email_ids,
         "added_todo_ids": added_ids, "added_todo_from": id_from, "added_requests": added_requests,
         "before": before, "after": _fields(target), "source_before": source_before,
     }
+    target.merge_undo = records
     mark_calendar_dirty(source)  # 일정이 있으면 ✓를 붙인다
     mark_calendar_dirty(target)
     data = {"source_id": source.id, "target_id": target.id}
@@ -195,14 +222,16 @@ def _restore(task: Task, values: dict, keys: tuple) -> None:
         setattr(task, key, value)
 
 
-def undo_merge(db: Session, user: User, target: Task, now: datetime) -> Task:
-    """합친 뒤 10분 안이면 옮겨 온 것만 B로 돌려보낸다. 사용자가 그사이 바꾼 A의 기한 · 중요도는 유지한다."""
-    rec = target.merge_undo if isinstance(target.merge_undo, dict) else {}
-    at = _parse(rec.get("at"))
-    if (not rec or at is None or _utc(now) - at > UNDO_WINDOW or target.user_id != user.id
-            or target.merged_into_id is not None):
+def undo_merge(db: Session, user: User, target: Task, source_id: int, now: datetime) -> Task:
+    """합친 뒤 10분 안이면 원본 source_id에서 옮겨 온 것만 돌려보낸다.
+
+    사용자가 그사이 바꾼 A의 기한 · 중요도는 유지한다. 다른 원본의 합치기 기록은 그대로 둔다.
+    """
+    records = _live_records(target, now)
+    rec = records.pop(str(source_id), None)
+    if rec is None or target.user_id != user.id or target.merged_into_id is not None:
         raise ActionError(NOTHING_TO_UNDO, 409)
-    source = db.scalar(select(Task).where(Task.id == rec.get("source_id"), Task.user_id == user.id))
+    source = db.scalar(select(Task).where(Task.id == source_id, Task.user_id == user.id))
     if source is None or source.merged_into_id != target.id:
         raise ActionError(NOTHING_TO_UNDO, 409)
 
@@ -216,13 +245,15 @@ def undo_merge(db: Session, user: User, target: Task, now: datetime) -> Task:
     for email in emails:
         email.task_id = source.id
 
-    # 할 일: 지금 상태(체크 · 메모) 그대로 B로. 원래 번호가 B에서 겹치면 새 번호.
-    added = set(i for i in rec.get("added_todo_ids") or [] if isinstance(i, int))
+    # 할 일: B에서 온 표시(merged_from)가 있는 것만, 지금 상태(체크 · 메모) 그대로 B로. 원래 번호가 겹치면 새 번호.
+    # 번호로 고르지 않는다. 사용자가 지운 뒤 새로 만든 할 일이 같은 번호를 받을 수 있기 때문이다.
     id_from = rec.get("added_todo_from") if isinstance(rec.get("added_todo_from"), dict) else {}
     target_plan, returning = [], []
     for p in target.plan or []:
-        if isinstance(p, dict) and p.get("id") in added:
-            returning.append(dict(p))
+        if isinstance(p, dict) and p.get("merged_from") == source.id:
+            item = dict(p)
+            del item["merged_from"]
+            returning.append(item)
         else:
             target_plan.append(dict(p) if isinstance(p, dict) else p)
     source_plan = [dict(p) if isinstance(p, dict) else p for p in (source.plan or [])]
@@ -264,7 +295,7 @@ def undo_merge(db: Session, user: User, target: Task, now: datetime) -> Task:
     source.next_action = sb.get("next_action") or ""
     source.merged_into_id = None
 
-    target.merge_undo = {}
+    target.merge_undo = records  # 이 원본의 기록만 뺀 새 dict
     mark_calendar_dirty(source)
     mark_calendar_dirty(target)
     data = {"source_id": source.id, "target_id": target.id}
