@@ -34,20 +34,12 @@ export default function Login() {
             FollowUp <b>Agent</b>
           </span>
         </div>
-        <h1>
-          목표만 말하세요.
-          <br />
-          끝날 때까지 AI가 추적합니다.
-        </h1>
-        <p>
-          고객 조회 → 견적서 확인 → 메일 작성 → <b>승인 후 발송</b> → 답변 대기 → 답변 분석 → 후속 업무 생성까지.
-          <br />
-          Agent는 업무 상태를 기억하고, 새 이벤트가 오면 다시 판단합니다.
-        </p>
+        <h1>업무 메일, 놓치지 않게.</h1>
+        <p>Gmail의 업무 메일을 정리하고, 할 일과 기한을 챙기고, 캘린더에 올립니다.</p>
         <ul className="hero-points">
-          <li>🧭 목표 기반 Agent Loop · Tool Calling</li>
-          <li>🛡️ 사용자별 데이터 격리 · 발송 전 사용자 승인</li>
-          <li>🧾 모든 행동을 타임라인으로 기록</li>
+          <li>📬 업무 메일만 골라 요약하고 할 일 · 기한을 정리합니다</li>
+          <li>📅 기한은 Google 캘린더 일정과 알림으로</li>
+          <li>🛡️ 답장은 내가 확인한 뒤에만 보냅니다</li>
         </ul>
       </div>
 
@@ -81,7 +73,7 @@ export default function Login() {
         </button>
         <p className="muted small">
           {mode === 'register'
-            ? '가입하면 내 계정 전용 가상 고객·문서·메일 데이터가 생성됩니다. 실제 메일은 발송되지 않습니다.'
+            ? '가입한 뒤 설정에서 Gmail을 연결하면 업무 메일을 가져옵니다.'
             : '계정이 없다면 회원가입 탭에서 바로 만들 수 있습니다.'}
         </p>
       </form>

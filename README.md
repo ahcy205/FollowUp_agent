@@ -14,7 +14,7 @@
 - **공급자 중립** — 대화 기록을 중립 형식으로 저장해 Claude와 Gemini를 환경변수 하나로 바꿉니다.
 - **테스트 340개** — LLM과 Google API(Gmail · 캘린더)를 가짜 클라이언트로 바꿔 시나리오 · 보안 · 동시성 · 재시도 · Gmail 동기화 · 메일 판별 · 캘린더 동기화를 검증하고, push마다 CI로 돌립니다(실 LLM 스모크 테스트는 opt-in).
 
-**목차** · [진행 상황](#진행-상황) · [데모 시나리오](#데모-시나리오-최우선-완료-기준) · [구조](#구조) · [보안](#보안) · [로컬 실행](#로컬-실행) · [Railway 배포](#railway-배포) · [범위 밖](#범위-밖-의도적으로-제외)
+**목차** · [진행 상황](#진행-상황) · [데모 시나리오](#데모-시나리오-최우선-완료-기준-demo_modetrue) · [구조](#구조) · [보안](#보안) · [로컬 실행](#로컬-실행) · [Railway 배포](#railway-배포) · [범위 밖](#범위-밖-의도적으로-제외)
 
 ## 진행 상황
 
@@ -25,12 +25,13 @@
 | 업무 메일 판별과 접수 (설계 3단계) | 완료 (실제 계정 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-mail-triage-and-intake.md) |
 | Google 캘린더 연동 (설계 4단계) | 완료 (실제 캘린더 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-calendar-sync.md) |
 | 받은 업무 화면 (설계 5단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-26-inbox-screen-design.md) · [구현 계획](docs/superpowers/plans/2026-10-26-inbox-screen.md) |
+| 데모 모드 분리 (설계 7단계 일부) | 완료 — [설계](docs/superpowers/specs/2026-10-27-demo-mode-split-design.md) · [구현 계획](docs/superpowers/plans/2026-10-27-demo-mode-split.md) |
 | 답장 · 정리 (설계 6~7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
 | RAG (검색 증강 생성) | 설계 중, 구현 전 — [설계 문서](docs/superpowers/specs/2026-10-26-rag-design.md) |
 
 **문서** · [변경 이력](CHANGELOG.md) · [결정 기록](docs/decisions.md) · [데이터 · 개인정보 흐름](docs/privacy.md) · [문제 해결](docs/troubleshooting.md) · [설계 문서 · 구현 계획](docs/superpowers/)
 
-## 데모 시나리오 (최우선 완료 기준)
+## 데모 시나리오 (최우선 완료 기준, `DEMO_MODE=true`)
 
 ```
 로그인 → "A회사에 견적서를 보내고 고객 답변이 오면 내용을 확인해서 내가 해야 할 일을 정리해줘."
@@ -127,7 +128,7 @@ cd backend && ../.venv/Scripts/python -m pytest -q
 cd backend && RUN_LLM_SMOKE=1 ../.venv/Scripts/python -m pytest smoke -v -s
 ```
 
-`DEMO_USER_PASSWORD`를 설정하면 기동 시 `DEMO_USER_EMAIL` 계정이 생성됩니다. 회원가입하는 모든 계정도 자기 전용 가상 데이터를 받습니다.
+데모 기능(가상 고객 · 문서 · 메일, 회신 시뮬레이터, Demo Reset)은 `DEMO_MODE=true`일 때만 켜집니다(기본 꺼짐). 켜져 있으면 회원가입하는 계정마다 자기 전용 가상 데이터를 받고, `DEMO_USER_PASSWORD`를 설정하면 기동 시 `DEMO_USER_EMAIL` 계정이 생성됩니다. 위 데모 시나리오는 `DEMO_MODE=true`에서 동작합니다.
 
 ### Google 연결 준비 (로컬)
 
@@ -178,7 +179,8 @@ Gmail을 연결하려면 본인 Google Cloud 프로젝트에 OAuth 클라이언�
 | `LLM_RPM_LIMIT` | 분당 LLM 호출 상한. Gemini 무료 등급은 `5` (결제 활성화 시 `0`=해제) |
 | `AGENT_TIMEOUT_SECONDS` | `420` 권장 (무료 등급 대기 시간 포함) |
 | `LLM_TRANSIENT_RETRIES` | Run 내 일시 오류 자동 재시도 횟수 (기본 `2`, `0`이면 끔) |
-| `DEMO_USER_PASSWORD` | 데모 계정 비밀번호 (선택) |
+| `DEMO_MODE` | 데모 기능 켜기 (기본 `false`) |
+| `DEMO_USER_PASSWORD` | 데모 계정 비밀번호 (선택, `DEMO_MODE=true`일 때만) |
 
 4. Settings → Networking → **Generate Domain**. Railway가 주입하는 `RAILWAY_PUBLIC_DOMAIN`으로 허용 호스트/Origin이 자동 설정됩니다(커스텀 도메인은 `PUBLIC_URL`, `ALLOWED_HOSTS` 추가).
 5. 컨테이너 시작 시 `alembic upgrade head` 후 uvicorn 기동. 헬스체크 `/api/health`.

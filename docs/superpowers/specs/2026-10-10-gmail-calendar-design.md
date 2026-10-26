@@ -315,7 +315,7 @@ Agent가 쓸 수 있는 도구:
 | `MAIL_BACKFILL_DAYS` | 첫 연결 백필, 기본 3 |
 | `AUTO_COMPLETE_DAYS` | 답장 후 자동 완료, 기본 3 |
 | `USER_TIMEZONE` | 기본 `Asia/Seoul` |
-| `DEMO_MODE` | 가상 데이터 · 시뮬레이터 · Demo Reset 노출. 개발 기본 `true`, 운영 기본 `false` |
+| `DEMO_MODE` | 가상 데이터 · 시뮬레이터 · Demo Reset 노출. 기본 `false` (2026-10-27 변경, [데모 모드 분리 설계](2026-10-27-demo-mode-split-design.md)) |
 
 새 의존성: `cryptography`(토큰 암호화). Google API는 httpx로 직접 호출해 무거운 클라이언트 라이브러리를 피한다.
 

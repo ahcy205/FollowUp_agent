@@ -24,6 +24,11 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 _DUMMY_HASH = hash_password("timing-equalizer-password")
 
 
+def _out(user: User) -> UserOut:
+    """로그인 사용자 정보와 화면이 데모 메뉴를 보일지 정하는 스위치."""
+    return UserOut(id=user.id, email=user.email, demo_mode=get_settings().demo_mode)
+
+
 @router.post("/register", response_model=UserOut, status_code=201)
 def register(body: Credentials, request: Request, response: Response, db: Session = Depends(get_db)):
     if not get_settings().allow_registration:
@@ -36,13 +41,14 @@ def register(body: Credentials, request: Request, response: Response, db: Sessio
     db.add(user)
     try:
         db.flush()
-        seed_user_data(db, user)  # every account gets its own isolated demo workspace
+        if get_settings().demo_mode:
+            seed_user_data(db, user)  # every account gets its own isolated demo workspace
         db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 가입된 이메일입니다.")
     set_session_cookie(response, user.id)
-    return user
+    return _out(user)
 
 
 @router.post("/login", response_model=UserOut)
@@ -55,7 +61,7 @@ def login(body: Credentials, request: Request, response: Response, db: Session =
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다.")
     set_session_cookie(response, user.id)
-    return user
+    return _out(user)
 
 
 @router.post("/logout", status_code=204)
@@ -67,4 +73,4 @@ def logout(response: Response):
 
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
-    return user
+    return _out(user)

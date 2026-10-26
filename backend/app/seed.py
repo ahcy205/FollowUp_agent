@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -107,15 +107,29 @@ TASKS = [
 
 
 def reset_user_data(db: Session, user: User) -> None:
-    """Delete the user's demo data and regenerate fixtures. Scoped by user_id; keeps Gmail mail and Google link."""
+    """Delete the user's demo data and regenerate fixtures. Scoped by user_id.
+
+    Real data stays: mail tasks (origin="mail") with their history, synced Gmail mail and the Google link.
+    Synced Gmail mail cannot be fetched again (history_id has moved past it), and mail tasks hold the user's edits.
+    """
     uid = user.id
+    demo_tasks = select(Task.id).where(Task.user_id == uid, Task.origin != "mail").scalar_subquery()
+    # Kept rows must not point at rows about to go.
+    db.execute(update(Task).where(Task.user_id == uid, Task.parent_task_id.in_(demo_tasks)).values(parent_task_id=None))
+    db.execute(update(Task).where(Task.user_id == uid, Task.merged_into_id.in_(demo_tasks)).values(merged_into_id=None))
+    # Only rows that actually point somewhere: an UPDATE bumps Task.updated_at, which orders the task lists.
+    db.execute(update(Task).where(Task.user_id == uid, Task.customer_id.is_not(None)).values(customer_id=None))
+    db.execute(update(Email).where(Email.user_id == uid, Email.gmail_message_id.is_not(None),
+                                   or_(Email.customer_id.is_not(None), Email.document_id.is_not(None)))
+               .values(customer_id=None, document_id=None))
+    db.execute(update(Email).where(Email.user_id == uid, Email.gmail_message_id.is_not(None),
+                                   Email.task_id.in_(demo_tasks)).values(task_id=None))
     for model in (AgentActionLog, ApprovalRequest, AgentRun):
-        db.execute(delete(model).where(model.user_id == uid))
-    # Synced Gmail mail is real mail: history_id has moved past it, so deleting it would lose it for good.
-    # The GoogleAccount row is never touched here; customer/task links on kept mail fall to NULL via the FKs.
+        db.execute(delete(model).where(model.user_id == uid,
+                                       or_(model.task_id.is_(None), model.task_id.in_(demo_tasks))))
     db.execute(delete(Email).where(Email.user_id == uid, Email.gmail_message_id.is_(None)))
-    db.execute(Task.__table__.update().where(Task.user_id == uid).values(parent_task_id=None))
-    for model in (Task, Document, Customer):
+    db.execute(delete(Task).where(Task.user_id == uid, Task.origin != "mail"))
+    for model in (Document, Customer):
         db.execute(delete(model).where(model.user_id == uid))
     db.flush()
     seed_user_data(db, user)

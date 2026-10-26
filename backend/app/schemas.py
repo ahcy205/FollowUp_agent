@@ -16,6 +16,7 @@ class Credentials(BaseModel):
 class UserOut(ORM):
     id: int
     email: str
+    demo_mode: bool = False
 
 
 class CustomerOut(ORM):

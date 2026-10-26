@@ -26,6 +26,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const { user, setUser, bumpRefresh } = useAuth()
   const [resetOpen, setResetOpen] = useState(false)
   const navigate = useNavigate()
+  const demo = user?.demo_mode === true
 
   const logout = async () => {
     await api.post('/auth/logout').catch(() => {})
@@ -50,13 +51,15 @@ function Shell({ children }: { children: React.ReactNode }) {
             <NavLink to="/tasks" end>
               전체 업무
             </NavLink>
-            <NavLink to="/workspace">워크스페이스 데이터</NavLink>
+            {demo && <NavLink to="/workspace">워크스페이스 데이터</NavLink>}
             <NavLink to="/settings">설정</NavLink>
           </nav>
           <div className="topbar-right">
-            <button className="btn btn-ghost btn-sm" onClick={() => setResetOpen(true)} title="데모 데이터를 초기 상태로 되돌립니다">
-              ↺ Demo Reset
-            </button>
+            {demo && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setResetOpen(true)} title="데모 데이터를 초기 상태로 되돌립니다">
+                ↺ Demo Reset
+              </button>
+            )}
             <span className="user-chip" title={user?.email}>
               {user?.email}
             </span>
@@ -68,7 +71,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       </header>
       <GoogleBanner />
       <main className="container">{children}</main>
-      {resetOpen && (
+      {demo && resetOpen && (
         <ResetDialog
           onClose={() => setResetOpen(false)}
           onDone={() => {
@@ -125,7 +128,10 @@ export default function App() {
           <Route path="/" element={<Protected><Inbox key={refreshKey} /></Protected>} />
           <Route path="/tasks" element={<Protected><Dashboard key={refreshKey} /></Protected>} />
           <Route path="/tasks/:id" element={<Protected><TaskDetailPage key={refreshKey} /></Protected>} />
-          <Route path="/workspace" element={<Protected><Workspace key={refreshKey} /></Protected>} />
+          <Route
+            path="/workspace"
+            element={user?.demo_mode ? <Protected><Workspace key={refreshKey} /></Protected> : <Navigate to="/" replace />}
+          />
           <Route path="/settings" element={<Protected><Settings /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
