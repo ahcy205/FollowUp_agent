@@ -21,6 +21,7 @@ from app.agent.guard import detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.deadline import Deadline, earliest, normalize_deadline
+from app.mail.merge import resolve_merged
 from app.models import Email, EmailDirection, RiskLevel, Task, TaskStatus
 
 log = logging.getLogger(__name__)
@@ -319,9 +320,11 @@ def _attach(db: Session, task: Task, email: Email, result: IntakeResult) -> None
 
 
 def _thread_task(db: Session, user_id: int, thread_id: str | None) -> Task | None:
+    """스레드의 업무. 합쳐진 업무면 합쳐진 대상을 돌려준다."""
     if not thread_id:
         return None
-    return db.scalar(select(Task).where(Task.user_id == user_id, Task.gmail_thread_id == thread_id))
+    task = db.scalar(select(Task).where(Task.user_id == user_id, Task.gmail_thread_id == thread_id))
+    return resolve_merged(db, task) if task is not None else None
 
 
 def _create_task(db: Session, user_id: int, email: Email) -> Task | None:

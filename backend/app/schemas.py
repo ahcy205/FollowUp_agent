@@ -155,7 +155,7 @@ class _Strict(BaseModel):
 
 
 class SnoozeIn(_Strict):
-    preset: Literal["evening", "tomorrow", "next_monday"] | None = None
+    preset: str | None = Field(default=None, max_length=40)  # 알 수 없는 값은 task_actions가 한국어 400으로
     until: datetime | None = None
 
 
@@ -164,8 +164,8 @@ class PriorityIn(_Strict):
 
 
 class DeadlineIn(_Strict):
-    date: str | None = Field(default=None, max_length=10)
-    time: str | None = Field(default=None, max_length=5)
+    date: str | None = Field(default=None, max_length=20)
+    time: str | None = Field(default=None, max_length=20)  # HH:MM 또는 HH:MM:SS, 검증은 task_actions
     clear: bool = False
     confirm: bool = False
 

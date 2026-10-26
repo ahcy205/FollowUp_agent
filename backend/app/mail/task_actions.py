@@ -37,7 +37,7 @@ PROMOTABLE_TRIAGE = ("not_work", "filtered")
 
 _CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-_TIME_RE = re.compile(r"(\d{2}):(\d{2})")
+_TIME_RE = re.compile(r"(\d{2}):(\d{2})(?::(\d{2}))?")  # 브라우저 입력은 HH:MM:SS일 수 있다
 
 CLOSED_MESSAGE = "이미 완료되었거나 취소된 업무입니다."
 
@@ -90,7 +90,7 @@ def _preset_until(preset: str, now: datetime, tz: str) -> datetime:
         return _local_at(today + timedelta(days=1), MORNING, zone)
     if preset == "next_monday":
         return _local_at(today + timedelta(days=7 - today.weekday()), MORNING, zone)
-    raise ActionError("알 수 없는 나중에 보기 선택지입니다.", 400)
+    raise ActionError("알 수 없는 선택지입니다.", 400)
 
 
 def snooze(task: Task, *, preset: str | None, until: datetime | None, now: datetime, tz: str) -> None:
@@ -159,7 +159,7 @@ def _parse_time(text: str | None) -> _time | None:
     if not text:
         return None
     m = _TIME_RE.fullmatch(text)
-    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59 or int(m.group(3) or 0) > 59:
         raise ActionError("시각 형식이 올바르지 않습니다. HH:MM(24시간제)으로 입력하세요.", 400)
     return _time(int(m.group(1)), int(m.group(2)))
 
@@ -343,7 +343,10 @@ def promote_email(db: Session, user: User, email: Email) -> Task:
     task = intake._thread_task(db, user.id, email.gmail_thread_id)
     created = False
     if task is None:
-        task = intake.create_pending_task(db, email)  # 커밋한다. 경합이면 그 스레드의 업무를 돌려준다
+        # create_pending_task는 업무를 만들며 바로 커밋한다. 아래 triage 변경 · 기록은 API가 따로 커밋하므로,
+        # 그 사이 서버가 죽으면 메일은 업무에 연결됐지만 triage가 not_work로 남을 수 있다.
+        # 업무는 분석 대기로 화면에 나오고 워커가 분석하므로 잃는 것은 없다.
+        task = intake.create_pending_task(db, email)  # 경합이면 그 스레드의 업무를 돌려준다
         if task is None:
             raise ActionError("업무를 만들지 못했습니다. 잠시 후 다시 시도하세요.", 409)
         created = email.task_id == task.id
@@ -354,6 +357,7 @@ def promote_email(db: Session, user: User, email: Email) -> Task:
             task.status = TaskStatus.ACTION_REQUIRED
             task.completed_at = None
             task.current_step = REOPENED_STEP
+            task.next_action = ""
             mark_calendar_dirty(task)
 
     email.triage = "work"

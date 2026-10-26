@@ -509,3 +509,88 @@ def test_api_ownership_and_limits(client, monkeypatch):
     # 이미 처리된 메일은 409 (쿼터 검사 전)
     assert client.post(f"/api/emails/{ids[0]}/promote").status_code == 409
     assert client.post(f"/api/emails/{ids[10]}/promote").status_code == 429
+
+
+# ---------------------------------------------------------------- 합쳐진 스레드 (리뷰 수정)
+
+def test_promote_follows_merged_thread(monkeypatch):
+    monkeypatch.setattr(get_settings(), "mail_triage_enabled", True)
+    with SessionLocal() as db:
+        u = _user(db)
+        a = _task(db, u.id)
+        b = _task(db, u.id, status=TaskStatus.COMPLETED, merged_into_id=a.id, completed_at=NOW)
+        m = _mail(u.id, thread=b.gmail_thread_id, triage="not_work")
+        db.add(m)
+        db.commit()
+        got = task_actions.promote_email(db, u, m)
+        db.commit()
+        assert got.id == a.id and m.task_id == a.id
+        db.refresh(b)
+        assert b.status == TaskStatus.COMPLETED and b.completed_at is not None
+
+
+def test_intake_new_mail_on_merged_thread(monkeypatch):
+    monkeypatch.setattr(intake, "datetime", _FixedDatetime)
+    with SessionLocal() as db:
+        u = _user(db)
+        a = _task(db, u.id, snoozed_until=NOW + timedelta(days=3))
+        b = _task(db, u.id, status=TaskStatus.COMPLETED, merged_into_id=a.id)
+        m = _mail(u.id, thread=b.gmail_thread_id)
+        db.add(m)
+        db.commit()
+        r = intake.intake_work_mails(db, u.id, ScriptedLLM(), max_mails=5, tz=TZ)
+        assert r.attached == 1
+        db.expire_all()
+        assert db.get(Email, m.id).task_id == a.id
+        a2 = db.get(Task, a.id)
+        assert a2.snoozed_until is None and a2.snooze_returned_at.replace(tzinfo=UTC) == NOW
+        assert db.get(Task, b.id).status == TaskStatus.COMPLETED
+
+
+def test_resolve_merged_guards():
+    from app.mail.merge import resolve_merged
+    with SessionLocal() as db:
+        u = _user(db)
+        other = _user(db, "o@example.com")
+        x = _task(db, u.id)
+        y = _task(db, u.id, merged_into_id=x.id)
+        x.merged_into_id = y.id  # 순환
+        db.commit()
+        assert resolve_merged(db, y).id in (x.id, y.id)  # 멈춘다
+        foreign = _task(db, other.id)
+        z = _task(db, u.id, merged_into_id=foreign.id)
+        assert resolve_merged(db, z).id == z.id  # 다른 사용자의 업무로는 가지 않는다
+        chain = [_task(db, u.id)]
+        for _ in range(7):
+            chain.append(_task(db, u.id, merged_into_id=chain[-1].id))
+        assert resolve_merged(db, chain[-1]).id == chain[-1 - 5].id  # 최대 5번
+
+
+def test_reopen_clears_next_action_and_lenient_inputs(monkeypatch):
+    monkeypatch.setattr(get_settings(), "mail_triage_enabled", True)
+    with SessionLocal() as db:
+        u = _user(db)
+        closed = _task(db, u.id, status=TaskStatus.COMPLETED, next_action="사용자가 취소한 업무입니다.")
+        m = _mail(u.id, thread=closed.gmail_thread_id, triage="not_work")
+        db.add(m)
+        db.commit()
+        task_actions.promote_email(db, u, m)
+        assert closed.next_action == ""
+
+        t = _task(db, u.id)
+        task_actions.set_deadline(t, date="2026-10-30", time="14:30:00", clear=False, confirm=False, tz=TZ, now=NOW)
+        assert t.deadline_at.astimezone(UTC) == _kst(2026, 10, 30, 14, 30) and not t.deadline_all_day
+        with pytest.raises(ActionError) as e:
+            task_actions.snooze(t, preset="someday", until=None, now=NOW, tz=TZ)
+        assert str(e.value) == "알 수 없는 선택지입니다."
+
+
+def test_api_lenient_inputs(client):
+    me = register(client)
+    tid = _api_task(me["id"])
+    r = client.post(f"/api/tasks/{tid}/snooze", json={"preset": "someday"})
+    assert r.status_code == 400 and r.json()["detail"] == "알 수 없는 선택지입니다."
+    future = (datetime.now(UTC) + timedelta(days=10)).strftime("%Y-%m-%d")
+    assert client.post(f"/api/tasks/{tid}/deadline", json={"date": future, "time": "09:00:00"}).status_code == 200
+    r = client.post(f"/api/tasks/{tid}/deadline", json={"date": future, "time": "9 o'clock!"})
+    assert r.status_code == 400 and "HH:MM" in r.json()["detail"]
