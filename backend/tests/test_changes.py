@@ -229,9 +229,9 @@ def test_todos_only_added():
         plan = [{"id": 1, "title": "견적 회신", "done": True, "evidence": "보냄", "due_at": None, "source": "agent"},
                 {"id": 2, "title": "내 메모", "done": False, "evidence": "", "due_at": None, "source": "user"}]
         t = _task(db, uid, plan=plan)
-        _add(db, [_mail(uid, content="추가로 샘플 2개를 함께 보내 주실 수 있나요? 부탁드립니다.")])
+        _add(db, [_mail(uid, content="추가로 샘플 2개를 함께 보내 주세요. 부탁드립니다.")])
         _run(db, uid, ScriptedLLM(structured_steps=[_result(
-            _change(field="todo_add", before="", after="샘플 2개 발송", evidence="샘플 2개를 함께 보내 주실 수 있나요"))]))
+            _change(field="todo_add", before="", after="샘플 2개 발송", evidence="샘플 2개를 함께 보내 주세요"))]))
         t = db.get(Task, t.id)
         assert t.plan[:2] == plan
         assert t.plan[2] == {"id": 3, "title": "샘플 2개 발송", "done": False, "evidence": "", "due_at": None,
@@ -270,9 +270,9 @@ def test_reference_task_promoted_on_new_todo():
     with SessionLocal() as db:
         uid = _user(db)
         t = _task(db, uid, status=TaskStatus.PENDING, plan=[], brief={"needs_reply": False})
-        _add(db, [_mail(uid, content="추가로 샘플 2개를 함께 보내 주실 수 있나요? 부탁드립니다.")])
+        _add(db, [_mail(uid, content="추가로 샘플 2개를 함께 보내 주세요. 부탁드립니다.")])
         _run(db, uid, ScriptedLLM(structured_steps=[_result(
-            _change(field="todo_add", before="", after="샘플 2개 발송", evidence="샘플 2개를 함께 보내 주실 수 있나요"),
+            _change(field="todo_add", before="", after="샘플 2개 발송", evidence="샘플 2개를 함께 보내 주세요"),
             needs_reply=False)]))
         t = db.get(Task, t.id)
         assert t.status == TaskStatus.ACTION_REQUIRED
@@ -337,11 +337,13 @@ def test_pending_task_gets_full_reanalysis():
     with SessionLocal() as db:
         uid = _user(db)
         t = _task(db, uid, brief={"analysis": "failed", "attempts": 3})
+        _add(db, [_mail(uid, content="처음 메일: 100개 납품 부탁드립니다.", minutes=0, task_id=t.id)])
         (mid,) = _add(db, [_mail(uid)])
-        schemas = []
+        schemas, prompts = [], []
 
         def intake_answer(prompt, schema):
             schemas.append(schema)
+            prompts.append(prompt)
             return {"summary": "수량 150개로 변경 요청", "counterpart": {"name": "박지은", "organization": "B상사"},
                     "requests": ["수량 150개 납품"], "todos": [], "priority": "NORMAL",
                     "deadline": {"text": "", "date": "", "time": "", "kind": "none"},
@@ -350,6 +352,10 @@ def test_pending_task_gets_full_reanalysis():
         llm = ScriptedLLM(structured_steps=[intake_answer])
         _run(db, uid, llm)
         assert schemas == [INTAKE_SCHEMA]
+        # 스레드 전체: 앞선 메일 본문도 들어가고, 최신 메일이 마지막
+        assert "처음 메일: 100개 납품 부탁드립니다." in prompts[0] and "수량을 150개로" in prompts[0]
+        assert prompts[0].index("처음 메일") < prompts[0].index("수량을 150개로")
+        assert prompts[0].count("<untrusted_external_content") == 4  # 메일마다 머리글 · 본문
         t = db.get(Task, t.id)
         assert t.brief["analysis"] == "done" and t.brief["email_id"] == mid
         assert t.change_log == []
@@ -452,9 +458,9 @@ def test_undo_todo_add_deletes_unless_checked():
     with SessionLocal() as db:
         uid = _user(db)
         t = _task(db, uid)
-        _add(db, [_mail(uid, content="추가로 샘플 2개를 함께 보내 주실 수 있나요? 부탁드립니다.")])
+        _add(db, [_mail(uid, content="추가로 샘플 2개를 함께 보내 주세요. 부탁드립니다.")])
         _run(db, uid, ScriptedLLM(structured_steps=[_result(
-            _change(field="todo_add", before="", after="샘플 2개 발송", evidence="샘플 2개를 함께 보내 주실 수 있나요"))]))
+            _change(field="todo_add", before="", after="샘플 2개 발송", evidence="샘플 2개를 함께 보내 주세요"))]))
         t = db.get(Task, t.id)
         t.plan = [dict(p, done=True) if p["id"] == 2 else p for p in t.plan]
         with pytest.raises(ActionError) as e:
@@ -562,3 +568,127 @@ def test_error_while_applying_records_failure_once(monkeypatch):
         assert db.get(Email, mid).task_id == t.id  # 붙인 것은 남는다
         assert t.brief.get("change_failed_at") and changes.PENDING_KEY not in t.brief
         assert t.status == TaskStatus.ACTION_REQUIRED
+
+
+def _intake_answer(**over):
+    base = {"summary": "납품 요청", "counterpart": {"name": "박지은", "organization": "B상사"},
+            "requests": ["수량 100개 납품"], "todos": [], "priority": "NORMAL",
+            "deadline": {"text": "", "date": "", "time": "", "kind": "none"}, "needs_reply": True, "suspicious": []}
+    base.update(over)
+    return base
+
+
+def test_thread_reanalysis_drops_oldest_bodies_over_cap():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid, brief={"analysis": "failed", "attempts": 3})
+        _add(db, [_mail(uid, content="가" * 6000, minutes=0, task_id=t.id),
+                  _mail(uid, content="나" * 6000, minutes=10, task_id=t.id)])
+        _add(db, [_mail(uid, minutes=60)])
+        llm = ScriptedLLM(structured_steps=[_intake_answer()])
+        _run(db, uid, llm)
+        p = llm.structured_prompts[0]
+        assert "가" * 100 not in p and "나" * 6000 in p and "수량을 150개로" in p
+        assert p.count("본문은 생략") == 1
+
+
+def test_first_intake_single_mail_prompt_unchanged():
+    from app.mail.intake import _build_prompt
+    with SessionLocal() as db:
+        uid = _user(db)
+        (mid,) = _add(db, [_mail(uid, thread="thr-new")])
+        llm = ScriptedLLM(structured_steps=[_intake_answer()])
+        _run(db, uid, llm)
+        assert llm.structured_prompts == [_build_prompt(db.get(Email, mid), TZ)]
+
+
+def test_evidence_quoted_from_earlier_mail_dropped():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid)
+        _add(db, [_mail(uid, content="검토했습니다. 마감은 10월 31일로 하겠습니다.", minutes=0, task_id=t.id)])
+        body = ("네 알겠습니다.\n\n-----Original Message-----\n보낸 날짜: 2026-10-26\n"
+                "검토했습니다. 마감은 10월 31일로 하겠습니다.")
+        _add(db, [_mail(uid, content=body, minutes=60)])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(
+            _deadline_change(evidence="마감은 10월 31일로 하겠습니다"))]))
+        t = db.get(Task, t.id)
+        assert t.deadline_at is None and t.change_log == []
+
+
+def test_question_sentence_forced_to_question():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid)
+        _add(db, [_mail(uid, content="안녕하세요.\n수량을 150개로 늘려도 될까요?\n확인 부탁드립니다.")])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(_change(evidence="수량을 150개로 늘려도"))]))
+        t = db.get(Task, t.id)
+        assert t.brief["requests"] == ["수량 100개 납품"]
+        assert t.change_log[0]["status"] == "question"
+
+
+def test_undo_deadline_conflicts_when_user_reset_same_date():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid, deadline_at=datetime(2026, 10, 29, 15, 0, tzinfo=UTC), deadline_all_day=True,
+                  deadline_kind="explicit", deadline_source="10월 30일")
+        _add(db, [_mail(uid, content="죄송하지만 마감을 10월 31일로 미뤄 주세요.")])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(_deadline_change())]))
+        t = db.get(Task, t.id)
+        t.deadline_source = USER_DEADLINE_SOURCE  # 사용자가 같은 날짜로 다시 정함
+        with pytest.raises(ActionError) as e:
+            undo_change(t, 1)
+        assert e.value.status == 409
+
+
+def test_retried_task_change_analysis_waits_next_cycle():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid, brief={"analysis": "pending", "attempts": 1})
+        (first,) = _add(db, [_mail(uid, content="100개 납품 부탁드립니다.", minutes=0, task_id=t.id)])
+        t.brief = {**t.brief, "email_id": first}
+        db.commit()
+        (mid,) = _add(db, [_mail(uid, minutes=60)])
+        llm = ScriptedLLM(structured_steps=[_intake_answer()])
+        _run(db, uid, llm)
+        assert len(llm.structured_prompts) == 1  # 1단계 다시 시도만
+        t = db.get(Task, t.id)
+        assert t.brief["analysis"] == "done" and t.brief[changes.PENDING_KEY] == [mid]
+        llm2 = ScriptedLLM(structured_steps=[_result(_change())])
+        _run(db, uid, llm2)
+        assert len(llm2.structured_prompts) == 1
+        assert db.get(Task, t.id).brief["requests"] == ["수량 150개 납품"]
+
+
+def test_closed_pending_task_reopens_on_new_mail():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid, status=TaskStatus.COMPLETED, completed_at=BASE,
+                  brief={"analysis": "failed", "attempts": 3})
+        _add(db, [_mail(uid)])
+        _run(db, uid, ScriptedLLM(structured_steps=[LLMError("한도")]))
+        t = db.get(Task, t.id)
+        assert t.status == TaskStatus.ACTION_REQUIRED and t.completed_at is None
+        assert t.current_step == REOPENED_STEP
+        assert t.brief["analysis"] == "pending" and t.brief["attempts"] == 0
+
+
+def test_promoted_mail_on_analyzed_task_queued_for_changes(monkeypatch):
+    from app.mail import task_actions
+    monkeypatch.setattr(get_settings(), "mail_triage_enabled", True)
+    with SessionLocal() as db:
+        uid = _user(db)
+        user = db.get(User, uid)
+        t = _task(db, uid)
+        m = _mail(uid)
+        m.triage = "not_work"
+        db.add(m)
+        db.commit()
+        task_actions.promote_email(db, user, m)
+        db.commit()
+        db.expire_all()
+        t = db.get(Task, t.id)
+        assert t.brief[changes.PENDING_KEY] == [m.id]
+        llm = ScriptedLLM(structured_steps=[_result(_change())])
+        _run(db, uid, llm)
+        assert db.get(Task, t.id).brief["requests"] == ["수량 150개 납품"]

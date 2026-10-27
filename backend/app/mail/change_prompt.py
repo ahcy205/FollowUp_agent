@@ -1,7 +1,8 @@
-"""재답장 변경 분석의 프롬프트 · 응답 스키마 · 검증 (설계 6.1). 반영 규칙은 app.mail.changes에 있다.
+"""재답장 변경 분석의 프롬프트 · 응답 스키마 · 검증 · 근거 확인 (설계 6.1 · 6.2). 반영 규칙은 app.mail.changes에 있다.
 
 메일 본문 · 앞선 메일 · 업무 상태는 모두 wrap_untrusted로 감싸 LLM에 보낸다. 앞선 메일은 제목과 앞 300자만 맥락으로 준다.
 """
+import re
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,8 @@ KINDS = ("confirmed", "question")
 EVIDENCE_CHARS = 500
 CONTEXT_MAILS = 5
 CONTEXT_CHARS = 300
+EVIDENCE_MIN = 8
+_QUESTION_ENDINGS = ("까요", "나요", "습니까")
 
 _DEADLINE = {"type": "object", "properties": {
     "text": {"type": "string"}, "date": {"type": "string"}, "time": {"type": "string"},
@@ -56,7 +59,6 @@ def _fmt_deadline(at: datetime | None, all_day: bool, tz: str) -> str:
         return "없음"
     local = (at if at.tzinfo else at.replace(tzinfo=UTC)).astimezone(ZoneInfo(tz))
     return f"{local.month}/{local.day}" + ("" if all_day else f" {local:%H:%M}")
-
 
 
 def _sender(email: Email, task: Task) -> str:
@@ -107,3 +109,33 @@ def _validate(raw) -> dict:
                                    for k in ("text", "date", "time", "kind")}})
     return {"changes": items[:MAX_ITEMS], "needs_reply": raw["needs_reply"],
             "suspicious": [s for s in (_str(x, ITEM_CHARS) for x in raw["suspicious"]) if s]}
+
+
+def evidence_in(evidence: str, body: str) -> bool:
+    """공백 · 줄바꿈 차이를 무시하고 근거 문장이 본문에 그대로 있는지 본다. 8자 미만 근거는 믿지 않는다."""
+    ev = " ".join(str(evidence or "").split())
+    return len(ev) >= EVIDENCE_MIN and ev in " ".join(str(body or "").split())
+
+
+def _asks(evidence: str, body: str) -> bool:
+    """근거가 든 문장이 물음이면(? 또는 ~까요 · ~나요 · ~습니까로 끝남) True. 줄바꿈 · 문장부호에서 문장이 끝난다."""
+    flat, breaks = "", set()
+    for tok in re.findall(r"\S+|\s+", body or ""):
+        if not tok.isspace():
+            flat += tok
+        elif flat:
+            if "\n" in tok:
+                breaks.add(len(flat))
+            flat += " "
+    ev = " ".join(str(evidence or "").split())
+    start = flat.find(ev)
+    if not ev or start < 0:
+        return False
+    end = start + len(ev)
+    if ev[-1] not in ".?!。":
+        while end < len(flat) and end not in breaks and flat[end] not in ".?!。":
+            end += 1
+        if end < len(flat) and flat[end] in ".?!。":
+            end += 1
+    sentence = flat[start:end].strip()
+    return sentence.endswith("?") or sentence.rstrip(" .!~…").endswith(_QUESTION_ENDINGS)

@@ -11,6 +11,7 @@
 import logging
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, object_session
 
 from app.agent.audit import log_action
@@ -19,7 +20,8 @@ from app.agent.llm import LLMClient, LLMError
 from app.mail import intake
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.deadline import USER_DEADLINE_SOURCE, normalize_deadline
-from app.mail.change_prompt import CHANGES_SCHEMA, CHANGES_SYSTEM, _build_prompt, _fmt_deadline, _sender, _validate
+from app.mail.change_prompt import (CHANGES_SCHEMA, CHANGES_SYSTEM, _asks, _build_prompt, _fmt_deadline, _sender,
+                                    _validate, evidence_in)
 from app.mail.errors import ActionError
 from app.mail.intake import ITEM_CHARS, MAX_ITEMS, SUMMARY_CHARS, TITLE_CHARS, _is_suspicious
 from app.mail.lifecycle import clear_wait_on_inbound
@@ -28,22 +30,15 @@ from app.models import Email, RiskLevel, Task, TaskStatus
 
 log = logging.getLogger(__name__)
 
-PENDING_KEY = "changes_pending_email_ids"  # LLM 장애로 아직 변경 분석을 못 한 메일 번호 (다음 주기에 다시)
+PENDING_KEY = intake.CHANGES_PENDING_KEY  # LLM 장애 등으로 아직 변경 분석을 못 한 메일 번호 (다음 주기에 다시)
 LOG_MAX = 50
 VALUE_CHARS = 40
-EVIDENCE_MIN = 8
 CHANGED_STEP = "상대 답장으로 내용이 바뀌었습니다"
 REPLIED_STEP = "상대가 다시 답장했습니다"
 FAILED_STEP = "새 메일 자동 분석에 실패했습니다 — 메일을 직접 확인해 주세요"
 CONFLICT_MESSAGE = "그 뒤에 직접 고친 내용이 있어 되돌릴 수 없습니다."
 _CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 _LABELS = {"title": "제목: ", "summary": "요약: ", "requests": "요청: ", "deadline": "기한 "}
-
-
-def evidence_in(evidence: str, body: str) -> bool:
-    """공백 · 줄바꿈 차이를 무시하고 근거 문장이 본문에 그대로 있는지 본다. 8자 미만 근거는 믿지 않는다."""
-    ev = " ".join(str(evidence or "").split())
-    return len(ev) >= EVIDENCE_MIN and ev in " ".join(str(body or "").split())
 
 
 def _cut(text) -> str:
@@ -75,8 +70,6 @@ def _set_deadline(task: Task, value: dict) -> None:
     task.deadline_source = value.get("source") or ""
     mark_calendar_dirty(task)
 
-
-# ---------------------------------------------------------------- 프롬프트 · 검증
 
 # ---------------------------------------------------------------- 분석 · 반영
 
@@ -131,9 +124,9 @@ def analyze_changes(db: Session, task: Task, emails: list[Email], llm: LLMClient
         _fail(db, task, ids)
         return False
     try:
-        _apply(db, task, emails, data, tz)
+        with db.begin_nested():  # 반영 중 오류면 이 저장점만 되돌린다(호출한 쪽의 커밋 전 작업은 남는다)
+            _apply(db, task, emails, data, tz)
     except Exception as e:  # noqa: BLE001 - 반쯤 반영한 것을 버리고 실패로 남겨야 같은 메일을 끝없이 다시 분석하지 않는다
-        db.rollback()
         log.warning("change analysis for task %s failed while applying: %s", task_id, type(e).__name__)
         task = db.get(Task, task_id)
         if task is not None:
@@ -165,6 +158,9 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str) ->
     plan = [dict(p) if isinstance(p, dict) else p for p in task.plan or []]
     history = [dict(e) for e in task.change_log or [] if isinstance(e, dict)]
     next_id = max((e.get("id", 0) for e in history if isinstance(e.get("id"), int)), default=0) + 1
+    # 앞선 메일(이번 묶음 밖, 받은 · 보낸 메일 모두)에도 있는 근거는 인용된 옛 문장일 수 있어 버린다
+    earlier = db.scalars(select(Email.content).where(Email.user_id == task.user_id, Email.task_id == task.id,
+                                                     Email.id.not_in([e.id for e in emails]))).all()
     entries = []
     for c in data["changes"]:
         field, after = c["field"], c["after"]
@@ -173,6 +169,10 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str) ->
         src = _source_mail(c["evidence"], emails)
         if src is None or (field != "deadline" and not after):
             continue
+        if any(evidence_in(c["evidence"], body or "") for body in earlier):
+            continue
+        if _asks(c["evidence"], src.content or ""):
+            c = {**c, "kind": "question"}  # 물음 문장을 확정 변경으로 반영하지 않는다
         entry = {"id": next_id, "email_id": src.id, "sender": _sender(src, task),
                  "received_at": intake._reference_time(src).isoformat(), "field": field, "before": c["before"],
                  "after": after, "evidence": c["evidence"], "status": "applied", "prev": None}
@@ -303,8 +303,9 @@ def undo_change(task: Task, change_id: int) -> None:
         task.goal = "\n".join(reqs) or brief.get("summary") or task.title
     elif field == "deadline":
         value = entry.get("value") or {}
-        if _iso(task.deadline_at) != value.get("at") or bool(task.deadline_all_day) != bool(value.get("all_day")):
-            raise ActionError(CONFLICT_MESSAGE, 409)
+        if (_iso(task.deadline_at) != value.get("at") or bool(task.deadline_all_day) != bool(value.get("all_day"))
+                or (task.deadline_source or "") != (value.get("source") or "")):
+            raise ActionError(CONFLICT_MESSAGE, 409)  # 같은 날짜라도 사용자가 다시 정했으면 덮지 않는다
         _set_deadline(task, prev or {})
     else:  # todo_add: 그 할 일을 지운다. 체크했거나 고쳤으면 그대로 둔다
         plan = [dict(p) if isinstance(p, dict) else p for p in task.plan or []]

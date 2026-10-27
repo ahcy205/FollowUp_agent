@@ -356,6 +356,8 @@ def promote_email(db: Session, user: User, email: Email) -> Task:
 
     if not created:
         intake.link_email(db, task, email)
+        if (task.brief or {}).get("analysis") not in ("pending", "failed"):
+            intake.queue_changes(task, email_id)  # 분석이 끝난 업무: 다음 주기에 변경 분석(설계 6.1)
         if str(task.status) in _CLOSED:
             task.status = TaskStatus.ACTION_REQUIRED
             task.completed_at = None
