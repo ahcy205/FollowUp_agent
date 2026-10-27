@@ -29,6 +29,22 @@ export interface MailBrief {
   needs_reply?: boolean
   priority?: string
   deadline_note?: string
+  thanks_email_id?: number // 답장을 보낸 뒤 상대가 답장했지만 답장이 필요 없다 (설계 6.5)
+}
+
+// 상대 재답장으로 바뀐 항목 하나 (task.change_log, 설계 6.4). prev · value는 서버가 되돌릴 때 쓴다.
+export interface ChangeEntry {
+  id: number
+  email_id: number
+  sender: string
+  received_at: string
+  field: 'title' | 'summary' | 'requests' | 'deadline' | 'todo_add'
+  before: string
+  after: string
+  evidence: string
+  status: 'applied' | 'question' | 'suggested' | 'undone'
+  prev?: unknown
+  value?: Record<string, unknown>
 }
 
 export interface Task {
@@ -54,6 +70,8 @@ export interface Task {
   snoozed_until: string | null
   priority_source: string
   merged_into_id: number | null
+  change_log: ChangeEntry[]
+  changed_unseen: boolean // "내용 바뀜" 표시: 상세를 열 때 POST /seen으로 끈다
   created_at: string
   updated_at: string
   completed_at: string | null
@@ -160,17 +178,17 @@ export interface MailExtras {
   wake_at: string | null
   returned: boolean
   nudge_days: number | null
-  merge_candidates: { task_id: number; title: string; evidence?: string | null }[] // evidence: 수정 요청으로 보인 근거 문장
+  merge_candidates: { task_id: number; title: string; evidence: string | null }[] // evidence: 수정 요청으로 보인 근거 문장
   undoable_merges: { source_id: number; title: string }[]
   merged_sources: { task_id: number; title: string; summary: string; merged_at: string | null }[]
   merged_into_id: number | null
   deadline_badge: DeadlineBadge
   priority_source: string
-  no_reply?: boolean
-  reply_sent_at?: string | null
-  draft?: ReplyDraft | null
-  remaining_todos_prompt?: boolean // 답장을 보냈는데 남은 할 일이 있다: "모두 완료" 안내
-  merge_analyzing?: boolean // 합친 내용을 분석하는 중
+  no_reply: boolean // 보낸 지 영업일 3일째 답이 없어 다시 연락할지 묻는 중
+  reply_sent_at: string | null
+  draft: ReplyDraft | null
+  remaining_todos_prompt: boolean // 답장을 보냈는데 남은 할 일이 있다: "모두 완료" 안내
+  merge_analyzing: boolean // 합친 내용을 분석하는 중
 }
 
 export interface ReplyDraftWarnings {
@@ -248,7 +266,7 @@ export interface InboxCard {
   has_merge_candidates: boolean
   analysis: string
   received_at: string | null
-  no_reply?: boolean
+  no_reply: boolean // 보낸 지 영업일 3일째 답이 없어 다시 연락할지 묻는 중
 }
 
 export interface SnoozedCard extends InboxCard {

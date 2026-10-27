@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { localDateValue, localTimeValue, shortDate } from '../../format'
 import type { MailAct, Priority, TaskDetail } from '../../types'
+import ChangesSection from './ChangesSection'
 
 const PRIORITIES: { value: Priority; cls: string; label: string }[] = [
   { value: 'HIGH', cls: 'pdot-high', label: '높음' },
@@ -11,7 +12,7 @@ const PRIORITIES: { value: Priority; cls: string; label: string }[] = [
 
 const USER_DEADLINE_SOURCE = '사용자가 직접 정함' // backend task_actions.USER_DEADLINE_SOURCE
 
-/** 요약 카드 본문 (설계 3.2절): 요약 · 보낸 사람 · 원하는 것 · 중요도 · 기한. 제목 카드 안에 들어간다. */
+/** 요약 카드 본문 (설계 3.2절): 요약 · 보낸 사람 · 원하는 것 · 바뀐 내용(6단계) · 중요도 · 기한. 제목 카드 안에 들어간다. */
 export default function SummaryCard({ data, act, calendarLine }: { data: TaskDetail; act: MailAct; calendarLine?: ReactNode }) {
   const { task, mail } = data
   const brief = task.brief
@@ -102,6 +103,8 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
           </ul>
         </div>
       )}
+
+      <ChangesSection log={task.change_log ?? []} act={act} closed={closed} />
 
       <div className="summary-block priority-row">
         <b className="small">중요도</b>

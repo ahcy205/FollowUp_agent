@@ -9,8 +9,9 @@ import CancelTaskPanel from '../components/CancelTaskPanel'
 import ReplySimulator from '../components/ReplySimulator'
 import StatusBadge from '../components/StatusBadge'
 import Timeline from '../components/Timeline'
-import MailActions from '../components/mail/MailActions'
+import MailActions, { type ComposePurpose } from '../components/mail/MailActions'
 import MailBanners from '../components/mail/MailBanners'
+import ReplyDraftCard from '../components/mail/ReplyDraftCard'
 import SummaryCard from '../components/mail/SummaryCard'
 import TodoChecklist from '../components/mail/TodoChecklist'
 import { dateTime, STATUS_META, tokens, TOOL_LABELS } from '../format'
@@ -25,6 +26,11 @@ export default function TaskDetailPage() {
   const [retrying, setRetrying] = useState(false)
   const [calRetrying, setCalRetrying] = useState(false)
   const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // 답장 초안 입력칸. 업무를 옮기면 닫힌 것으로 본다.
+  const [composeState, setComposeState] = useState<{ taskId: string | undefined; purpose: ComposePurpose } | null>(null)
+  const compose = composeState && composeState.taskId === id ? composeState.purpose : null
+  const onCompose = useCallback((purpose: ComposePurpose | null) => setComposeState(purpose ? { taskId: id, purpose } : null), [id])
+  const seenFor = useRef<number | null>(null)
 
   // One-shot fetch, used right after a user action so the button feels instant and as a fallback when the stream closes.
   const load = useCallback(async () => {
@@ -93,6 +99,19 @@ export default function TaskDetailPage() {
     }
   }, [id, load])
 
+  // "내용 바뀜" 표시는 상세를 열면 끈다(설계 6.4). 한 번 연 업무에는 한 번만 보낸다.
+  useEffect(() => {
+    if (!data || String(data.task.id) !== id || !data.task.changed_unseen || seenFor.current === data.task.id) return
+    seenFor.current = data.task.id
+    api
+      .post<TaskDetail>(`/tasks/${data.task.id}/seen`)
+      .then((d) => setData((cur) => (cur && cur.task.id === d.task.id ? d : cur)))
+      .catch(() => {
+        // 표시가 남을 뿐이다. 다음에 열 때 다시 보낸다.
+        seenFor.current = null
+      })
+  }, [data, id])
+
   const retry = async () => {
     setRetrying(true)
     try {
@@ -143,6 +162,7 @@ export default function TaskDetailPage() {
   )
   const lastLog = data.logs[data.logs.length - 1]
   const isMail = task.origin === 'mail'
+  const draft = data.mail?.draft ?? null
 
   const calendarLine = task.calendar_state !== 'none' && (
     <div className="calendar-line small">
@@ -213,7 +233,7 @@ export default function TaskDetailPage() {
 
       <div className="detail-grid">
         <div className="stack">
-          {isMail && <MailBanners key={task.id} data={data} act={act} onMerged={onMerged} />}
+          {isMail && <MailBanners key={task.id} data={data} act={act} onMerged={onMerged} onCompose={onCompose} />}
 
           <section className="card">
             <div className="detail-title">
@@ -271,6 +291,10 @@ export default function TaskDetailPage() {
             )}
           </section>
 
+          {isMail && draft && task.merged_into_id == null && (!closed || draft.status === 'unknown') && (
+            <ReplyDraftCard key={`draft-${task.id}`} data={data} draft={draft} act={act} onRecompose={onCompose} />
+          )}
+
           {failed && (
             <div className={`alert ${lastRun.status === 'STOPPED' ? 'alert-amber' : 'alert-red'} alert-action`}>
               <div>
@@ -292,7 +316,16 @@ export default function TaskDetailPage() {
           {isMail && (
             <>
               <TodoChecklist key={`todos-${task.id}`} task={task} act={act} />
-              <MailActions key={`actions-${task.id}`} task={task} act={act} onCancelled={load} emphasizeReply={task.plan.length > 0 && doneCount === task.plan.length} />
+              <MailActions
+                key={`actions-${task.id}`}
+                task={task}
+                act={act}
+                onCancelled={load}
+                emphasizeReply={task.plan.length > 0 && doneCount === task.plan.length}
+                draft={draft}
+                compose={compose}
+                onCompose={onCompose}
+              />
             </>
           )}
 

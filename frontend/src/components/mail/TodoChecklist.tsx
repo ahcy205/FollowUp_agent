@@ -169,9 +169,9 @@ export default function TodoChecklist({ task, act }: { task: Task; act: MailAct 
 
       {error && <div className="alert alert-red todo-error">{error}</div>}
 
-      {allDone && !closed && (
+      {allDone && !closed && task.status !== 'WAITING' && (
         <div className="alert alert-green todo-all-done">
-          할 일을 모두 끝냈습니다. 이제 답장을 보낼 차례입니다 — <b>답장 초안 만들기</b>는 6단계에서 제공합니다.
+          할 일을 모두 끝냈습니다. 이제 답장을 보낼 차례입니다 — 아래 <b>답장 초안 만들기</b>를 눌러 주세요.
         </div>
       )}
 

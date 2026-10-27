@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { localDateValue, localTimeValue, withLocalOffset } from '../../format'
-import type { MailAct, Task } from '../../types'
+import type { MailAct, ReplyDraft, Task } from '../../types'
 import CancelTaskPanel from '../CancelTaskPanel'
 
 type Panel = 'none' | 'snooze' | 'close'
@@ -12,17 +12,28 @@ function isTodoTab(task: Task) {
   return task.status === 'PENDING' && (analysis === 'pending' || analysis === 'failed')
 }
 
-/** 버튼 줄 (설계 3.4절): 나중에 보기 · 답장 필요 없음으로 닫기 · 업무 취소 · 답장 초안 만들기(6단계). */
+export type ComposePurpose = 'reply' | 'followup'
+
+/**
+ * 버튼 줄 (설계 3.4절): 답장 초안 만들기 · 나중에 보기 · 답장 필요 없음으로 닫기 · 업무 취소.
+ * 초안 입력칸(설계 2.1)은 여기서 열린다. 안내 띠의 "다시 연락하기"와 초안 카드의 "다시 만들기"도 compose로 연다.
+ */
 export default function MailActions({
   task,
   act,
   onCancelled,
   emphasizeReply,
+  draft,
+  compose,
+  onCompose,
 }: {
   task: Task
   act: MailAct
   onCancelled: () => void
   emphasizeReply: boolean
+  draft: ReplyDraft | null
+  compose: ComposePurpose | null
+  onCompose: (purpose: ComposePurpose | null) => void
 }) {
   const [panel, setPanel] = useState<Panel>('none')
   const [busy, setBusy] = useState('')
@@ -30,9 +41,19 @@ export default function MailActions({
   const [custom, setCustom] = useState(false)
   const [until, setUntil] = useState('')
   const [reason, setReason] = useState('')
+  const [userInput, setUserInput] = useState('')
+  const composeRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (compose) composeRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [compose])
 
   const closed = task.status === 'COMPLETED' || task.status === 'CANCELLED'
   if (closed) return null
+  const canDraft = task.merged_into_id == null
+  const locked = draft?.status === 'sending' || draft?.status === 'unknown'
+  const showDraftButton = canDraft && !locked && draft?.status !== 'draft'
+  const remaining = task.plan.filter((p) => !p.done).length
 
   const run = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key)
@@ -74,10 +95,22 @@ export default function MailActions({
     <section className="card mail-actions">
       <div className="mail-action-row">
         <span className="reply-draft">
-          <button type="button" className={`btn btn-sm ${emphasizeReply ? 'btn-primary' : 'btn-ghost'}`} disabled>
-            답장 초안 만들기
-          </button>
-          <span className="muted small">6단계에서 제공</span>
+          {showDraftButton && (
+            <>
+              <button
+                type="button"
+                className={`btn btn-sm ${emphasizeReply ? 'btn-primary' : 'btn-ghost'}`}
+                aria-expanded={compose != null}
+                onClick={() => {
+                  setError('')
+                  onCompose(compose ? null : 'reply')
+                }}
+              >
+                답장 초안 만들기
+              </button>
+              {remaining > 0 && <span className="muted small">아직 끝나지 않은 할 일이 {remaining}개 있습니다</span>}
+            </>
+          )}
         </span>
         {isTodoTab(task) && (
           <button type="button" className="btn btn-ghost btn-sm" aria-expanded={panel === 'snooze'} onClick={() => toggle('snooze')}>
@@ -91,6 +124,40 @@ export default function MailActions({
           <CancelTaskPanel taskId={task.id} onCancelled={onCancelled} />
         </span>
       </div>
+
+      {compose && canDraft && !locked && (
+        <div className="inline-panel" ref={composeRef}>
+          <b>{compose === 'followup' ? '다시 연락하는 메일에 넣을 내용' : '답장에 넣을 내용'}</b>
+          <textarea
+            rows={4}
+            maxLength={2000}
+            value={userInput}
+            placeholder="(선택) 예: 납기는 11/15로 확정, 단가는 기존과 같음"
+            onChange={(e) => setUserInput(e.target.value)}
+          />
+          <div className="muted small">할 일 메모는 자동으로 들어갑니다. 더 넣을 내용이 있으면 적어 주세요.</div>
+          {draft?.status === 'draft' && <div className="muted small">지금 있는 초안은 새 초안으로 바뀝니다.</div>}
+          <div className="inline-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={!!busy}
+              onClick={() =>
+                run('draft', async () => {
+                  await act('/reply-draft', { purpose: compose, user_input: userInput.trim() })
+                  setUserInput('')
+                  onCompose(null)
+                })
+              }
+            >
+              {busy === 'draft' ? '초안을 만드는 중…' : '초안 만들기'}
+            </button>
+            <button type="button" className="btn btn-link btn-sm" disabled={!!busy} onClick={() => onCompose(null)}>
+              취소
+            </button>
+          </div>
+        </div>
+      )}
 
       {panel === 'snooze' && isTodoTab(task) && (
         <div className="inline-panel">
