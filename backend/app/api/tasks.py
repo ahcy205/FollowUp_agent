@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.agent import orchestrator
 from app.agent.audit import log_action
+from app.agent.llm import get_llm
 from app.config import get_settings
 from app.db import SessionLocal, get_db
 from app.models import (
@@ -21,6 +22,7 @@ from app.models import (
     Document,
     Email,
     EmailDirection,
+    ReplyDraft,
     Task,
     TaskStatus,
     User,
@@ -39,22 +41,32 @@ from app.schemas import (
     GoalIn,
     GoalUpdateIn,
     MailExtras,
+    NoReplyIn,
     MergeIn,
     MergeUndoIn,
     PriorityIn,
     PromoteOut,
+    ReplyConfirmIn,
+    ReplyDraftIn,
+    ReplyDraftOut,
+    ReplyDraftUpdateIn,
     RunOut,
     SnoozeIn,
     TaskBrief,
     TaskDetail,
     TodoOpIn,
 )
+from app.mail import changes as mail_changes
 from app.mail import inbox as mail_inbox
+from app.mail import lifecycle
 from app.mail import merge as mail_merge
+from app.google.client import get_google_client
+from app.mail import reply_draft
+from app.mail import reply_send
 from app.mail import sync as mail_sync
 from app.mail import task_actions
 from app.mail.task_actions import ActionError
-from app.security import agent_limiter, ai_action_limiter, calendar_retry_limiter, get_current_user
+from app.security import agent_limiter, ai_action_limiter, calendar_retry_limiter, get_current_user, send_limiter
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
@@ -157,11 +169,32 @@ def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
         is_snoozed=mail_inbox.is_snoozed(task, now, tz), wake_at=wake,
         returned=mail_inbox.returned_at(task, now, tz) is not None,
         nudge_days=mail_inbox.nudge_days(task, latest_at, now, tz),
-        merge_candidates=[{"task_id": c.id, "title": c.title} for c in candidates],
+        merge_candidates=[{"task_id": c.id, "title": c.title, "evidence": mail_inbox.merge_evidence(task, c)}
+                          for c in candidates],
         undoable_merges=[{"source_id": i, "title": titles.get(i, "")} for i in source_ids],
         merged_sources=_merged_sources(db, task),
         merged_into_id=task.merged_into_id, deadline_badge=mail_inbox.deadline_badge(task, now, tz),
         priority_source=task.priority_source,
+        no_reply=mail_inbox.no_reply_active(task), reply_sent_at=task.reply_sent_at,
+        draft=_draft_out(db, task, now),
+        remaining_todos_prompt=reply_send.remaining_todos_prompt(task),
+        merge_analyzing=task.merged_into_id is None and (task.merge_analysis or {}).get("state") == "pending",
+    )
+
+
+def _draft_out(db: Session, task: Task, now: datetime) -> ReplyDraftOut | None:
+    d = db.scalar(select(ReplyDraft).where(ReplyDraft.user_id == task.user_id, ReplyDraft.task_id == task.id))
+    if d is None:
+        return None
+    warnings = d.warnings if isinstance(d.warnings, dict) else {}
+    unknown = reply_send.is_unknown(d, now)  # 5분 넘게 sending에 멈춘 초안도 결과 불분명으로 보인다
+    return ReplyDraftOut(
+        purpose=d.purpose, to_addr=d.to_addr, cc_candidates=list(d.cc_candidates or []),
+        cc_selected=list(d.cc_selected or []), subject=d.subject, body=d.body,
+        status="unknown" if unknown else d.status, warnings=warnings,
+        can_send=d.status == "draft" and not reply_draft.placeholders(d.body),
+        unknown_since=d.sending_at if unknown else None, updated_at=d.updated_at,
+        replied_after=d.status == "draft" and reply_send.replied_after_draft(db, task, d),
     )
 
 
@@ -335,6 +368,99 @@ def close_task(task_id: int, body: CloseTaskIn, user: User = Depends(get_current
     return _done(db, task, user)
 
 
+@router.post("/tasks/{task_id}/no-reply", response_model=TaskDetail)
+def answer_no_reply(task_id: int, body: NoReplyIn, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    """상대 답장 없음 물음에 답한다: 다시 연락 · 더 기다리기 · 완료로 닫기."""
+    task = _mail_task(db, task_id, user)
+    _act(lifecycle.answer_no_reply, db, user, task, body.choice, datetime.now(timezone.utc))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/changes/{change_id}/undo", response_model=TaskDetail)
+def undo_task_change(task_id: int, change_id: int, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    """상대 재답장으로 바뀐 항목 하나를 이전 값으로 되돌린다."""
+    task = _mail_task(db, task_id, user)
+    _act(mail_changes.undo_change, task, change_id)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/changes/{change_id}/apply", response_model=TaskDetail)
+def apply_task_change(task_id: int, change_id: int, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    """사용자가 정한 기한을 상대가 바꾼 제안을 반영한다."""
+    task = _mail_task(db, task_id, user)
+    _act(mail_changes.apply_suggestion, task, change_id, get_settings().user_timezone)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/seen", response_model=TaskDetail)
+def mark_task_seen(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """화면이 업무 상세를 열 때 부른다: "내용 바뀜" 표시를 끈다."""
+    task = _mail_task(db, task_id, user)
+    task.changed_unseen = False
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft", response_model=TaskDetail)
+def create_reply_draft(task_id: int, body: ReplyDraftIn, user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    """답장 초안을 만든다(있으면 대체). 받는 사람은 서버가 정한다."""
+    task = _mail_task(db, task_id, user)
+    _act(reply_draft.ensure_can_generate, db, task)
+    ai_action_limiter.check(f"ai:{user.id}")  # after the checks above so rejected calls cost nothing
+    _act(reply_draft.generate_draft, db, task, user, get_llm(), purpose=body.purpose, user_input=body.user_input,
+         tz=get_settings().user_timezone)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft/update", response_model=TaskDetail)
+def update_reply_draft(task_id: int, body: ReplyDraftUpdateIn, user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    draft = _act(reply_draft.find_draft, db, task)
+    _act(reply_draft.update_draft, draft, subject=body.subject, body=body.body, cc_selected=body.cc_selected)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft/delete", response_model=TaskDetail)
+def delete_reply_draft(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    draft = _act(reply_draft.find_draft, db, task)
+    _act(reply_draft.delete_draft, db, draft)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft/send", response_model=TaskDetail)
+def send_reply_draft(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """승인한 초안을 원래 Gmail 스레드로 보낸다. 받는 사람은 서버가 다시 확인한다. 결과가 불분명하면 unknown."""
+    task = _mail_task(db, task_id, user)
+    draft = _act(reply_draft.find_draft, db, task)
+    _act(reply_send.ensure_can_send, db, user, task, draft)
+    send_limiter.check(f"send:{user.id}")  # after the checks above so rejected calls cost nothing
+    _act(reply_send.send_draft, db, user, task, draft, get_google_client(), datetime.now(timezone.utc))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft/confirm", response_model=TaskDetail)
+def confirm_reply_sent(task_id: int, body: ReplyConfirmIn, user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    """발송 결과가 불분명한 초안: 사용자가 보낸편지함에서 확인한 결과(5분 뒤부터)."""
+    task = _mail_task(db, task_id, user)
+    draft = _act(reply_draft.find_draft, db, task)
+    _act(reply_send.confirm_unknown, db, user, task, draft, sent=body.sent, now=datetime.now(timezone.utc))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/todos/complete-all", response_model=TaskDetail)
+def complete_all_todos(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """남은 할 일을 모두 완료로 정리한다(답장을 보낸 뒤 안내)."""
+    task = _mail_task(db, task_id, user)
+    reply_send.complete_remaining_todos(task)
+    return _done(db, task, user)
+
+
 @router.post("/tasks/{task_id}/reanalyze", response_model=TaskDetail)
 def reanalyze_task(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     task = _mail_task(db, task_id, user)
@@ -352,7 +478,10 @@ def merge_task(task_id: int, body: MergeIn, user: User = Depends(get_current_use
     source = _mail_task(db, task_id, user)
     target = get_owned(db, Task, body.into_task_id, user)
     _act(mail_merge.merge, db, user, source, target, datetime.now(timezone.utc))
-    return _done(db, target, user)
+    detail = _done(db, target, user)
+    if (target.merge_analysis or {}).get("state") == "pending" and target.calendar_state != "pending":
+        mail_sync.wake()  # 합친 내용 분석은 워커가 바로 이어서 한다(설계 7.3)
+    return detail
 
 
 @router.post("/tasks/{task_id}/merge/undo", response_model=TaskDetail)

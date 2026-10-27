@@ -242,18 +242,26 @@ def test_conflict_with_user_deleted_event(setup, google_fake):
         assert task.calendar_state == "deleted_by_user" and task.calendar_event_id == eid
 
 
-def test_cancel_marks_check(setup, google_fake):
+def test_cancel_removes_event(setup, google_fake):
+    """완료 · 취소된 업무의 일정은 지운다(실제 계정 점검 뒤 사용자 결정 — 예전에는 ✓만 붙였다)."""
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid)
         _sync(db, aid, google_fake)
         task = db.get(Task, tid)
+        eid = event_id_for(task, _salt(db, aid))
         orchestrator.cancel_task(db, db.get(User, uid), task, "")
         assert db.get(Task, tid).calendar_state == "pending"
+        r = _sync(db, aid, google_fake)
+        assert r.removed == 1
+        assert _calls(google_fake, "delete") == [("delete", eid)]
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+        (log,) = _logs(db, tid, "CALENDAR_REMOVED")
+        assert log.reason == "업무가 닫혀 캘린더 일정을 지웠습니다"
+        # 다음 주기에 닫힌 업무를 다시 고르지 않는다
         _sync(db, aid, google_fake)
-        ev = google_fake.events[event_id_for(task, _salt(db, aid))]
-        assert ev["summary"].startswith("✓ ")
-        assert db.get(Task, tid).calendar_state == "synced"
+        assert len(_calls(google_fake, "delete")) == 1
 
 
 def test_cancel_after_user_deleted_untouched(setup, google_fake):
@@ -421,20 +429,153 @@ def test_mark_calendar_dirty_rules():
     assert t4.calendar_state == "pending"
 
 
-def test_deadline_removed_keeps_event(setup, google_fake):
+def _clear_deadline(db, tid):
+    task = db.get(Task, tid)
+    task.deadline_at = None
+    mark_calendar_dirty(task)
+    db.commit()
+
+
+def test_clear_deadline_deletes_own_event(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        _clear_deadline(db, tid)
+        r = _sync(db, aid, google_fake)
+        assert r.removed == 1 and r.errors == 0
+        assert eid not in google_fake.events and _calls(google_fake, "delete") == [("delete", eid)]
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+        (log,) = _logs(db, tid, "CALENDAR_REMOVED")
+        assert log.reason == "기한이 없어져 캘린더 일정을 지웠습니다"
+        assert SUMMARY not in str(log.output_data)
+        # 다시 돌려도 아무 호출이 없다
+        n = len(google_fake.calendar_calls)
+        _sync(db, aid, google_fake)
+        assert len(google_fake.calendar_calls) == n
+
+
+@pytest.mark.parametrize("marker", [None, "othersalt:1"])
+def test_clear_deadline_foreign_event_not_deleted(setup, google_fake, marker):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        priv = google_fake.events[eid]["extendedProperties"]["private"]
+        if marker is None:
+            priv.pop("followupTask")
+        else:
+            priv["followupTask"] = marker
+        _clear_deadline(db, tid)
+        _sync(db, aid, google_fake)
+        assert _calls(google_fake, "delete") == [] and eid in google_fake.events
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+
+
+def test_new_deadline_after_remove_recreates_event(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        _clear_deadline(db, tid)
+        _sync(db, aid, google_fake)
+        assert eid not in google_fake.events and db.get(Task, tid).calendar_state == "none"
+        task = db.get(Task, tid)
+        task.deadline_at = datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc)
+        mark_calendar_dirty(task)
+        db.commit()
+        r = _sync(db, aid, google_fake)
+        assert r.created == 1 and r.deleted_by_user == 0 and r.errors == 0
+        task = db.get(Task, tid)
+        assert task.calendar_state == "synced" and task.calendar_event_id == eid
+        assert eid in google_fake.events and eid not in google_fake.deleted_events
+        ev = google_fake.events[eid]
+        assert ev["start"] == {"date": "2026-11-06"} and ev["status"] == "confirmed"
+        assert "followupRemoved" not in ev["extendedProperties"]["private"]
+        assert google_fake.calendar_get("t", eid).status == "confirmed"
+        assert len(_logs(db, tid, "CALENDAR_SYNCED")) == 2  # 처음 만들 때 + 되살릴 때
+
+
+def test_clear_deadline_already_gone(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        google_fake.events.pop(eid)  # 404
+        _clear_deadline(db, tid)
+        r = _sync(db, aid, google_fake)
+        assert r.errors == 0 and _calls(google_fake, "delete") == []
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+
+
+def test_clear_deadline_user_deleted_event_is_gone(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        google_fake.delete_event(eid)  # cancelled
+        _clear_deadline(db, tid)
+        _sync(db, aid, google_fake)
+        assert _calls(google_fake, "delete") == []
+        assert db.get(Task, tid).calendar_state == "none"
+
+
+def test_completed_task_removes_event_and_reopen_restores(setup, google_fake):
+    """완료로 닫으면 일정을 지우고, 다시 열리면(상대 새 메일 · 합치기 되돌리기) 같은 번호의 일정을 되살린다."""
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid)
         _sync(db, aid, google_fake)
         task = db.get(Task, tid)
-        task.deadline_at = None
+        eid = event_id_for(task, _salt(db, aid))
+        task.status = TaskStatus.COMPLETED
         mark_calendar_dirty(task)
         db.commit()
-        n = len(google_fake.calendar_calls)
         _sync(db, aid, google_fake)
-        assert len(google_fake.calendar_calls) == n
-        assert db.get(Task, tid).calendar_state == "synced"
-        assert event_id_for(task, _salt(db, aid)) in google_fake.events
+        assert _calls(google_fake, "delete") == [("delete", eid)]
+        assert db.get(Task, tid).calendar_event_id is None
+        task = db.get(Task, tid)
+        task.status = TaskStatus.ACTION_REQUIRED
+        mark_calendar_dirty(task)
+        db.commit()
+        _sync(db, aid, google_fake)
+        task = db.get(Task, tid)
+        assert task.calendar_state == "synced" and task.calendar_event_id == eid
+        assert google_fake.calendar_get("t", eid).status == "confirmed"
+        assert not google_fake.events[eid]["summary"].startswith("✓ ")
+
+
+def test_already_closed_synced_events_removed(setup, google_fake):
+    """이번 변경 전에 닫혀 ✓만 붙은 일정(synced 상태로 남음)도 다음 주기에 지운다(사용자 결정)."""
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        task = db.get(Task, tid)
+        eid = event_id_for(task, _salt(db, aid))
+        task.status = TaskStatus.CANCELLED  # 예전 코드가 ✓를 붙이고 synced로 둔 상태
+        db.commit()
+        r = _sync(db, aid, google_fake)
+        assert r.removed == 1 and _calls(google_fake, "delete") == [("delete", eid)]
+        assert db.get(Task, tid).calendar_state == "none"
+
+
+def test_closed_task_foreign_or_user_deleted_event_untouched(setup, google_fake):
+    """닫힌 업무라도 사용자가 지운 일정(deleted_by_user)은 건드리지 않는다."""
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid, status=TaskStatus.CANCELLED, state="deleted_by_user", event_id="fuag0000000100000001")
+        _sync(db, aid, google_fake)
+        assert google_fake.calendar_calls == []
+        assert db.get(Task, tid).calendar_state == "deleted_by_user"
 
 
 def test_intake_marks_dirty():

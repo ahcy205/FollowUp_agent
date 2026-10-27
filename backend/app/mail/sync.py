@@ -20,7 +20,9 @@ from app.google.client import (
 )
 from app.google.oauth import access_token_for, forget_access_token
 from app.mail.calendar_sync import sync_calendars
+from app.mail import lifecycle
 from app.mail.intake import intake_work_mails
+from app.mail.merge_analysis import finish_stale_merges, run_merge_analyses
 from app.mail.parse import parse_raw
 from app.mail.triage import triage_pending
 from app.models import Email, EmailDirection, GoogleAccount
@@ -40,6 +42,7 @@ class SyncResult:
     stored: int
     skipped_sent: int
     complete: bool
+    sent_stored: int = 0
 
 
 def _utc(dt: datetime) -> datetime:
@@ -194,6 +197,43 @@ def _store(db: Session, user_id: int, msg) -> bool:
     return True
 
 
+def _known_thread(db: Session, user_id: int, thread_id: str | None) -> bool:
+    """업무가 있거나, 이 사용자의 받은 메일이 저장된 스레드인가(업무가 아직 없어도 된다)."""
+    if not thread_id:
+        return False
+    if lifecycle.task_for_thread(db, user_id, thread_id) is not None:
+        return True
+    return db.scalar(select(Email.id).where(Email.user_id == user_id, Email.gmail_thread_id == thread_id,
+                                            Email.direction == EmailDirection.INBOUND.value).limit(1)) is not None
+
+
+def _store_sent(db: Session, account: GoogleAccount, msg, now: datetime) -> bool:
+    """업무가 있거나 받은 메일이 저장된 스레드의 보낸 메일을 OUTBOUND로 저장한다. 모르는 스레드면 False(저장 안 함).
+
+    업무가 있으면 답장 보냄으로 옮긴다. 업무가 아직 없으면(받은 메일 접수 전) 저장만 하고, 접수가 업무를 만들 때
+    이 메일이 최신 받은 메일보다 늦으면 답장 보냄으로 둔다(app.mail.intake).
+    """
+    if not _known_thread(db, account.user_id, msg.thread_id):
+        return False
+    try:
+        row = _build_email(account.user_id, msg)
+    except Exception as e:  # noqa: BLE001 - one unparseable mail must not stop the cycle
+        log.warning("gmail message %s skipped: %s", msg.id, type(e).__name__)
+        return False
+    row.direction = EmailDirection.OUTBOUND
+    row.sender = (account.google_email or "")[:ADDRESS_MAX]
+    try:
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+            lifecycle.record_sent_mail(db, account.user_id, row, now)
+    except IntegrityError as e:  # a concurrent sync stored it first
+        log.info("gmail message %s skipped: %s", msg.id, type(e).__name__)
+        return False
+    db.commit()
+    return True
+
+
 # --- sync ---
 
 def _fail(db: Session, account: GoogleAccount, message: str, result: SyncResult) -> SyncResult:
@@ -232,6 +272,7 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
         remaining = [i for i in ids if i not in have and i not in skipped]
         cap = max(1, get_settings().mail_sync_max_per_cycle)
         batch, deferred = remaining[:cap], remaining[cap:]
+        sent_msgs = []  # 보낸 메일은 받은 메일을 다 저장한 뒤에 본다: 같은 묶음의 받은 메일로 스레드를 알 수 있게
         for mid in batch:
             try:
                 msg = client.gmail_get_raw(token, mid)
@@ -241,7 +282,10 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
                 log.info("gmail message %s could not be fetched; skipped", mid)
                 _mark_skipped(account.id, mid)
                 continue
-            if "INBOX" not in msg.label_ids or "SENT" in msg.label_ids:
+            if "SENT" in msg.label_ids:
+                sent_msgs.append(msg)
+                continue
+            if "INBOX" not in msg.label_ids:
                 result.skipped_sent += 1
                 _mark_skipped(account.id, mid)
                 continue
@@ -249,6 +293,12 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
                 result.stored += 1
             else:
                 _mark_skipped(account.id, mid)
+        for msg in sent_msgs:
+            if _store_sent(db, account, msg, now):
+                result.sent_stored += 1
+            else:
+                result.skipped_sent += 1
+                _mark_skipped(account.id, msg.id)
     except GoogleTransientError:
         log.info("gmail sync for account %s interrupted (transient); stored %d", account.id, result.stored)
         return _fail(db, account, TRANSIENT_MESSAGE, result)
@@ -272,8 +322,8 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
     db.commit()
     if result.complete:
         clear_skipped(account.id)
-    log.info("gmail sync for account %s: listed %d, stored %d, skipped %d, deferred %d",
-             account.id, result.listed, result.stored, result.skipped_sent, len(deferred))
+    log.info("gmail sync for account %s: listed %d, stored %d, sent_stored %d, skipped %d, deferred %d",
+             account.id, result.listed, result.stored, result.sent_stored, result.skipped_sent, len(deferred))
     return result
 
 
@@ -286,6 +336,7 @@ def process_inbox(db: Session, user_id: int) -> None:
     """
     settings = get_settings()
     if not settings.mail_triage_enabled:
+        _finish_merges_without_llm(db, user_id, settings.user_timezone)
         return
     try:
         llm = get_llm()
@@ -295,11 +346,39 @@ def process_inbox(db: Session, user_id: int) -> None:
     try:
         db.rollback()  # start from a clean transaction
         triage_pending(db, user_id, llm, max_batches=settings.mail_triage_batches_per_cycle)
+        # 합친 내용 분석(설계 7.3)은 재답장 분석보다 먼저: 옮겨 온 옛 메일이 그 뒤에 온 새 메일의 변경을 덮지 않게
+        run_merge_analyses(db, user_id, llm, settings.user_timezone)
         # intake also retries analyses that failed earlier, so it runs even if triage did nothing
         intake_work_mails(db, user_id, llm, max_mails=settings.mail_intake_per_cycle,
                           tz=settings.user_timezone)
     except Exception as e:  # noqa: BLE001 - processing must never undo or fail the sync
         log.warning("mail processing for user %s failed: %s", user_id, type(e).__name__)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+
+
+def _finish_merges_without_llm(db: Session, user_id: int, tz: str) -> None:
+    """판별이 꺼진 동안 남은 '합친 내용 분석 중'을 5단계 규칙으로 마무리한다(설계 7.3). 메일은 LLM으로 가지 않는다."""
+    try:
+        db.rollback()
+        run_merge_analyses(db, user_id, None, tz)
+    except Exception as e:  # noqa: BLE001 - 동기화를 실패시키지 않는다
+        log.warning("merge finishing for user %s failed: %s", user_id, type(e).__name__)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+
+
+def _finish_stale_merges_for(db: Session, user_id: int) -> None:
+    """합친 지 10분이 지난 '분석 중'을 LLM 없이 5단계 규칙으로 마무리한다. LLM 준비 여부와 관계없이 매 주기 돈다."""
+    try:
+        db.rollback()
+        finish_stale_merges(db, user_id, datetime.now(timezone.utc))
+    except Exception as e:  # noqa: BLE001 - 동기화를 실패시키지 않는다
+        log.warning("merge finishing for user %s failed: %s", user_id, type(e).__name__)
         try:
             db.rollback()
         except SQLAlchemyError:
@@ -318,6 +397,19 @@ def _sync_calendar_for(db: Session, account_id: int, client: GoogleClient) -> No
                        tz=settings.user_timezone, public_url=settings.public_url)
     except Exception as e:  # noqa: BLE001 - calendar problems must never undo or fail the mail sync
         log.warning("calendar sync for account %s failed: %s", account_id, type(e).__name__)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+
+
+def _check_no_reply_for(db: Session, user_id: int) -> None:
+    """Move sent tasks nobody answered for 3 business days back to the to-do tab. No LLM; never raises."""
+    try:
+        db.rollback()
+        lifecycle.check_no_reply(db, user_id, datetime.now(timezone.utc), get_settings().user_timezone)
+    except Exception as e:  # noqa: BLE001 - this check must never fail the sync cycle
+        log.warning("no-reply check for user %s failed: %s", user_id, type(e).__name__)
         try:
             db.rollback()
         except SQLAlchemyError:
@@ -360,6 +452,8 @@ def run_sync_cycle(now: datetime | None = None, user_id: int | None = None, proc
                     processed += 1
                     if process:
                         process_inbox(db, account.user_id)
+                        _check_no_reply_for(db, account.user_id)
+                        _finish_stale_merges_for(db, account.user_id)
                         _sync_calendar_for(db, account_id, client)
                 finally:
                     try:

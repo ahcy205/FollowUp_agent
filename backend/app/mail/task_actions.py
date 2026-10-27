@@ -304,7 +304,7 @@ def close_without_reply(db: Session, user: User, task: Task, reason: str) -> Non
     task.next_action = ""
     task.waiting_for = ""
     task.snoozed_until = None
-    mark_calendar_dirty(task)  # 일정은 지우지 않고 제목 앞에 ✓를 붙인다
+    mark_calendar_dirty(task)  # 앱이 만든 캘린더 일정을 지운다(다시 열리면 되살린다)
     log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="TASK_CLOSED",
                output_data={"reason": reason}, reason="답장 필요 없음으로 닫았습니다")
 
@@ -356,6 +356,8 @@ def promote_email(db: Session, user: User, email: Email) -> Task:
 
     if not created:
         intake.link_email(db, task, email)
+        if (task.brief or {}).get("analysis") not in ("pending", "failed"):
+            intake.queue_changes(task, email_id)  # 분석이 끝난 업무: 다음 주기에 변경 분석(설계 6.1)
         if str(task.status) in _CLOSED:
             task.status = TaskStatus.ACTION_REQUIRED
             task.completed_at = None

@@ -32,10 +32,12 @@ MAX_TRANSIENT_ATTEMPTS = 5
 TRANSIENT_MESSAGE = "Google 캘린더 연결이 불안정해 일정을 반영하지 못했습니다."
 ERROR_MESSAGE = "Google 캘린더에 일정을 반영하지 못했습니다."
 FOREIGN_EVENT_MESSAGE = "같은 번호의 다른 캘린더 일정이 있어 반영하지 못했습니다."
+CLOSED_REMOVED_REASON = "업무가 닫혀 캘린더 일정을 지웠습니다"
 
 _BASE32HEX = "0123456789abcdefghijklmnopqrstuv"  # 캘린더 일정 ID에 쓸 수 있는 글자
 _SALT_LEN = 8
 _MARKER_KEY = "followupTask"
+_REMOVED_KEY = "followupRemoved"  # 앱이 기한 삭제로 지운 일정에 붙인다 (사용자가 지운 일정과 구분)
 
 NONE, PENDING, SYNCED, DELETED, ERROR = "none", "pending", "synced", "deleted_by_user", "error"
 
@@ -47,6 +49,7 @@ class CalendarSyncResult:
     deleted_by_user: int = 0
     errors: int = 0
     skipped: int = 0
+    removed: int = 0
 
 
 class _StopSync(Exception):
@@ -70,7 +73,10 @@ def _targets(db: Session, user_id: int, max_tasks: int) -> list[int]:
                or_(Task.calendar_state == PENDING,
                    # 닫힌 업무는 새 일정을 만들지 않으므로 고르지 않는다 (매 주기 한도를 차지하지 않게)
                    and_(Task.calendar_state == NONE, Task.deadline_at.is_not(None),
-                        Task.status.not_in(_CLOSED))))
+                        Task.status.not_in(_CLOSED)),
+                   # 예전 규칙으로 ✓만 붙고 남은 닫힌 업무의 일정도 지운다
+                   and_(Task.calendar_state == SYNCED, Task.calendar_event_id.is_not(None),
+                        Task.status.in_(_CLOSED))))
         .order_by(Task.updated_at, Task.id)
         .limit(max_tasks)
     ).all())
@@ -139,11 +145,58 @@ def _patch(db: Session, task: Task, client: GoogleClient, token: str, body: dict
     return "updated"
 
 
+def _remove_event(db: Session, task: Task, client: GoogleClient, token: str, salt: str,
+                  reason: str = "기한이 없어져 캘린더 일정을 지웠습니다") -> str:
+    """기한이 없어졌거나 닫힌 업무의 일정을 지운다. 이 업무가 만든 일정(비공개 표식 일치)만 지우고, 이미 없으면 조용히 넘어간다."""
+    event_id = task.calendar_event_id
+    try:
+        existing = client.calendar_get(token, event_id)
+    except GoogleNotFound:
+        existing = None
+    removed = False
+    if (existing is not None and existing.status != "cancelled"
+            and existing.private.get(_MARKER_KEY) == private_marker(task, salt)):
+        try:
+            # 앱이 지운 일정임을 남긴다. 같은 번호로 기한이 다시 생기면 이 표식으로 되살릴지 판단한다.
+            client.calendar_patch(token, event_id, {"extendedProperties": {"private": {_REMOVED_KEY: "1"}}})
+            client.calendar_delete(token, event_id)
+            removed = True
+        except GoogleNotFound:
+            pass
+    task.calendar_event_id = None
+    task.calendar_event_url = ""
+    task.calendar_attempts = 0
+    task.calendar_error = ""
+    if removed:
+        _set_state(db, task, NONE, "CALENDAR_REMOVED", reason=reason)
+        return "removed"
+    task.calendar_state = NONE
+    return "skipped"
+
+
+def _restore(db: Session, task: Task, client: GoogleClient, token: str, body: dict) -> str:
+    """앱이 지운 일정을 되살린다. 취소된 일정은 id가 남아 insert가 409이므로 status=confirmed로 patch한다."""
+    patch_body = {k: v for k, v in body.items() if k != "id"}
+    patch_body["status"] = "confirmed"
+    patch_body["extendedProperties"] = {"private": {**body["extendedProperties"]["private"], _REMOVED_KEY: None}}
+    for key in ("start", "end"):
+        part = dict(patch_body[key])
+        if "dateTime" in part:
+            part["date"] = None
+        else:
+            part["dateTime"] = None
+            part["timeZone"] = None
+        patch_body[key] = part
+    event = client.calendar_patch(token, task.calendar_event_id, patch_body)
+    _synced(db, task, event, created=True)
+    return "created"
+
+
 def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str, public_url: str, salt: str) -> str:
-    """업무 1개를 반영한다. 결과: created | updated | deleted | error | skipped. GoogleError는 호출한 쪽이 처리한다."""
+    """업무 1개를 반영한다. 결과: created | updated | deleted | removed | error | skipped. GoogleError는 호출한 쪽이 처리한다."""
     if not task.calendar_event_id:
         if task.deadline_at is None or task.status in _CLOSED:
-            # 완료 · 취소된 업무는 이미 있는 일정에만 ✓를 붙인다. 새 일정은 만들지 않는다.
+            # 완료 · 취소된 업무는 새 일정을 만들지 않는다 (이미 있는 일정은 아래에서 지운다).
             task.calendar_state = NONE
             return "skipped"
         body = build_event(task, tz=tz, public_url=public_url, salt=salt)
@@ -160,16 +213,20 @@ def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str,
             if existing.html_link:
                 task.calendar_event_url = existing.html_link
             if existing.status == "cancelled":
+                if existing.private.get(_REMOVED_KEY) == "1":
+                    # 기한이 없어져 앱이 지웠던 일정이다. 기한이 다시 생겼으니 같은 번호로 되살린다.
+                    return _restore(db, task, client, token, body)
                 _deleted(db, task)
                 return "deleted"
             return _patch(db, task, client, token, body)
         _synced(db, task, event, created=True)
         return "created"
 
+    if task.status in _CLOSED:
+        # 완료 · 취소 · 합쳐진 업무의 일정은 지운다. 다시 열리면 insert 409 → 되살리기로 같은 일정이 돌아온다.
+        return _remove_event(db, task, client, token, salt, reason=CLOSED_REMOVED_REASON)
     if task.deadline_at is None:
-        # 기한 삭제에 따른 일정 정리는 이 단계 범위가 아니다. 일정은 그대로 둔다.
-        task.calendar_state = SYNCED
-        return "skipped"
+        return _remove_event(db, task, client, token, salt)
     return _patch(db, task, client, token, build_event(task, tz=tz, public_url=public_url, salt=salt))
 
 
@@ -217,6 +274,8 @@ def _sync_one(db: Session, task_id: int, client: GoogleClient, token: str, tz: s
         result.updated += 1
     elif outcome == "deleted":
         result.deleted_by_user += 1
+    elif outcome == "removed":
+        result.removed += 1
     elif outcome == "error":
         result.errors += 1
     else:
@@ -249,6 +308,7 @@ def sync_calendars(db: Session, account: GoogleAccount, client: GoogleClient, *,
     except Exception as e:  # noqa: BLE001 - 캘린더 오류가 메일 동기화 주기를 멈추면 안 된다
         db.rollback()
         log.warning("calendar sync for user %s aborted: %s", user_id, type(e).__name__)
-    log.info("calendar sync for user %s: created=%d updated=%d deleted_by_user=%d errors=%d skipped=%d",
-             user_id, result.created, result.updated, result.deleted_by_user, result.errors, result.skipped)
+    log.info("calendar sync for user %s: created=%d updated=%d deleted_by_user=%d removed=%d errors=%d skipped=%d",
+             user_id, result.created, result.updated, result.deleted_by_user, result.removed, result.errors,
+             result.skipped)
     return result

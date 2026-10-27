@@ -19,6 +19,8 @@ function situations(card: Card): string[] {
   if (card.analysis === 'failed') out.push('분석 실패')
   if (card.nudge_days != null) out.push(`${card.nudge_days}일째 답장 안 함`)
   if (card.returned) out.push('다시 표시됨')
+  if (card.no_reply) out.push('보낸 지 영업일 3일째 답이 없습니다')
+  if (card.changed_unseen) out.push('내용 바뀜')
   if (card.has_merge_candidates) out.push('합치기 제안')
   return out
 }
@@ -48,7 +50,7 @@ export default function InboxCard({ card, extra }: { card: Card; extra?: ReactNo
                 </span>
               )}
               {chips.map((c) => (
-                <span key={c} className={`tag${c === '분석 실패' ? ' tag-red' : c === '합치기 제안' ? ' tag-blue' : ' tag-amber'}`}>
+                <span key={c} className={`tag${c === '분석 실패' ? ' tag-red' : c === '합치기 제안' || c === '내용 바뀜' ? ' tag-blue' : ' tag-amber'}`}>
                   {c}
                 </span>
               ))}

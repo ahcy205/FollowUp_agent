@@ -26,7 +26,8 @@
 | Google 캘린더 연동 (설계 4단계) | 완료 (실제 캘린더 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-calendar-sync.md) |
 | 받은 업무 화면 (설계 5단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-26-inbox-screen-design.md) · [구현 계획](docs/superpowers/plans/2026-10-26-inbox-screen.md) |
 | 데모 모드 분리 (설계 7단계 일부) | 완료 — [설계](docs/superpowers/specs/2026-10-27-demo-mode-split-design.md) · [구현 계획](docs/superpowers/plans/2026-10-27-demo-mode-split.md) |
-| 답장 · 정리 (설계 6~7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
+| 답장과 수명주기 (설계 6단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-27-reply-and-lifecycle-design.md) · [구현 계획](docs/superpowers/plans/2026-10-27-reply-and-lifecycle.md) · [정확도 측정](docs/evals/2026-10-27-reply-lifecycle.md) |
+| 정리 (설계 7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
 | RAG (검색 증강 생성) | 설계 중, 구현 전 — [설계 문서](docs/superpowers/specs/2026-10-26-rag-design.md) |
 
 **문서** · [변경 이력](CHANGELOG.md) · [결정 기록](docs/decisions.md) · [데이터 · 개인정보 흐름](docs/privacy.md) · [문제 해결](docs/troubleshooting.md) · [설계 문서 · 구현 계획](docs/superpowers/)
@@ -156,11 +157,13 @@ Gmail을 연결하려면 본인 Google Cloud 프로젝트에 OAuth 클라이언�
 
 - 브라우저 주소는 `PUBLIC_URL`과 같은 호스트(`localhost`)로 여세요. `127.0.0.1`로 열면 로그인 쿠키가 달라 연결이 실패합니다.
 - 테스트 상태 앱은 Google 정책상 갱신 토큰이 **7일 뒤 만료**됩니다. 만료되면 앱 상단 빨간 배너에서 다시 연결하세요.
-- 메일 판별 · 요약 · 캘린더 · 답장은 다음 단계에서 추가됩니다. 지금은 메일을 가져와 저장하는 것까지입니다.
+- 연결만 하면 메일을 가져와 저장하는 데까지 동작합니다. 업무 판별 · 요약 · 답장 초안은 아래 "업무 메일 자동 판별 켜기"로 스위치를 켜야 동작합니다. 기한이 있는 업무는 캘린더 일정으로 들어갑니다.
+- 답장은 업무 상세의 초안 카드에서 사용자가 확인하고 보내기를 눌렀을 때만 원래 Gmail 스레드로 나갑니다. Gmail에서 직접 보낸 답장도 감지해 "답장 보냄"으로 옮깁니다.
 
 ### 업무 메일 자동 판별 켜기
 
 `backend/.env`에 `MAIL_TRIAGE_ENABLED=true`를 넣고 서버를 재시작하면, 가져온 메일에서 업무 메일을 골라 요약 · 할 일 · 기한이 담긴 업무를 자동으로 만듭니다. 기본값은 꺼짐입니다.
+같은 스위치로 재답장 분석(상대가 바꾼 내용 반영), 다른 스레드 수정 요청 판단, 답장 초안 만들기도 켜집니다.
 켜면 메일의 보낸 사람 · 제목 · 본문 일부가 LLM 공급자로 전송됩니다. 전송 범위와 무료 등급 주의 사항은 [데이터 · 개인정보 흐름](docs/privacy.md)을 보세요.
 
 ## Railway 배포
@@ -186,8 +189,7 @@ Gmail을 연결하려면 본인 Google Cloud 프로젝트에 OAuth 클라이언�
 5. 컨테이너 시작 시 `alembic upgrade head` 후 uvicorn 기동. 헬스체크 `/api/health`.
 
 ## 범위 밖 (의도적으로 제외)
-기업 메일(Gmail 외) 연동, 실제 외부 발송, 모델 학습/파인튜닝, Multi-Agent, 결제, 모바일 앱.
-데모 시나리오의 메일은 내부 가상 메일 시스템이며 주소는 예약 도메인 `.example`을 사용합니다.
-Gmail을 연결하면 받은편지함 메일을 가져와 저장하는 데까지 동작합니다(판별 · 요약 · 답장은 [진행 상황](#진행-상황) 참고).
+기업 메일(Gmail 외) 연동, 자동 발송(사용자 승인 없이 나가는 메일), 모델 학습/파인튜닝, Multi-Agent, 결제, 모바일 앱.
+데모 시나리오의 메일은 내부 가상 메일 시스템이며 주소는 예약 도메인 `.example`을 사용합니다.Gmail을 연결하면 받은편지함 메일을 가져와 저장하고, 판별 스위치를 켜면 업무 접수 · 캘린더 · 답장 초안과 승인 후 발송까지 동작합니다([진행 상황](#진행-상황) 참고).
 
 설계 문서: [Gmail · Google 캘린더 연동](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) · [Agent 전체 구조와 RAG](docs/superpowers/specs/2026-10-26-rag-design.md)

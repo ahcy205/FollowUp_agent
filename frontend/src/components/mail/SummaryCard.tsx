@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { localDateValue, localTimeValue, shortDate } from '../../format'
 import type { MailAct, Priority, TaskDetail } from '../../types'
+import ChangesSection from './ChangesSection'
 
 const PRIORITIES: { value: Priority; cls: string; label: string }[] = [
   { value: 'HIGH', cls: 'pdot-high', label: '높음' },
@@ -11,7 +12,7 @@ const PRIORITIES: { value: Priority; cls: string; label: string }[] = [
 
 const USER_DEADLINE_SOURCE = '사용자가 직접 정함' // backend task_actions.USER_DEADLINE_SOURCE
 
-/** 요약 카드 본문 (설계 3.2절): 요약 · 보낸 사람 · 원하는 것 · 중요도 · 기한. 제목 카드 안에 들어간다. */
+/** 요약 카드 본문 (설계 3.2절): 요약 · 보낸 사람 · 원하는 것 · 바뀐 내용(6단계) · 중요도 · 기한. 제목 카드 안에 들어간다. */
 export default function SummaryCard({ data, act, calendarLine }: { data: TaskDetail; act: MailAct; calendarLine?: ReactNode }) {
   const { task, mail } = data
   const brief = task.brief
@@ -21,7 +22,6 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
   const [editing, setEditing] = useState(false)
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
-  const [calendarKept, setCalendarKept] = useState(false) // 기한을 없앴지만 캘린더 일정은 남아 있음
 
   const run = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key)
@@ -41,7 +41,6 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
     setDate(task.deadline_at ? localDateValue(task.deadline_at) : '')
     setTime(task.deadline_at && !task.deadline_all_day ? localTimeValue(task.deadline_at) : '')
     setError('')
-    setCalendarKept(false)
     setEditing(true)
   }
 
@@ -54,11 +53,7 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
   }
 
   const clear = async () => {
-    const hadEvent = task.calendar_state === 'synced'
-    if (await run('clear', () => act('/deadline', { clear: true }))) {
-      setEditing(false)
-      setCalendarKept(hadEvent) // 기한을 없애도 캘린더 일정은 지우지 않는다 (6단계에서 정함)
-    }
+    if (await run('clear', () => act('/deadline', { clear: true }))) setEditing(false)
   }
 
   const cp = brief.counterpart
@@ -108,6 +103,8 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
           </ul>
         </div>
       )}
+
+      <ChangesSection log={task.change_log ?? []} act={act} closed={closed} />
 
       <div className="summary-block priority-row">
         <b className="small">중요도</b>
@@ -196,9 +193,6 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
           </div>
         )}
 
-        {calendarKept && !task.deadline_at && (
-          <div className="muted small">캘린더 일정은 그대로 남습니다. 필요하면 캘린더에서 지워 주세요.</div>
-        )}
         {calendarLine}
       </div>
 

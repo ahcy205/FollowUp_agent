@@ -134,11 +134,40 @@ class Task(Base):
     merged_into_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
     merge_dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
     merge_undo: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 6단계 답장과 수명주기
+    reply_sent_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    wait_from: Mapped[datetime | None] = mapped_column(Timestamp)  # 상대 답장 없음 계산 기준(보낼 때 · 더 기다리기 때 now)
+    no_reply_asked_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    change_log: Mapped[list] = mapped_column(JSON, default=list)
+    changed_unseen: Mapped[bool] = mapped_column(Boolean, default=False)
+    related: Mapped[dict] = mapped_column(JSON, default=dict)
+    merge_analysis: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(Timestamp)
 
     customer: Mapped[Customer | None] = relationship()
+
+
+class ReplyDraft(Base):
+    __tablename__ = "reply_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), unique=True)
+    purpose: Mapped[str] = mapped_column(String(10), default="reply")  # reply | followup
+    to_addr: Mapped[str] = mapped_column(String(255))
+    cc_candidates: Mapped[list] = mapped_column(JSON, default=list)
+    cc_selected: Mapped[list] = mapped_column(JSON, default=list)
+    subject: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(10), default="draft")  # draft | sending | sent | unknown
+    warnings: Mapped[dict] = mapped_column(JSON, default=dict)
+    user_input: Mapped[str] = mapped_column(Text, default="")
+    gmail_message_id: Mapped[str | None] = mapped_column(String(64))
+    sending_at: Mapped[datetime | None] = mapped_column(Timestamp)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
 
 
 class GoogleAccount(Base):

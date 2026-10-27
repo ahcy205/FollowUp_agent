@@ -1,7 +1,8 @@
 """업무 메일 접수: work로 판별된 Gmail 메일을 Gmail 스레드당 업무 1개로 만든다.
 
 새 스레드면 업무를 "분석 대기"로 먼저 만들고 커밋한 다음 LLM에 한 번 분석을 맡긴다. 분석이 실패해도
-메일이 화면에서 사라지지 않게 하기 위해서다. 이미 업무가 있는 스레드의 메일은 LLM 없이 붙인다.
+메일이 화면에서 사라지지 않게 하기 위해서다. 이미 업무가 있는 스레드의 메일은 먼저 붙이고(커밋), 분석이 끝난 업무면
+업무마다 묶어 변경 분석(app.mail.changes, 설계 6절)을, 분석 대기 · 실패 업무면 처음 분석을 다시 한다(설계 6.6).
 LLM 제공자 장애(LLMError)는 시도 횟수에 넣지 않고 "분석 대기"로 둔다(명세 4.3.3 · 7절). LLM이 형식이 틀린 답을 냈거나
 그 밖의 예외가 났을 때만 시도 횟수를 올리고, 3회째에 분석을 멈춘다. 완료 · 취소된 업무는 다시 분석하지 않는다.
 로그에는 메일 · 업무 번호, 건수, 예외 타입 이름만 남긴다.
@@ -23,6 +24,7 @@ from app.config import get_settings
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.deadline import USER_DEADLINE_SOURCE, Deadline, earliest, normalize_deadline
 from app.mail.inbox import is_snoozed
+from app.mail import related
 from app.mail.merge import resolve_merged
 from app.models import Email, EmailDirection, RiskLevel, Task, TaskStatus
 
@@ -30,6 +32,8 @@ log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 3
 BODY_CHARS = 6000
+THREAD_CHARS = 12000  # 스레드 전체 다시 분석: 본문 합계 상한
+CHANGES_PENDING_KEY = "changes_pending_email_ids"  # 변경 분석(app.mail.changes)을 기다리는 메일 번호
 HEADER_CHARS = 200
 CC_MAX = 10
 TITLE_CHARS = 120
@@ -43,6 +47,8 @@ PENDING_GOAL = "메일 분석 대기 중"
 PENDING_STEP = "메일 분석 대기"
 FAILED_STEP = "자동 분석에 실패했습니다 — 메일을 직접 확인해 주세요"
 REFERENCE_STEP = "참고용 메일 — 답장이 필요 없어 보입니다"
+REPLIED_STEP = "답장 보냄"  # lifecycle.mark_reply_sent와 같은 문구
+REOPENED_STEP = "새 메일로 다시 열림"  # task_actions.REOPENED_STEP과 같은 문구 (순환 import 때문에 여기에도 둔다)
 ATTACHED_REASON = "같은 스레드에 새 메일이 왔습니다"
 NO_SUBJECT = "(제목 없음)"
 _WEEKDAYS = "월화수목금토일"
@@ -61,9 +67,16 @@ INTAKE_SCHEMA = {"type": "object", "properties": {
         "required": ["text", "date", "time", "kind"], "additionalProperties": False},
     "priority": {"type": "string", "enum": ["HIGH", "NORMAL", "LOW"]},
     "needs_reply": {"type": "boolean"},
-    "suspicious": {"type": "array", "items": {"type": "string"}}},
+    "suspicious": {"type": "array", "items": {"type": "string"}},
+    # 다른 스레드 수정 요청 판단(설계 7.2). 후보가 없을 때는 빠뜨려도 된다(검증이 기본값으로 채운다).
+    "related_task": {"type": ["integer", "null"]},
+    "relation": {"type": "string", "enum": ["change", "followup", "none"]},
+    "relation_evidence": {"type": "string"}},
     "required": ["summary", "counterpart", "requests", "todos", "deadline", "priority", "needs_reply", "suspicious"],
     "additionalProperties": False}
+# 후보가 있을 때만 쓰는 스키마: 판단 필드를 반드시 채우게 한다
+RELATED_SCHEMA = {**INTAKE_SCHEMA, "required": [*INTAKE_SCHEMA["required"], "related_task", "relation",
+                                                "relation_evidence"]}
 
 INTAKE_SYSTEM = """당신은 사용자가 받은 업무 메일을 읽고 업무 카드로 정리하는 비서입니다.
 사용자는 이 메일을 받은 사람입니다. 보낸 사람(상대)이 사용자에게 무엇을 원하는지, 사용자가 무엇을 해야 하는지 정리하세요.
@@ -78,6 +91,12 @@ INTAKE_SYSTEM = """당신은 사용자가 받은 업무 메일을 읽고 업무 
 - priority: HIGH(급하거나 중요함), NORMAL, LOW 중 하나.
 - needs_reply: 사용자가 이 메일에 답장해야 하면 true, 아니면 false.
 - 값이 없으면 "" 또는 []로 두세요.
+- related_task · relation · relation_evidence: 프롬프트에 "관련 업무 후보"가 있을 때만 판단하세요. 이 메일이 후보 업무의
+  수정 · 추가 요청이면 relation="change", 같은 건의 이어지는 연락이면 "followup", 아니면 "none"입니다.
+  relation_evidence에는 근거 문장을 이 메일 본문에서 글자 그대로 옮기세요. 후보가 없거나 관계가 없으면
+  related_task=null, relation="none", relation_evidence=""로 두세요. 같은 회사라는 것만으로 관계가 있다고 하지 마세요.
+  메일이 "기존 건과 별개", "별건으로"처럼 다른 건이라고 밝히거나 후보와 다른 품목 · 다른 일을 새로 요청하면, 후보를 언급하더라도
+  relation="none"입니다.
 
 날짜 계산:
 - 프롬프트에 주어진 수신 시각과 요일을 기준으로 상대 표현을 실제 날짜로 바꾸세요. 예: "이번 주 금요일", "다음 주 중", "내일 오전".
@@ -97,7 +116,8 @@ class IntakeResult:
     attached: int = 0  # 같은 스레드의 기존 업무에 붙인 메일 (LLM 없음)
     analyzed: int = 0  # 분석에 성공한 업무
     pending: int = 0  # 분석에 실패해 다음 주기에 다시 시도할 업무
-    failed: int = 0  # 이번에 시도 횟수를 다 써서 분석을 멈춘 업무
+    failed: int = 0  # 이번에 시도 횟수를 다 써서 분석을 멈춘 업무 · 변경 분석이 두 번 형식 오류로 실패한 업무
+    changed: int = 0  # 같은 스레드 새 메일로 변경 분석을 마친 업무
 
 
 class _InvalidResult(Exception):
@@ -127,12 +147,48 @@ def _format_received(at: datetime, tz: str) -> str:
     return f"{local:%Y-%m-%d}({_WEEKDAYS[local.weekday()]}) {local:%H:%M} {abbr}"
 
 
-def _build_prompt(email: Email, tz: str) -> str:
+def _header(email: Email) -> str:
     name = _one_line((email.gmail_meta or {}).get("sender_name"), HEADER_CHARS)
     address = _one_line(email.sender, HEADER_CHARS)
     sender = f"{name} <{address}>" if name else address
     cc = ", ".join(_one_line(c, HEADER_CHARS) for c in (email.cc or [])[:CC_MAX] if isinstance(c, str)) or "없음"
-    header = f"보낸 사람: {sender}\n참조: {cc}\n제목: {_one_line(email.subject, HEADER_CHARS)}"
+    return f"보낸 사람: {sender}\n참조: {cc}\n제목: {_one_line(email.subject, HEADER_CHARS)}"
+
+
+def _build_thread_prompt(emails: list[Email], tz: str) -> str:
+    """스레드 전체로 처음 분석을 다시 할 때(설계 6.6). 오래된 것부터, 마지막이 최신.
+
+    본문 합계가 THREAD_CHARS를 넘으면 오래된 메일부터 본문을 빼고 머리글만 남긴다(최신 메일 본문은 늘 넣는다).
+    """
+    sizes = [min(len(e.content or ""), BODY_CHARS) for e in emails]
+    total, drop = sum(sizes), 0
+    while total > THREAD_CHARS and drop < len(emails) - 1:
+        total -= sizes[drop]
+        drop += 1
+    parts = [f"수신 시각(최신 메일): {_format_received(_reference_time(emails[-1]), tz)}\n"
+             "아래는 같은 스레드의 메일입니다(오래된 것부터, 마지막이 최신). 스레드 전체를 보고 지금 기준으로 업무를 정리하세요. "
+             "상대적인 날짜 표현은 그 표현이 나온 메일의 수신 시각과 요일을 기준으로 계산하세요."]
+    for i, e in enumerate(emails):
+        header = f"{_header(e)}\n수신 시각: {_format_received(_reference_time(e), tz)}"
+        block = wrap_untrusted(f"email#{e.id} header", header, max_chars=len(header))
+        if i < drop:
+            block += "\n(오래된 메일이라 본문은 생략했습니다)"
+        else:
+            block += "\n" + wrap_untrusted(f"email#{e.id} body", e.content or "", max_chars=BODY_CHARS)
+        parts.append(f"### 메일 {i + 1}\n{block}")
+    return "\n\n".join(parts)
+
+
+def _intake_prompt(db: Session, task: Task, email: Email, tz: str) -> str:
+    """업무에 받은 메일이 둘 이상이면 스레드 전체로, 아니면 그 메일 하나로 분석한다(처음 접수는 하나)."""
+    mails = db.scalars(select(Email).where(Email.user_id == task.user_id, Email.task_id == task.id,
+                                           Email.direction == EmailDirection.INBOUND)).all()
+    mails = sorted({m.id: m for m in [*mails, email]}.values(), key=lambda m: (_reference_time(m), m.id))
+    return _build_thread_prompt(mails, tz) if len(mails) > 1 else _build_prompt(email, tz)
+
+
+def _build_prompt(email: Email, tz: str) -> str:
+    header = _header(email)
     return (
         f"수신 시각: {_format_received(_reference_time(email), tz)}\n"
         "아래 메일을 분석하세요. 상대적인 날짜 표현은 위 수신 시각과 요일을 기준으로 계산하세요.\n\n"
@@ -171,6 +227,10 @@ def _validate(raw) -> dict:
         "priority": priority if priority in PRIORITIES else "NORMAL",
         "needs_reply": raw["needs_reply"],
         "suspicious": [s for s in (_str(x, ITEM_CHARS) for x in suspicious) if s],
+        # 관계 판단은 빠뜨려도 형식 오류가 아니다. 값 검사는 related.judge_related가 한다.
+        "related_task": raw.get("related_task"),
+        "relation": raw.get("relation") if isinstance(raw.get("relation"), str) else "none",
+        "relation_evidence": _str(raw.get("relation_evidence"), ITEM_CHARS),
     }
 
 
@@ -208,6 +268,7 @@ def _record_failure(task: Task) -> None:
         brief["analysis"] = "failed"
         task.current_step = FAILED_STEP
     task.brief = brief  # 새 dict를 넣어야 JSON 컬럼 변경이 감지된다
+    task.related = dict(related.UNJUDGED)  # 판단을 못 했다: 5단계 "같은 보낸 사람" 규칙으로 제안한다(설계 7.3)
 
 
 def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz: str) -> bool:
@@ -219,12 +280,16 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
     """
     task_id, email_id = task.id, email.id
     try:
-        data = _validate(llm.structured(INTAKE_SYSTEM, _build_prompt(email, tz), INTAKE_SCHEMA))
+        candidates = related.related_candidates(db, task, email.sender or "", datetime.now(timezone.utc))
+        prompt = _intake_prompt(db, task, email, tz) + related.candidates_block(candidates)
+        data = _validate(llm.structured(INTAKE_SYSTEM, prompt, RELATED_SCHEMA if candidates else INTAKE_SCHEMA))
         db.flush()  # 아직 쓰지 않은 변경을 refresh가 버리지 않게
         db.refresh(task)  # 분석하는 동안 사용자가 닫았거나 합쳤을 수 있다. 그런 업무를 다시 열지 않는다.
         if task.status in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
             log.info("mail intake: task %s was closed or merged during analysis; result dropped", task_id)
             return True
+        task.related = (related.judge_related(data, candidates, email.content or "") if candidates
+                        else dict(related.NONE))
         _apply(db, task, email, data, tz)
     except LLMError as e:
         log.warning("mail intake analysis for task %s email %s postponed: %s", task_id, email_id, type(e).__name__)
@@ -238,6 +303,37 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
         log.warning("mail intake analysis failed for task %s email %s: %s", task_id, email_id, type(e).__name__)
         return False
     return True
+
+
+def _newest_inbound_time(db: Session, task: Task, email: Email) -> datetime:
+    """분석한 받은 메일(_intake_prompt와 같은 범위) 중 가장 늦은 시각."""
+    mails = db.scalars(select(Email).where(Email.user_id == task.user_id, Email.task_id == task.id,
+                                           Email.direction == EmailDirection.INBOUND)).all()
+    return max(_reference_time(m) for m in [*mails, email])
+
+
+def _replied_after_inbound(db: Session, task: Task, email: Email) -> bool:
+    """분석한 받은 메일보다 늦은 답장이 있는가. 업무에 붙은 보낸 메일이 더 늦으면 그 시각으로 답장 보냄 처리한다."""
+    from app.mail import lifecycle  # lifecycle → task_actions → intake 순환 import를 피한다
+    newest_in = _newest_inbound_time(db, task, email)
+    out = db.scalars(select(Email).where(Email.user_id == task.user_id, Email.task_id == task.id,
+                                         Email.direction == EmailDirection.OUTBOUND)).all()
+    latest = max(out, key=lambda m: (_reference_time(m), m.id), default=None)
+    if latest is not None:
+        sent_at = _reference_time(latest)
+        if sent_at > newest_in and (task.reply_sent_at is None or _as_utc(task.reply_sent_at) < sent_at):
+            lifecycle.mark_reply_sent(db, task, latest, sent_at, source="gmail")
+    return task.reply_sent_at is not None and _as_utc(task.reply_sent_at) > newest_in
+
+
+def _attach_thread_sent(db: Session, task: Task) -> None:
+    """업무가 생기기 전에 저장된 같은 스레드의 보낸 메일(app.mail.sync)을 업무에 붙인다. 커밋하지 않는다."""
+    if not task.gmail_thread_id:
+        return
+    for m in db.scalars(select(Email).where(Email.user_id == task.user_id, Email.task_id.is_(None),
+                                            Email.gmail_thread_id == task.gmail_thread_id,
+                                            Email.direction == EmailDirection.OUTBOUND)):
+        m.task_id = task.id
 
 
 def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
@@ -296,7 +392,11 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
     else:
         task.deadline_at, task.deadline_all_day, task.deadline_kind, task.deadline_source = None, False, "none", ""
     mark_calendar_dirty(task)  # 기한이 생기거나 바뀌면 다음 주기에 캘린더에 반영한다
-    if not data["needs_reply"] and not plan:
+    if _replied_after_inbound(db, task, email):
+        # 분석한 받은 메일보다 늦게 답장을 보냈다(분석이 늦게 끝남 · 접수 전에 폰으로 답장): 처리할 일로 덮지 않는다
+        task.status, task.waiting_for, task.current_step = TaskStatus.WAITING, "상대 회신", REPLIED_STEP
+        task.next_action = plan[0]["title"] if plan else ""
+    elif not data["needs_reply"] and not plan:
         task.status, task.current_step, task.next_action = TaskStatus.PENDING, REFERENCE_STEP, ""
     else:
         task.status = TaskStatus.ACTION_REQUIRED
@@ -335,12 +435,6 @@ def link_email(db: Session, task: Task, email: Email) -> None:
                output_data={"email_id": email.id}, reason=ATTACHED_REASON)
 
 
-def _attach(db: Session, task: Task, email: Email, result: IntakeResult) -> None:
-    link_email(db, task, email)
-    db.commit()
-    result.attached += 1
-
-
 def _thread_task(db: Session, user_id: int, thread_id: str | None) -> Task | None:
     """스레드의 업무. 합쳐진 업무면 합쳐진 대상을 돌려준다."""
     if not thread_id:
@@ -361,6 +455,7 @@ def _create_task(db: Session, user_id: int, email: Email) -> Task | None:
     try:
         db.flush()
         email.task_id = task.id
+        _attach_thread_sent(db, task)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -404,9 +499,93 @@ def _retryable_tasks(db: Session, user_id: int) -> list[Task]:
     return out
 
 
+def queue_changes(task: Task, email_id: int) -> None:
+    """분석이 끝난 업무에 붙은 새 상대 메일을 변경 분석 대기에 넣는다. 커밋하지 않는다."""
+    brief = dict(task.brief or {})
+    brief[CHANGES_PENDING_KEY] = list(dict.fromkeys([*(brief.get(CHANGES_PENDING_KEY) or []), email_id]))
+    task.brief = brief
+
+
+def _thread_mail(db: Session, task: Task, email: Email, analyzed_now: set[int], reanalyze: dict[int, int],
+                 result: IntakeResult) -> None:
+    """이미 업무가 있는 스레드의 메일을 붙이고, 이 주기에 할 분석을 정한다(설계 6.6).
+
+    - 분석이 끝난 업무: 변경 분석 대기에 넣는다. 주기 끝에 업무마다 한 번 묶어 분석한다.
+    - 분석 대기 · 실패 업무: 처음 분석을 스레드 전체로 다시 한다(실패했던 업무는 시도 횟수를 0으로).
+      닫힌 업무였으면 처리할 일로 다시 연다(설계 6.5 마지막 줄).
+    - 이 주기에 이미 분석한 업무(analyzed_now)는 업무당 주기마다 분석 1회를 지키려 다음 주기로 미룬다.
+    """
+    from app.mail.lifecycle import clear_wait_on_inbound  # lifecycle → task_actions → intake 순환 import를 피한다
+    link_email(db, task, email)
+    clear_wait_on_inbound(task)
+    brief = dict(task.brief or {})
+    state = brief.get("analysis")
+    if state in ("pending", "failed"):
+        if task.status in CLOSED_TASK_STATUSES:
+            task.status = TaskStatus.ACTION_REQUIRED
+            task.completed_at = None
+            task.current_step = REOPENED_STEP
+            task.next_action = ""
+            mark_calendar_dirty(task)
+        brief["email_id"] = email.id  # 메일은 받은 순서로 오므로 마지막이 최신 (분석은 스레드 전체)
+        if state == "failed":
+            brief.update(analysis="pending", attempts=0)
+            if task.current_step != REOPENED_STEP:
+                task.current_step = PENDING_STEP
+        task.brief = brief
+        if task.id not in analyzed_now:
+            reanalyze[task.id] = email.id
+    else:
+        queue_changes(task, email.id)
+    db.commit()
+    result.attached += 1
+
+
+def _change_tasks(db: Session, user_id: int) -> list[Task]:
+    tasks = db.scalars(select(Task).where(Task.user_id == user_id, Task.origin == "mail",
+                                          Task.merged_into_id.is_(None)).order_by(Task.id)).all()
+    # 합친 내용 분석이 남은 업무는 미룬다: 옮겨 온 옛 메일을 먼저 분석해야 새 메일의 변경이 덮이지 않는다(설계 7.3)
+    return [t for t in tasks if isinstance(t.brief, dict) and t.brief.get(CHANGES_PENDING_KEY)
+            and (t.merge_analysis or {}).get("state") != "pending"]
+
+
+def _run_changes(db: Session, user_id: int, llm: LLMClient, tz: str, budget: int, result: IntakeResult,
+                 skip: set[int]) -> None:
+    """변경 분석 대기 메일이 있는 업무마다 묶어서 한 번 분석한다. LLM 장애면 남은 업무는 다음 주기로.
+
+    skip(이 주기에 처음 분석 · 다시 분석한 업무)은 업무당 주기마다 분석 1회를 지키려고 다음 주기로 미룬다.
+    """
+    from app.mail import changes
+    for task in _change_tasks(db, user_id):
+        if task.id in skip:
+            continue
+        if budget <= 0:
+            return
+        ids = [i for i in task.brief.get(changes.PENDING_KEY) or [] if isinstance(i, int)]
+        emails = db.scalars(select(Email).where(Email.user_id == user_id, Email.task_id == task.id,
+                                                Email.id.in_(ids))).all()
+        if not emails:  # 합치기 등으로 다른 업무로 옮겨진 메일
+            brief = dict(task.brief)
+            brief.pop(changes.PENDING_KEY, None)
+            task.brief = brief
+            db.commit()
+            continue
+        budget -= 1
+        ok = changes.analyze_changes(db, task, list(emails), llm, tz)
+        db.commit()
+        if ok:
+            result.changed += 1
+        elif (task.brief or {}).get(changes.PENDING_KEY):
+            return  # LLM 장애: 다음 주기에 다시
+        else:
+            result.failed += 1
+
+
 def intake_work_mails(db: Session, user_id: int, llm: LLMClient, *, max_mails: int, tz: str) -> IntakeResult:
+    """분석 1회가 예산 1이다: 처음 분석 다시 시도 → 새 메일(새 업무 분석) → 스레드 메일 다시 분석 → 변경 분석 순서."""
     result = IntakeResult()
     budget = max_mails
+    analyzed_now: set[int] = set()  # 이 주기에 처음 분석(새 업무 · 다시 시도)을 한 업무
 
     for task in _retryable_tasks(db, user_id):
         if budget <= 0:
@@ -422,9 +601,11 @@ def intake_work_mails(db: Session, user_id: int, llm: LLMClient, *, max_mails: i
             log.info("mail intake: source email missing for task %s", task.id)
             continue
         budget -= 1
+        analyzed_now.add(task.id)
         if not _analyze(db, task, email, llm, tz, result):
             return _done(user_id, result)
 
+    reanalyze: dict[int, int] = {}  # 처음 분석을 다시 할 업무 → 최신 메일
     if budget > 0:
         mails = db.scalars(
             select(Email)
@@ -436,7 +617,7 @@ def intake_work_mails(db: Session, user_id: int, llm: LLMClient, *, max_mails: i
         for email in mails:
             existing = _thread_task(db, user_id, email.gmail_thread_id)
             if existing is not None:
-                _attach(db, existing, email, result)
+                _thread_mail(db, existing, email, analyzed_now, reanalyze, result)
                 continue
             task = _create_task(db, user_id, email)
             if task is None:
@@ -444,16 +625,29 @@ def intake_work_mails(db: Session, user_id: int, llm: LLMClient, *, max_mails: i
                 if existing is None:
                     log.warning("mail intake: could not create or find a task for email %s", email.id)
                     continue
-                _attach(db, existing, email, result)
+                _thread_mail(db, existing, email, analyzed_now, reanalyze, result)
                 continue
             result.created += 1
+            analyzed_now.add(task.id)
+            budget -= 1
             if not _analyze(db, task, email, llm, tz, result):
-                break
+                return _done(user_id, result)
 
+    for task_id, email_id in reanalyze.items():
+        if budget <= 0:
+            return _done(user_id, result)  # 분석 대기로 남아 다음 주기에 다시 시도한다
+        task, email = db.get(Task, task_id), db.get(Email, email_id)
+        budget -= 1
+        analyzed_now.add(task_id)
+        if not _analyze(db, task, email, llm, tz, result):
+            return _done(user_id, result)
+
+    _run_changes(db, user_id, llm, tz, budget, result, analyzed_now)
     return _done(user_id, result)
 
 
 def _done(user_id: int, result: IntakeResult) -> IntakeResult:
-    log.info("mail intake for user %s: created=%d attached=%d analyzed=%d pending=%d failed=%d",
-             user_id, result.created, result.attached, result.analyzed, result.pending, result.failed)
+    log.info("mail intake for user %s: created=%d attached=%d analyzed=%d pending=%d failed=%d changed=%d",
+             user_id, result.created, result.attached, result.analyzed, result.pending, result.failed,
+             result.changed)
     return result

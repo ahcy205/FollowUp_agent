@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StrictBool
 
 
 class ORM(BaseModel):
@@ -77,6 +77,8 @@ class TaskBrief(ORM):
     snoozed_until: datetime | None
     priority_source: str
     merged_into_id: int | None
+    change_log: list = []  # 상대 재답장으로 바뀐 내용 (설계 6.4)
+    changed_unseen: bool = False  # "내용 바뀜" 표시: 상세를 열 때 POST /seen으로 끈다
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
@@ -123,6 +125,7 @@ class RunOut(ORM):
 class MergeCandidateOut(BaseModel):
     task_id: int
     title: str
+    evidence: str | None = None  # "수정 요청으로 보임" 판단의 근거 문장(설계 7.3). 5단계 규칙 후보는 None
 
 
 class UndoableMergeOut(BaseModel):
@@ -137,6 +140,21 @@ class MergedSourceOut(BaseModel):
     merged_at: datetime | None
 
 
+class ReplyDraftOut(BaseModel):
+    purpose: str
+    to_addr: str
+    cc_candidates: list[str]
+    cc_selected: list[str]
+    subject: str
+    body: str
+    status: str
+    warnings: dict
+    can_send: bool  # 빈칸이 없고 상태가 draft일 때만
+    unknown_since: datetime | None  # 발송 결과가 불분명해진 시각 (status == "unknown"일 때만)
+    updated_at: datetime  # 만들기 · 고치기 · 초안으로 되돌리기 시각. reply_sent_at이 더 늦으면 이미 답장을 보낸 것
+    replied_after: bool = False  # 이 초안 이후 보낸 답장이 확인됐다(Gmail 보낸 메일은 메일 시각이 더 이를 수 있어 서버가 판단)
+
+
 class MailExtras(BaseModel):
     is_snoozed: bool
     wake_at: datetime | None
@@ -148,6 +166,11 @@ class MailExtras(BaseModel):
     merged_into_id: int | None
     deadline_badge: dict
     priority_source: str
+    no_reply: bool = False
+    reply_sent_at: datetime | None = None
+    draft: ReplyDraftOut | None = None
+    remaining_todos_prompt: bool = False  # 답장을 보냈는데(WAITING) 남은 할 일이 있다: "모두 완료" 안내
+    merge_analyzing: bool = False  # 합친 내용을 분석하는 중(설계 7.3)
 
 
 class TaskDetail(BaseModel):
@@ -228,6 +251,27 @@ class CloseTaskIn(_Strict):
     reason: str = Field(default="", max_length=500)
 
 
+class NoReplyIn(_Strict):
+    choice: Literal["followup", "wait", "close"]
+
+
+class ReplyConfirmIn(_Strict):
+    """발송 결과가 불분명한 초안: 보낸편지함에서 확인한 결과."""
+    sent: StrictBool
+
+
+class ReplyDraftIn(_Strict):
+    purpose: Literal["reply", "followup"]
+    user_input: str = Field(default="", max_length=2000)
+
+
+class ReplyDraftUpdateIn(_Strict):
+    """길이 · 빈 값 검사는 reply_draft가 한국어 문구로 한다."""
+    subject: str = Field(max_length=1000)
+    body: str = Field(max_length=20000)
+    cc_selected: list[str] = Field(default_factory=list, max_length=20)
+
+
 class MergeIn(_Strict):
     into_task_id: int
 
@@ -302,6 +346,8 @@ class InboxCard(BaseModel):
     has_merge_candidates: bool
     analysis: str
     received_at: datetime | None
+    no_reply: bool = False  # 보낸 지 영업일 3일째 답이 없어 다시 연락할지 묻는 중
+    changed_unseen: bool = False  # 상대 재답장으로 바뀐 내용을 아직 보지 않음("내용 바뀜")
 
 
 class SnoozedCard(InboxCard):
