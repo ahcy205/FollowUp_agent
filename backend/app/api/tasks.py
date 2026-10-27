@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.agent import orchestrator
 from app.agent.audit import log_action
+from app.agent.llm import get_llm
 from app.config import get_settings
 from app.db import SessionLocal, get_db
 from app.models import (
@@ -21,6 +22,7 @@ from app.models import (
     Document,
     Email,
     EmailDirection,
+    ReplyDraft,
     Task,
     TaskStatus,
     User,
@@ -44,6 +46,9 @@ from app.schemas import (
     MergeUndoIn,
     PriorityIn,
     PromoteOut,
+    ReplyDraftIn,
+    ReplyDraftOut,
+    ReplyDraftUpdateIn,
     RunOut,
     SnoozeIn,
     TaskBrief,
@@ -53,6 +58,7 @@ from app.schemas import (
 from app.mail import inbox as mail_inbox
 from app.mail import lifecycle
 from app.mail import merge as mail_merge
+from app.mail import reply_draft
 from app.mail import sync as mail_sync
 from app.mail import task_actions
 from app.mail.task_actions import ActionError
@@ -165,6 +171,20 @@ def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
         merged_into_id=task.merged_into_id, deadline_badge=mail_inbox.deadline_badge(task, now, tz),
         priority_source=task.priority_source,
         no_reply=mail_inbox.no_reply_active(task), reply_sent_at=task.reply_sent_at,
+        draft=_draft_out(db, task),
+    )
+
+
+def _draft_out(db: Session, task: Task) -> ReplyDraftOut | None:
+    d = db.scalar(select(ReplyDraft).where(ReplyDraft.user_id == task.user_id, ReplyDraft.task_id == task.id))
+    if d is None:
+        return None
+    warnings = d.warnings if isinstance(d.warnings, dict) else {}
+    return ReplyDraftOut(
+        purpose=d.purpose, to_addr=d.to_addr, cc_candidates=list(d.cc_candidates or []),
+        cc_selected=list(d.cc_selected or []), subject=d.subject, body=d.body, status=d.status, warnings=warnings,
+        can_send=d.status == "draft" and not reply_draft.placeholders(d.body),
+        unknown_since=d.sending_at if d.status == "unknown" else None,
     )
 
 
@@ -344,6 +364,35 @@ def answer_no_reply(task_id: int, body: NoReplyIn, user: User = Depends(get_curr
     """상대 답장 없음 물음에 답한다: 다시 연락 · 더 기다리기 · 완료로 닫기."""
     task = _mail_task(db, task_id, user)
     _act(lifecycle.answer_no_reply, db, user, task, body.choice, datetime.now(timezone.utc))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft", response_model=TaskDetail)
+def create_reply_draft(task_id: int, body: ReplyDraftIn, user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    """답장 초안을 만든다(있으면 대체). 받는 사람은 서버가 정한다."""
+    task = _mail_task(db, task_id, user)
+    _act(reply_draft.ensure_can_generate, db, task)
+    ai_action_limiter.check(f"ai:{user.id}")  # after the checks above so rejected calls cost nothing
+    _act(reply_draft.generate_draft, db, task, user, get_llm(), purpose=body.purpose, user_input=body.user_input,
+         tz=get_settings().user_timezone)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft/update", response_model=TaskDetail)
+def update_reply_draft(task_id: int, body: ReplyDraftUpdateIn, user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    draft = _act(reply_draft.find_draft, db, task)
+    _act(reply_draft.update_draft, draft, subject=body.subject, body=body.body, cc_selected=body.cc_selected)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft/delete", response_model=TaskDetail)
+def delete_reply_draft(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    task = _mail_task(db, task_id, user)
+    draft = _act(reply_draft.find_draft, db, task)
+    _act(reply_draft.delete_draft, db, draft)
     return _done(db, task, user)
 
 

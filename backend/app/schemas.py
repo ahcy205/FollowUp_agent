@@ -137,6 +137,19 @@ class MergedSourceOut(BaseModel):
     merged_at: datetime | None
 
 
+class ReplyDraftOut(BaseModel):
+    purpose: str
+    to_addr: str
+    cc_candidates: list[str]
+    cc_selected: list[str]
+    subject: str
+    body: str
+    status: str
+    warnings: dict
+    can_send: bool  # 빈칸이 없고 상태가 draft일 때만
+    unknown_since: datetime | None  # 발송 결과가 불분명해진 시각 (status == "unknown"일 때만)
+
+
 class MailExtras(BaseModel):
     is_snoozed: bool
     wake_at: datetime | None
@@ -150,6 +163,7 @@ class MailExtras(BaseModel):
     priority_source: str
     no_reply: bool = False
     reply_sent_at: datetime | None = None
+    draft: ReplyDraftOut | None = None
 
 
 class TaskDetail(BaseModel):
@@ -232,6 +246,18 @@ class CloseTaskIn(_Strict):
 
 class NoReplyIn(_Strict):
     choice: Literal["followup", "wait", "close"]
+
+
+class ReplyDraftIn(_Strict):
+    purpose: Literal["reply", "followup"]
+    user_input: str = Field(default="", max_length=2000)
+
+
+class ReplyDraftUpdateIn(_Strict):
+    """길이 · 빈 값 검사는 reply_draft가 한국어 문구로 한다."""
+    subject: str = Field(max_length=1000)
+    body: str = Field(max_length=20000)
+    cc_selected: list[str] = Field(default_factory=list, max_length=20)
 
 
 class MergeIn(_Strict):

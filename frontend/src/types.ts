@@ -168,6 +168,28 @@ export interface MailExtras {
   priority_source: string
   no_reply?: boolean
   reply_sent_at?: string | null
+  draft?: ReplyDraft | null
+}
+
+export interface ReplyDraftWarnings {
+  placeholders: number
+  unsupported: string[]
+  outside_contacts: string[]
+  suspicious: string[]
+}
+
+// 답장 초안. 받는 사람(to_addr)과 참조 후보는 서버가 정한다.
+export interface ReplyDraft {
+  purpose: 'reply' | 'followup'
+  to_addr: string
+  cc_candidates: string[]
+  cc_selected: string[]
+  subject: string
+  body: string
+  status: 'draft' | 'sending' | 'sent' | 'unknown'
+  warnings: ReplyDraftWarnings
+  can_send: boolean
+  unknown_since: string | null
 }
 
 // 메일 업무 동작 하나를 보내고 응답(TaskDetail)으로 화면을 바꾼다. 실패하면 ApiError를 던진다.
