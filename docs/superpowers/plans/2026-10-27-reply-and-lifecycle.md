@@ -320,7 +320,7 @@
 - [ ] **Step 1: 시험 세트** — 설계 9절의 세 묶음(변경 감지 ~10, 관련 판단 ~10, 초안 ~5). 각 사례 `{name, task_state, mails, expected}`. 주소는 `.example` 도메인.
 - [ ] **Step 2: 스모크 테스트** — `RUN_LLM_SMOKE=1`일 때만. 사례마다 실제 함수(`analyze_changes`, 분석+`judge_related`, `generate_draft` + `draft_warnings`)를 메모리 DB로 돌려 맞음/놓침/잘못을 세고 `-s`로 표를 출력. 단언: "잘못 반영한 변경 == 0", "근거 없는 숫자가 든 초안 == 0". 놓침은 단언하지 않는다.
 - [ ] **Step 3: 실행** — `cd backend && PYTHONUTF8=1 RUN_LLM_SMOKE=1 ../.venv/Scripts/python -m pytest smoke/test_reply_lifecycle_smoke.py -v -s`. 실패하면 프롬프트를 고치고 다시(최대 3회, 결과마다 표 기록).
-- [ ] **Step 4: 로컬 점검** (사용자와 함께, 실제 계정)
+- [x] **Step 4: 로컬 점검** (사용자와 함께, 실제 계정)
   - 다른 계정으로 업무 메일 → 초안(메모 넣기) → 빈칸 막힘 확인 → 채우고 보내기 → Gmail 스레드에 답장 확인 → "답장 보냄"
   - Gmail 앱에서 다른 업무에 직접 답장 → 90초 안에 "답장 보냄"
   - 상대가 같은 스레드에 "수량 150개로" → 바뀐 내용 · 되돌리기
@@ -328,7 +328,7 @@
   - 기한 없애기 → 캘린더 일정 사라짐
   - 같은 회사 다른 주소로 새 스레드 수정 요청 → 근거 있는 합치기 제안 → 합치기 → 바뀐 내용
   - 상대 답장 없음은 테스트 계정 DB에서 `wait_from`을 과거로 바꿔 확인
-- [ ] **Step 5: 문서** — privacy(설계 10절의 새 전송 · 저장), decisions(설계의 "내 판단"), troubleshooting(발송 실패 · 결과 불분명 · 보낸 답장 감지 안 됨), CHANGELOG, README 진행 표, 상위 설계 반영(설계 12절)
+- [x] **Step 5: 문서** — privacy(설계 10절의 새 전송 · 저장), decisions(설계의 "내 판단"), troubleshooting(발송 실패 · 결과 불분명 · 보낸 답장 감지 안 됨), CHANGELOG, README 진행 표, 상위 설계 반영(설계 12절)
 - [ ] **Step 6: push → CI → `main` 병합 · 테스트 · push → 로컬 브랜치 삭제** (원격 브랜치 삭제는 사용자 확인)
 
 ---
