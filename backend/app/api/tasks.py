@@ -56,6 +56,7 @@ from app.schemas import (
     TaskDetail,
     TodoOpIn,
 )
+from app.mail import changes as mail_changes
 from app.mail import inbox as mail_inbox
 from app.mail import lifecycle
 from app.mail import merge as mail_merge
@@ -370,6 +371,32 @@ def answer_no_reply(task_id: int, body: NoReplyIn, user: User = Depends(get_curr
     """상대 답장 없음 물음에 답한다: 다시 연락 · 더 기다리기 · 완료로 닫기."""
     task = _mail_task(db, task_id, user)
     _act(lifecycle.answer_no_reply, db, user, task, body.choice, datetime.now(timezone.utc))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/changes/{change_id}/undo", response_model=TaskDetail)
+def undo_task_change(task_id: int, change_id: int, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    """상대 재답장으로 바뀐 항목 하나를 이전 값으로 되돌린다."""
+    task = _mail_task(db, task_id, user)
+    _act(mail_changes.undo_change, task, change_id)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/changes/{change_id}/apply", response_model=TaskDetail)
+def apply_task_change(task_id: int, change_id: int, user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    """사용자가 정한 기한을 상대가 바꾼 제안을 반영한다."""
+    task = _mail_task(db, task_id, user)
+    _act(mail_changes.apply_suggestion, task, change_id, get_settings().user_timezone)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/seen", response_model=TaskDetail)
+def mark_task_seen(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """화면이 업무 상세를 열 때 부른다: "내용 바뀜" 표시를 끈다."""
+    task = _mail_task(db, task_id, user)
+    task.changed_unseen = False
     return _done(db, task, user)
 
 

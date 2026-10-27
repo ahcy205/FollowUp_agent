@@ -1,7 +1,8 @@
 """업무 메일 접수: work로 판별된 Gmail 메일을 Gmail 스레드당 업무 1개로 만든다.
 
 새 스레드면 업무를 "분석 대기"로 먼저 만들고 커밋한 다음 LLM에 한 번 분석을 맡긴다. 분석이 실패해도
-메일이 화면에서 사라지지 않게 하기 위해서다. 이미 업무가 있는 스레드의 메일은 LLM 없이 붙인다.
+메일이 화면에서 사라지지 않게 하기 위해서다. 이미 업무가 있는 스레드의 메일은 먼저 붙이고(커밋), 분석이 끝난 업무면
+업무마다 묶어 변경 분석(app.mail.changes, 설계 6절)을, 분석 대기 · 실패 업무면 처음 분석을 다시 한다(설계 6.6).
 LLM 제공자 장애(LLMError)는 시도 횟수에 넣지 않고 "분석 대기"로 둔다(명세 4.3.3 · 7절). LLM이 형식이 틀린 답을 냈거나
 그 밖의 예외가 났을 때만 시도 횟수를 올리고, 3회째에 분석을 멈춘다. 완료 · 취소된 업무는 다시 분석하지 않는다.
 로그에는 메일 · 업무 번호, 건수, 예외 타입 이름만 남긴다.
@@ -97,7 +98,8 @@ class IntakeResult:
     attached: int = 0  # 같은 스레드의 기존 업무에 붙인 메일 (LLM 없음)
     analyzed: int = 0  # 분석에 성공한 업무
     pending: int = 0  # 분석에 실패해 다음 주기에 다시 시도할 업무
-    failed: int = 0  # 이번에 시도 횟수를 다 써서 분석을 멈춘 업무
+    failed: int = 0  # 이번에 시도 횟수를 다 써서 분석을 멈춘 업무 · 변경 분석이 두 번 형식 오류로 실패한 업무
+    changed: int = 0  # 같은 스레드 새 메일로 변경 분석을 마친 업무
 
 
 class _InvalidResult(Exception):
@@ -335,12 +337,6 @@ def link_email(db: Session, task: Task, email: Email) -> None:
                output_data={"email_id": email.id}, reason=ATTACHED_REASON)
 
 
-def _attach(db: Session, task: Task, email: Email, result: IntakeResult) -> None:
-    link_email(db, task, email)
-    db.commit()
-    result.attached += 1
-
-
 def _thread_task(db: Session, user_id: int, thread_id: str | None) -> Task | None:
     """스레드의 업무. 합쳐진 업무면 합쳐진 대상을 돌려준다."""
     if not thread_id:
@@ -404,7 +400,75 @@ def _retryable_tasks(db: Session, user_id: int) -> list[Task]:
     return out
 
 
+def _thread_mail(db: Session, task: Task, email: Email, created_now: set[int], reanalyze: dict[int, int],
+                 result: IntakeResult) -> None:
+    """이미 업무가 있는 스레드의 메일을 붙이고, 이 주기에 할 분석을 정한다(설계 6.6).
+
+    - 분석이 끝난 업무: 변경 분석 대기(brief[PENDING_KEY])에 넣는다. 주기 끝에 업무마다 한 번 묶어 분석한다.
+    - 분석 대기 · 실패 업무: 처음 분석을 최신 메일로 다시 한다(실패했던 업무는 시도 횟수를 0으로).
+    - 이 주기에 만든 업무 · 닫힌 업무의 분석 대기 · 실패: 붙이기만 한다(만든 업무의 다음 메일은 다음 주기에 변경 분석).
+    """
+    from app.mail import changes  # changes가 intake를 쓰므로 순환 import를 피한다
+    from app.mail.lifecycle import clear_wait_on_inbound
+    link_email(db, task, email)
+    clear_wait_on_inbound(task)
+    brief = dict(task.brief or {})
+    state = brief.get("analysis")
+    if state in ("pending", "failed"):
+        if task.id not in created_now and task.status not in CLOSED_TASK_STATUSES:
+            brief["email_id"] = email.id  # 메일은 받은 순서로 오므로 마지막이 최신
+            if state == "failed":
+                brief.update(analysis="pending", attempts=0)
+                task.current_step = PENDING_STEP
+            reanalyze[task.id] = email.id
+    else:
+        brief[changes.PENDING_KEY] = list(dict.fromkeys([*(brief.get(changes.PENDING_KEY) or []), email.id]))
+    task.brief = brief
+    db.commit()
+    result.attached += 1
+
+
+def _change_tasks(db: Session, user_id: int) -> list[Task]:
+    from app.mail import changes
+    tasks = db.scalars(select(Task).where(Task.user_id == user_id, Task.origin == "mail",
+                                          Task.merged_into_id.is_(None)).order_by(Task.id)).all()
+    return [t for t in tasks if isinstance(t.brief, dict) and t.brief.get(changes.PENDING_KEY)]
+
+
+def _run_changes(db: Session, user_id: int, llm: LLMClient, tz: str, budget: int, result: IntakeResult,
+                 skip: set[int]) -> None:
+    """변경 분석 대기 메일이 있는 업무마다 묶어서 한 번 분석한다. LLM 장애면 남은 업무는 다음 주기로.
+
+    skip(이 주기에 처음 분석한 업무)은 업무당 주기마다 분석 1회를 지키려고 다음 주기로 미룬다.
+    """
+    from app.mail import changes
+    for task in _change_tasks(db, user_id):
+        if task.id in skip:
+            continue
+        if budget <= 0:
+            return
+        ids = [i for i in task.brief.get(changes.PENDING_KEY) or [] if isinstance(i, int)]
+        emails = db.scalars(select(Email).where(Email.user_id == user_id, Email.task_id == task.id,
+                                                Email.id.in_(ids))).all()
+        if not emails:  # 합치기 등으로 다른 업무로 옮겨진 메일
+            brief = dict(task.brief)
+            brief.pop(changes.PENDING_KEY, None)
+            task.brief = brief
+            db.commit()
+            continue
+        budget -= 1
+        ok = changes.analyze_changes(db, task, list(emails), llm, tz)
+        db.commit()
+        if ok:
+            result.changed += 1
+        elif (task.brief or {}).get(changes.PENDING_KEY):
+            return  # LLM 장애: 다음 주기에 다시
+        else:
+            result.failed += 1
+
+
 def intake_work_mails(db: Session, user_id: int, llm: LLMClient, *, max_mails: int, tz: str) -> IntakeResult:
+    """분석 1회가 예산 1이다: 처음 분석 다시 시도 → 새 메일(새 업무 분석) → 스레드 메일 다시 분석 → 변경 분석 순서."""
     result = IntakeResult()
     budget = max_mails
 
@@ -425,6 +489,8 @@ def intake_work_mails(db: Session, user_id: int, llm: LLMClient, *, max_mails: i
         if not _analyze(db, task, email, llm, tz, result):
             return _done(user_id, result)
 
+    created_now: set[int] = set()
+    reanalyze: dict[int, int] = {}  # 처음 분석을 다시 할 업무 → 최신 메일
     if budget > 0:
         mails = db.scalars(
             select(Email)
@@ -436,7 +502,7 @@ def intake_work_mails(db: Session, user_id: int, llm: LLMClient, *, max_mails: i
         for email in mails:
             existing = _thread_task(db, user_id, email.gmail_thread_id)
             if existing is not None:
-                _attach(db, existing, email, result)
+                _thread_mail(db, existing, email, created_now, reanalyze, result)
                 continue
             task = _create_task(db, user_id, email)
             if task is None:
@@ -444,16 +510,28 @@ def intake_work_mails(db: Session, user_id: int, llm: LLMClient, *, max_mails: i
                 if existing is None:
                     log.warning("mail intake: could not create or find a task for email %s", email.id)
                     continue
-                _attach(db, existing, email, result)
+                _thread_mail(db, existing, email, created_now, reanalyze, result)
                 continue
             result.created += 1
+            created_now.add(task.id)
+            budget -= 1
             if not _analyze(db, task, email, llm, tz, result):
-                break
+                return _done(user_id, result)
 
+    for task_id, email_id in reanalyze.items():
+        if budget <= 0:
+            return _done(user_id, result)  # 분석 대기로 남아 다음 주기에 다시 시도한다
+        task, email = db.get(Task, task_id), db.get(Email, email_id)
+        budget -= 1
+        if not _analyze(db, task, email, llm, tz, result):
+            return _done(user_id, result)
+
+    _run_changes(db, user_id, llm, tz, budget, result, created_now)
     return _done(user_id, result)
 
 
 def _done(user_id: int, result: IntakeResult) -> IntakeResult:
-    log.info("mail intake for user %s: created=%d attached=%d analyzed=%d pending=%d failed=%d",
-             user_id, result.created, result.attached, result.analyzed, result.pending, result.failed)
+    log.info("mail intake for user %s: created=%d attached=%d analyzed=%d pending=%d failed=%d changed=%d",
+             user_id, result.created, result.attached, result.analyzed, result.pending, result.failed,
+             result.changed)
     return result

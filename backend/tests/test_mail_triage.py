@@ -311,8 +311,10 @@ def test_thread_mail_goes_to_work_without_llm(client):
             assert e.triage == "work" and e.triage_reason == "업무 스레드의 새 메일"
         assert c.triage == "filtered"
         assert r.thread == 2 and r.filtered == 1
+        # 6단계(설계 6.1): 붙인 뒤 업무마다 묶어 변경 분석 1회 (두 통이 한 프롬프트에)
+        llm = ScriptedLLM(structured_steps=[{"changes": [], "needs_reply": True, "suspicious": []}])
         intake_work_mails(db, uid, llm, max_mails=5, tz="Asia/Seoul")
-        assert llm.structured_prompts == []
+        assert len(llm.structured_prompts) == 1
         a, b, _ = _get(db, ids)
         assert a.task_id == task_id and b.task_id == task_id
 

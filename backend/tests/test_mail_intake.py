@@ -6,6 +6,7 @@ from app.agent.llm import LLMError
 from app.db import SessionLocal
 from app.mail.intake import (FAILED_STEP, INTAKE_SCHEMA, INTAKE_SYSTEM, PENDING_GOAL, PENDING_STEP,
                              REFERENCE_STEP, analyze_into_task, intake_work_mails)
+from app.mail.changes import CHANGES_SCHEMA
 from app.models import AgentActionLog, Email, EmailDirection, Task, TaskStatus, User
 from tests.conftest import ScriptedLLM, register
 
@@ -193,7 +194,8 @@ def test_reference_only_mail():
         assert task.brief["analysis"] == "done"
 
 
-def test_same_thread_attaches_without_llm():
+def test_same_thread_attaches_then_change_analysis():
+    # 6단계(설계 6.1): 분석이 끝난 업무의 스레드 메일은 붙인 뒤 변경 분석 1회를 한다(접수 분석은 다시 하지 않는다).
     with SessionLocal() as db:
         uid = _user(db)
         existing = Task(user_id=uid, title="기존", goal="기존 업무", origin="mail", agent_enabled=False,
@@ -201,10 +203,12 @@ def test_same_thread_attaches_without_llm():
         db.add(existing)
         db.commit()
         (mid,) = _add(db, [_mail(uid, thread="thr-x")])
-        llm = ScriptedLLM(structured_steps=[AssertionError("LLM must not be called")])
+        schemas = []
+        llm = ScriptedLLM(structured_steps=[lambda p, s: schemas.append(s) or
+                                            {"changes": [], "needs_reply": True, "suspicious": []}])
         r = _run(db, uid, llm)
-        assert llm.structured_prompts == []
-        assert (r.created, r.attached, r.analyzed) == (0, 1, 0)
+        assert schemas == [CHANGES_SCHEMA]
+        assert (r.created, r.attached, r.analyzed, r.changed) == (0, 1, 0, 1)
         email = db.get(Email, mid)
         assert email.task_id == existing.id and email.processed is True
         (log,) = _logs(db, existing.id, "MAIL_ATTACHED")
@@ -440,9 +444,9 @@ def test_thread_race_integrity_error_attaches(monkeypatch):
         real = intake._thread_task
         calls = iter([None])  # 첫 조회는 다른 워커가 업무를 만들기 전처럼 보이게 한다
         monkeypatch.setattr(intake, "_thread_task", lambda *a: next(calls, real(*a)))
-        llm = ScriptedLLM(structured_steps=[AssertionError("LLM must not be called")])
+        llm = ScriptedLLM(structured_steps=[{"changes": [], "needs_reply": True, "suspicious": []}])
         r = _run(db, uid, llm)
-        assert llm.structured_prompts == []
+        assert len(llm.structured_prompts) == 1  # 6단계: 접수 분석이 아니라 변경 분석 1회
         assert (r.created, r.attached) == (0, 1)
         assert db.get(Email, mid).task_id == existing.id
         assert len(_mail_tasks(db, uid)) == 1

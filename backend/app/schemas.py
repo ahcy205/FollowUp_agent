@@ -77,6 +77,8 @@ class TaskBrief(ORM):
     snoozed_until: datetime | None
     priority_source: str
     merged_into_id: int | None
+    change_log: list = []  # 상대 재답장으로 바뀐 내용 (설계 6.4)
+    changed_unseen: bool = False  # "내용 바뀜" 표시: 상세를 열 때 POST /seen으로 끈다
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None
