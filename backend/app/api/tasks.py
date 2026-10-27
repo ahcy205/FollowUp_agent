@@ -46,6 +46,7 @@ from app.schemas import (
     MergeUndoIn,
     PriorityIn,
     PromoteOut,
+    ReplyConfirmIn,
     ReplyDraftIn,
     ReplyDraftOut,
     ReplyDraftUpdateIn,
@@ -58,11 +59,13 @@ from app.schemas import (
 from app.mail import inbox as mail_inbox
 from app.mail import lifecycle
 from app.mail import merge as mail_merge
+from app.google.client import get_google_client
 from app.mail import reply_draft
+from app.mail import reply_send
 from app.mail import sync as mail_sync
 from app.mail import task_actions
 from app.mail.task_actions import ActionError
-from app.security import agent_limiter, ai_action_limiter, calendar_retry_limiter, get_current_user
+from app.security import agent_limiter, ai_action_limiter, calendar_retry_limiter, get_current_user, send_limiter
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
@@ -171,20 +174,23 @@ def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
         merged_into_id=task.merged_into_id, deadline_badge=mail_inbox.deadline_badge(task, now, tz),
         priority_source=task.priority_source,
         no_reply=mail_inbox.no_reply_active(task), reply_sent_at=task.reply_sent_at,
-        draft=_draft_out(db, task),
+        draft=_draft_out(db, task, now),
+        remaining_todos_prompt=reply_send.remaining_todos_prompt(task),
     )
 
 
-def _draft_out(db: Session, task: Task) -> ReplyDraftOut | None:
+def _draft_out(db: Session, task: Task, now: datetime) -> ReplyDraftOut | None:
     d = db.scalar(select(ReplyDraft).where(ReplyDraft.user_id == task.user_id, ReplyDraft.task_id == task.id))
     if d is None:
         return None
     warnings = d.warnings if isinstance(d.warnings, dict) else {}
+    unknown = reply_send.is_unknown(d, now)  # 5분 넘게 sending에 멈춘 초안도 결과 불분명으로 보인다
     return ReplyDraftOut(
         purpose=d.purpose, to_addr=d.to_addr, cc_candidates=list(d.cc_candidates or []),
-        cc_selected=list(d.cc_selected or []), subject=d.subject, body=d.body, status=d.status, warnings=warnings,
+        cc_selected=list(d.cc_selected or []), subject=d.subject, body=d.body,
+        status="unknown" if unknown else d.status, warnings=warnings,
         can_send=d.status == "draft" and not reply_draft.placeholders(d.body),
-        unknown_since=d.sending_at if d.status == "unknown" else None,
+        unknown_since=d.sending_at if unknown else None,
     )
 
 
@@ -393,6 +399,35 @@ def delete_reply_draft(task_id: int, user: User = Depends(get_current_user), db:
     task = _mail_task(db, task_id, user)
     draft = _act(reply_draft.find_draft, db, task)
     _act(reply_draft.delete_draft, db, draft)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft/send", response_model=TaskDetail)
+def send_reply_draft(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """승인한 초안을 원래 Gmail 스레드로 보낸다. 받는 사람은 서버가 다시 확인한다. 결과가 불분명하면 unknown."""
+    task = _mail_task(db, task_id, user)
+    draft = _act(reply_draft.find_draft, db, task)
+    _act(reply_send.ensure_can_send, db, user, task, draft)
+    send_limiter.check(f"send:{user.id}")  # after the checks above so rejected calls cost nothing
+    _act(reply_send.send_draft, db, user, task, draft, get_google_client(), datetime.now(timezone.utc))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/reply-draft/confirm", response_model=TaskDetail)
+def confirm_reply_sent(task_id: int, body: ReplyConfirmIn, user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    """발송 결과가 불분명한 초안: 사용자가 보낸편지함에서 확인한 결과(5분 뒤부터)."""
+    task = _mail_task(db, task_id, user)
+    draft = _act(reply_draft.find_draft, db, task)
+    _act(reply_send.confirm_unknown, db, user, task, draft, sent=body.sent, now=datetime.now(timezone.utc))
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/todos/complete-all", response_model=TaskDetail)
+def complete_all_todos(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """남은 할 일을 모두 완료로 정리한다(답장을 보낸 뒤 안내)."""
+    task = _mail_task(db, task_id, user)
+    reply_send.complete_remaining_todos(task)
     return _done(db, task, user)
 
 

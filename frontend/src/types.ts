@@ -169,6 +169,7 @@ export interface MailExtras {
   no_reply?: boolean
   reply_sent_at?: string | null
   draft?: ReplyDraft | null
+  remaining_todos_prompt?: boolean // 답장을 보냈는데 남은 할 일이 있다: "모두 완료" 안내
 }
 
 export interface ReplyDraftWarnings {

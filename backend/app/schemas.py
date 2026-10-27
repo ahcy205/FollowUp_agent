@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StrictBool
 
 
 class ORM(BaseModel):
@@ -164,6 +164,7 @@ class MailExtras(BaseModel):
     no_reply: bool = False
     reply_sent_at: datetime | None = None
     draft: ReplyDraftOut | None = None
+    remaining_todos_prompt: bool = False  # 답장을 보냈는데(WAITING) 남은 할 일이 있다: "모두 완료" 안내
 
 
 class TaskDetail(BaseModel):
@@ -246,6 +247,11 @@ class CloseTaskIn(_Strict):
 
 class NoReplyIn(_Strict):
     choice: Literal["followup", "wait", "close"]
+
+
+class ReplyConfirmIn(_Strict):
+    """발송 결과가 불분명한 초안: 보낸편지함에서 확인한 결과."""
+    sent: StrictBool
 
 
 class ReplyDraftIn(_Strict):

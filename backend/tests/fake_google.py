@@ -71,6 +71,7 @@ class FakeGoogle:
         self.calendar_fail_times: int = 0
         self.calendar_calls: list[tuple[str, str]] = []
         self.sent: list[tuple[bytes, str]] = []  # gmail_send 기록: (raw, thread_id)
+        self.gmail_send_fail: Exception | None = None  # 설정하면 gmail_send가 보내지 않고 이 예외를 낸다
         self._seq = 0
         self._tokens = 0
 
@@ -136,6 +137,8 @@ class FakeGoogle:
         return self.mailbox[message_id]
 
     def gmail_send(self, access_token: str, raw_rfc822: bytes, thread_id: str) -> SentMessage:
+        if self.gmail_send_fail is not None:
+            raise self.gmail_send_fail
         mid = self.deliver(raw_rfc822, labels=("SENT",), thread_id=thread_id)
         self.sent.append((raw_rfc822, thread_id))
         return SentMessage(id=mid, thread_id=thread_id)
