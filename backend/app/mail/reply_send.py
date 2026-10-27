@@ -11,7 +11,7 @@
   rfc_message_id를 시간 순으로 이어 쓴다(마지막 10개).
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from email.policy import default as default_policy
 
@@ -44,6 +44,7 @@ TOKEN_FAILED = "Google에 연결하지 못해 보내지 않았습니다. 잠시 
 CHECKING = "아직 발송 여부를 확인하는 중입니다. 잠시 후 다시 확인해 주세요."
 NOT_UNKNOWN = "발송 여부를 확인할 초안이 아닙니다."
 CLOSED = "닫혔거나 다른 업무에 합쳐진 업무에서는 답장을 보낼 수 없습니다."
+ALREADY_REPLIED = "이미 답장을 보낸 것으로 확인됐습니다. 초안을 지우거나 다시 만들어 주세요."
 
 
 # ---------------------------------------------------------------- MIME
@@ -85,6 +86,10 @@ def ensure_can_send(db: Session, user: User, task: Task, draft: ReplyDraft) -> G
         raise ActionError(CLOSED, 409)
     if draft.status != "draft":
         raise ActionError(ALREADY, 409)
+    if (task.reply_sent_at is not None and draft.updated_at is not None
+            and _utc(task.reply_sent_at) > _utc(draft.updated_at)):
+        # 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다('안 보내졌어요' 뒤 동기화가 찾은 경우 등). 두 번 보내지 않는다.
+        raise ActionError(ALREADY_REPLIED, 409)
     account = _account(db, user.id)
     if account is None or account.status != GoogleAccountStatus.CONNECTED:
         raise ActionError(NOT_CONNECTED, 409)
@@ -125,7 +130,7 @@ def _sent_reason(draft: ReplyDraft) -> str:
 
 
 def _back_to_draft(db: Session, draft: ReplyDraft, error: Exception) -> None:
-    _set(db, draft, ("sending",), status="draft", sending_at=None)
+    _set(db, draft, ("sending",), status="draft", sending_at=None, updated_at=datetime.now(UTC))
     log_action(db, user_id=draft.user_id, task_id=draft.task_id, run_id=None, action_type="REPLY_SEND_FAILED",
                output_data={"error": type(error).__name__}, reason="답장을 보내지 못했습니다. 초안은 그대로 있습니다")
     db.commit()
@@ -234,7 +239,7 @@ def confirm_unknown(db: Session, user: User, task: Task, draft: ReplyDraft, *, s
         lifecycle.mark_reply_sent(db, task, None, now, source="app", reason=_sent_reason(draft),
                                   recipients=1 + len(draft.cc_selected or []))
     else:
-        if not _set(db, draft, (draft.status,), status="draft", sending_at=None):
+        if not _set(db, draft, (draft.status,), status="draft", sending_at=None, updated_at=now):
             raise ActionError(NOT_UNKNOWN, 409)
         db.refresh(draft)
         log_action(db, user_id=draft.user_id, task_id=draft.task_id, run_id=None, action_type="REPLY_SEND_NOT_SENT",

@@ -45,8 +45,9 @@ def test_inbox_groups_and_order(client, monkeypatch):
     card = todo["now"][0]
     assert set(card) == {"task_id", "title", "summary", "sender_name", "sender_org", "priority", "deadline_badge",
                          "todo_done", "todo_total", "nudge_days", "returned", "has_merge_candidates", "analysis",
-                         "received_at", "no_reply"}
+                         "received_at", "no_reply", "changed_unseen"}
     assert card["deadline_badge"]["text"] == "D-1 내일" and card["todo_total"] == 2 and card["todo_done"] == 0
+    assert card["changed_unseen"] is False
     assert body["triage_enabled"] is False
 
 
@@ -216,3 +217,16 @@ def test_detail_merged_sources(client, monkeypatch):
         merge.undo_merge(db, db.get(User, me["id"]), db.get(Task, a_id), b_id, NOW + timedelta(minutes=5))
         db.commit()
     assert client.get(f"/api/tasks/{a_id}").json()["mail"]["merged_sources"] == []
+
+
+def test_card_changed_unseen(client, monkeypatch):
+    """상대 재답장으로 바뀐 내용을 아직 보지 않은 업무 카드에 표시한다(설계 6.4)."""
+    _fix_now(monkeypatch)
+    me = register(client)
+    with SessionLocal() as db:
+        tid = _task(db, me["id"]).id
+        t = db.get(Task, tid)
+        t.changed_unseen = True
+        db.commit()
+    cards = [c for b in client.get("/api/inbox").json()["tabs"]["todo"].values() for c in b]
+    assert [c["changed_unseen"] for c in cards if c["task_id"] == tid] == [True]

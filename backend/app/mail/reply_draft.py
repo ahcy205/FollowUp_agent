@@ -22,7 +22,7 @@ from app.mail.draft_checks import PLACEHOLDER_RE, draft_warnings, placeholders  
 from app.mail.errors import ActionError
 from app.mail.inbox import _utc
 from app.mail.intake import _format_received, _one_line
-from app.models import Email, EmailDirection, GoogleAccount, ReplyDraft, Task, User
+from app.models import Email, EmailDirection, GoogleAccount, ReplyDraft, Task, User, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -243,7 +243,7 @@ def generate_draft(db: Session, task: Task, user: User, llm: LLMClient, *, purpo
     warnings["suspicious"] = list(dict.fromkeys([*data["suspicious"], *flags]))[:MAX_ITEMS]
     values = dict(purpose=purpose, to_addr=to, cc_candidates=candidates, cc_selected=[], subject=_subject(emails),
                   body=data["body"], status="draft", warnings=warnings, user_input=user_input,
-                  gmail_message_id=None, sending_at=None)
+                  gmail_message_id=None, sending_at=None, updated_at=utcnow())
 
     existing = _draft_of(db, task)
     if existing is None:
@@ -297,7 +297,8 @@ def update_draft(draft: ReplyDraft, *, subject: str, body: str, cc_selected: lis
     sources, header_text = _context_texts(db, task, draft.user_input)
     warnings = draft_warnings(body, sources, header_text)
     warnings["suspicious"] = list((draft.warnings or {}).get("suspicious") or [])
-    values = dict(subject=subject, body=body, cc_selected=[c for c in allowed if c in chosen], warnings=warnings)
+    values = dict(subject=subject, body=body, cc_selected=[c for c in allowed if c in chosen], warnings=warnings,
+                  updated_at=utcnow())  # Core UPDATE: 시각을 직접 넣는다
     _guarded(db, draft, ReplyDraft.status == "draft", values, NOT_EDITABLE)
     log_action(db, user_id=draft.user_id, task_id=draft.task_id, run_id=None, action_type="REPLY_DRAFT_UPDATED",
                output_data=_counts(draft), reason="답장 초안을 고쳤습니다")

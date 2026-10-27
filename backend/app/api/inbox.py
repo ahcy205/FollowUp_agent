@@ -85,6 +85,7 @@ def _card(db: Session, task: Task, times: dict, now: datetime, tz: str, *, candi
         analysis=str(brief.get("analysis") or ""),
         received_at=t.get("latest") or inbox._utc(task.created_at),
         no_reply=inbox.no_reply_active(task),
+        changed_unseen=bool(task.changed_unseen),
     )
 
 

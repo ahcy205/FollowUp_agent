@@ -316,6 +316,7 @@ def test_api_flow(client):
     draft = r.json()["mail"]["draft"]
     assert draft["to_addr"] == "kim@partner.co.kr" and draft["cc_candidates"] == ["lee@partner.co.kr"]
     assert draft["can_send"] is False and draft["status"] == "draft" and draft["unknown_since"] is None
+    assert draft["updated_at"]  # 화면이 reply_sent_at과 비교한다
     assert client.get(f"/api/tasks/{tid}").json()["mail"]["draft"]["body"] == draft["body"]
 
     r = client.post(f"/api/tasks/{tid}/reply-draft/update",

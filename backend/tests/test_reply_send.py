@@ -419,3 +419,50 @@ def test_stale_sending_can_be_confirmed(fake):
         _confirm(db, tid, did, False, now=NOW + timedelta(minutes=3))
         db.commit()
         assert db.get(ReplyDraft, did).status == "draft"
+
+
+def test_send_blocked_when_reply_found_after_not_sent(fake):
+    """'안 보내졌어요'로 되돌린 뒤 동기화가 실제로 보낸 메일을 찾으면(reply_sent_at이 초안보다 늦음) 다시 보내지 않는다."""
+    from app.mail import lifecycle
+    start = datetime.now(UTC) - timedelta(minutes=10)
+    fake.gmail_send_fail = GoogleTransientError("timeout")
+    with SessionLocal() as db:
+        tid, did = _setup(db, _user(db))
+        _send(db, tid, now=start, client=fake)
+        assert db.get(ReplyDraft, did).status == "unknown"
+        now = datetime.now(UTC)
+        _confirm(db, tid, did, False, now=now)
+        db.commit()
+        d = db.get(ReplyDraft, did)
+        assert d.status == "draft" and rs._utc(d.updated_at) >= rs._utc(now) - timedelta(seconds=1)
+        uid = db.get(Task, tid).user_id
+        row = Email(user_id=uid, sender=ME, receiver="park@partner.co.kr", subject="Re: 견적 문의", content="x",
+                    direction=EmailDirection.OUTBOUND, processed=False, received_at=start,
+                    gmail_message_id="sent-elsewhere", gmail_thread_id="thr-1", cc=[], gmail_meta={})
+        db.add(row)
+        db.flush()
+        lifecycle.record_sent_mail(db, uid, row, now + timedelta(seconds=30))
+        db.commit()
+        assert db.get(ReplyDraft, did).status == "draft"  # sending_at이 없어 초안과 맞춰 보지 못한다
+        fake.gmail_send_fail = None
+        sent_before = len(fake.sent)
+        with pytest.raises(ActionError) as e:
+            _send(db, tid, now=now + timedelta(minutes=1), client=fake)
+        assert e.value.status == 409
+        assert e.value.args[0] == "이미 답장을 보낸 것으로 확인됐습니다. 초안을 지우거나 다시 만들어 주세요."
+        assert len(fake.sent) == sent_before
+        assert db.get(ReplyDraft, did).status == "draft"
+
+
+def test_draft_edit_after_reply_can_send(fake):
+    """답장을 보낸 뒤 새로 고친 초안(updated_at이 더 늦음)은 보낼 수 있다."""
+    with SessionLocal() as db:
+        tid, did = _setup(db, _user(db))
+        task = db.get(Task, tid)
+        task.reply_sent_at = datetime.now(UTC) - timedelta(hours=1)
+        db.commit()
+        from app.mail import reply_draft
+        reply_draft.update_draft(db.get(ReplyDraft, did), subject="Re: 견적 문의", body=BODY, cc_selected=[])
+        db.commit()
+        _send(db, tid, now=datetime.now(UTC), client=fake)
+        assert db.get(ReplyDraft, did).status == "sent"

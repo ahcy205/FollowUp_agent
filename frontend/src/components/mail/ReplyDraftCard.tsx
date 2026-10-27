@@ -122,6 +122,9 @@ export default function ReplyDraftCard({
   const base_ = threadSubject(data.emails)
   const subjectDrift = editable && base_ !== '' && !bareSubject(subject).startsWith(base_)
   const w = draft.warnings
+  // 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다. 서버도 보내기를 409로 막는다.
+  const replyAt = data.mail?.reply_sent_at
+  const sentLater = replyAt != null && parseDate(replyAt).getTime() > parseDate(draft.updated_at).getTime()
   const confirmable = unknownAt != null && now >= unknownAt + UNKNOWN_CONFIRM_MS
 
   if (draft.status === 'sent') {
@@ -231,7 +234,11 @@ export default function ReplyDraftCard({
         </div>
       )}
 
-      {editable && step === 'confirm-send' && (
+      {editable && sentLater && (
+        <div className="alert alert-amber">이미 답장을 보낸 것으로 확인됐습니다. 초안을 지우거나 다시 만들어 주세요.</div>
+      )}
+
+      {editable && step === 'confirm-send' && !sentLater && (
         <div className="inline-panel draft-confirm">
           <span>
             <b>{draft.to_addr}</b>에게 보냅니다 · 참조 {cc.length}명
@@ -263,7 +270,7 @@ export default function ReplyDraftCard({
 
       {editable && step === 'edit' && (
         <div className="draft-actions">
-          <button type="button" className="btn btn-primary btn-sm" disabled={!!busy || blanks.length > 0} onClick={startSend}>
+          <button type="button" className="btn btn-primary btn-sm" disabled={!!busy || blanks.length > 0 || sentLater} onClick={startSend}>
             {busy === 'save' ? '저장 중…' : '보내기'}
           </button>
           {blanks.length > 0 && <span className="muted small">빈칸 {blanks.length}개를 채워야 보낼 수 있습니다</span>}

@@ -210,6 +210,7 @@ export interface ReplyDraft {
   warnings: ReplyDraftWarnings
   can_send: boolean
   unknown_since: string | null
+  updated_at: string // 만들기 · 고치기 · 초안으로 되돌리기 시각. reply_sent_at이 더 늦으면 이미 답장을 보낸 것
 }
 
 // 메일 업무 동작 하나를 보내고 응답(TaskDetail)으로 화면을 바꾼다. 실패하면 ApiError를 던진다.
@@ -267,6 +268,7 @@ export interface InboxCard {
   analysis: string
   received_at: string | null
   no_reply: boolean // 보낸 지 영업일 3일째 답이 없어 다시 연락할지 묻는 중
+  changed_unseen: boolean // 상대 재답장으로 바뀐 내용을 아직 보지 않음
 }
 
 export interface SnoozedCard extends InboxCard {

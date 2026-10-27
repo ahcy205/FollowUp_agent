@@ -151,6 +151,7 @@ class ReplyDraftOut(BaseModel):
     warnings: dict
     can_send: bool  # 빈칸이 없고 상태가 draft일 때만
     unknown_since: datetime | None  # 발송 결과가 불분명해진 시각 (status == "unknown"일 때만)
+    updated_at: datetime  # 만들기 · 고치기 · 초안으로 되돌리기 시각. reply_sent_at이 더 늦으면 이미 답장을 보낸 것
 
 
 class MailExtras(BaseModel):
@@ -345,6 +346,7 @@ class InboxCard(BaseModel):
     analysis: str
     received_at: datetime | None
     no_reply: bool = False  # 보낸 지 영업일 3일째 답이 없어 다시 연락할지 묻는 중
+    changed_unseen: bool = False  # 상대 재답장으로 바뀐 내용을 아직 보지 않음("내용 바뀜")
 
 
 class SnoozedCard(InboxCard):
