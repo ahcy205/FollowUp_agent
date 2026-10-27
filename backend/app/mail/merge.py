@@ -263,7 +263,7 @@ def merge(db: Session, user: User, source: Task, target: Task, now: datetime) ->
     else:
         target.merge_analysis = {}  # 이전 합치기의 분석 상태가 이번 합치기로 보이지 않게
     source.merge_analysis = {}  # 합쳐진 업무에는 분석 상태를 남기지 않는다(pending은 위에서 막았다)
-    mark_calendar_dirty(source)  # 일정이 있으면 ✓를 붙인다
+    mark_calendar_dirty(source)  # 합쳐진 업무의 일정은 지운다(되돌리면 되살린다)
     mark_calendar_dirty(target)
     data = {"source_id": source.id, "target_id": target.id}
     _log(db, user, target, "TASK_MERGED", data, f"업무 #{source.id}을 이 업무에 합쳤습니다")

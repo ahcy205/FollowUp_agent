@@ -32,6 +32,7 @@ MAX_TRANSIENT_ATTEMPTS = 5
 TRANSIENT_MESSAGE = "Google 캘린더 연결이 불안정해 일정을 반영하지 못했습니다."
 ERROR_MESSAGE = "Google 캘린더에 일정을 반영하지 못했습니다."
 FOREIGN_EVENT_MESSAGE = "같은 번호의 다른 캘린더 일정이 있어 반영하지 못했습니다."
+CLOSED_REMOVED_REASON = "업무가 닫혀 캘린더 일정을 지웠습니다"
 
 _BASE32HEX = "0123456789abcdefghijklmnopqrstuv"  # 캘린더 일정 ID에 쓸 수 있는 글자
 _SALT_LEN = 8
@@ -72,7 +73,10 @@ def _targets(db: Session, user_id: int, max_tasks: int) -> list[int]:
                or_(Task.calendar_state == PENDING,
                    # 닫힌 업무는 새 일정을 만들지 않으므로 고르지 않는다 (매 주기 한도를 차지하지 않게)
                    and_(Task.calendar_state == NONE, Task.deadline_at.is_not(None),
-                        Task.status.not_in(_CLOSED))))
+                        Task.status.not_in(_CLOSED)),
+                   # 예전 규칙으로 ✓만 붙고 남은 닫힌 업무의 일정도 지운다
+                   and_(Task.calendar_state == SYNCED, Task.calendar_event_id.is_not(None),
+                        Task.status.in_(_CLOSED))))
         .order_by(Task.updated_at, Task.id)
         .limit(max_tasks)
     ).all())
@@ -141,8 +145,9 @@ def _patch(db: Session, task: Task, client: GoogleClient, token: str, body: dict
     return "updated"
 
 
-def _remove_event(db: Session, task: Task, client: GoogleClient, token: str, salt: str) -> str:
-    """기한이 없어진 업무의 일정을 지운다. 이 업무가 만든 일정(비공개 표식 일치)만 지우고, 이미 없으면 조용히 넘어간다."""
+def _remove_event(db: Session, task: Task, client: GoogleClient, token: str, salt: str,
+                  reason: str = "기한이 없어져 캘린더 일정을 지웠습니다") -> str:
+    """기한이 없어졌거나 닫힌 업무의 일정을 지운다. 이 업무가 만든 일정(비공개 표식 일치)만 지우고, 이미 없으면 조용히 넘어간다."""
     event_id = task.calendar_event_id
     try:
         existing = client.calendar_get(token, event_id)
@@ -163,7 +168,7 @@ def _remove_event(db: Session, task: Task, client: GoogleClient, token: str, sal
     task.calendar_attempts = 0
     task.calendar_error = ""
     if removed:
-        _set_state(db, task, NONE, "CALENDAR_REMOVED", reason="기한이 없어져 캘린더 일정을 지웠습니다")
+        _set_state(db, task, NONE, "CALENDAR_REMOVED", reason=reason)
         return "removed"
     task.calendar_state = NONE
     return "skipped"
@@ -191,7 +196,7 @@ def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str,
     """업무 1개를 반영한다. 결과: created | updated | deleted | removed | error | skipped. GoogleError는 호출한 쪽이 처리한다."""
     if not task.calendar_event_id:
         if task.deadline_at is None or task.status in _CLOSED:
-            # 완료 · 취소된 업무는 이미 있는 일정에만 ✓를 붙인다. 새 일정은 만들지 않는다.
+            # 완료 · 취소된 업무는 새 일정을 만들지 않는다 (이미 있는 일정은 아래에서 지운다).
             task.calendar_state = NONE
             return "skipped"
         body = build_event(task, tz=tz, public_url=public_url, salt=salt)
@@ -217,11 +222,10 @@ def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str,
         _synced(db, task, event, created=True)
         return "created"
 
+    if task.status in _CLOSED:
+        # 완료 · 취소 · 합쳐진 업무의 일정은 지운다. 다시 열리면 insert 409 → 되살리기로 같은 일정이 돌아온다.
+        return _remove_event(db, task, client, token, salt, reason=CLOSED_REMOVED_REASON)
     if task.deadline_at is None:
-        if task.status in _CLOSED:
-            # 닫힌 업무는 일정을 지우지 않고 그대로 둔다 (✓ 표시는 이미 반영되어 있다).
-            task.calendar_state = SYNCED
-            return "skipped"
         return _remove_event(db, task, client, token, salt)
     return _patch(db, task, client, token, build_event(task, tz=tz, public_url=public_url, salt=salt))
 

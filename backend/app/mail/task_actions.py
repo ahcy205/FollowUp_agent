@@ -304,7 +304,7 @@ def close_without_reply(db: Session, user: User, task: Task, reason: str) -> Non
     task.next_action = ""
     task.waiting_for = ""
     task.snoozed_until = None
-    mark_calendar_dirty(task)  # 일정은 지우지 않고 제목 앞에 ✓를 붙인다
+    mark_calendar_dirty(task)  # 앱이 만든 캘린더 일정을 지운다(다시 열리면 되살린다)
     log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="TASK_CLOSED",
                output_data={"reason": reason}, reason="답장 필요 없음으로 닫았습니다")
 

@@ -177,7 +177,7 @@ def cancel_task(db: Session, user: User, task: Task, reason: str = "") -> None:
         task.next_action = "사용자가 취소한 업무입니다." + (f" 사유: {reason}" if reason else "")
         if task.origin == "mail":
             task.snoozed_until = None  # 닫힌 업무의 스누즈는 의미가 없다
-            mark_calendar_dirty(task)  # 일정은 지우지 않고 제목 앞에 ✓를 붙인다
+            mark_calendar_dirty(task)  # 앱이 만든 캘린더 일정을 지운다(다시 열리면 되살린다)
         log_action(db, user_id=user.id, task_id=task.id, run_id=run.id if run else None, action_type="TASK_CANCELLED",
                    input_data={"from": before, "to": TaskStatus.CANCELLED},
                    output_data={"stopped_run": run.id if run else None, "voided_approvals": len(pending)},

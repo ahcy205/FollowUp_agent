@@ -242,18 +242,26 @@ def test_conflict_with_user_deleted_event(setup, google_fake):
         assert task.calendar_state == "deleted_by_user" and task.calendar_event_id == eid
 
 
-def test_cancel_marks_check(setup, google_fake):
+def test_cancel_removes_event(setup, google_fake):
+    """완료 · 취소된 업무의 일정은 지운다(실제 계정 점검 뒤 사용자 결정 — 예전에는 ✓만 붙였다)."""
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid)
         _sync(db, aid, google_fake)
         task = db.get(Task, tid)
+        eid = event_id_for(task, _salt(db, aid))
         orchestrator.cancel_task(db, db.get(User, uid), task, "")
         assert db.get(Task, tid).calendar_state == "pending"
+        r = _sync(db, aid, google_fake)
+        assert r.removed == 1
+        assert _calls(google_fake, "delete") == [("delete", eid)]
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+        (log,) = _logs(db, tid, "CALENDAR_REMOVED")
+        assert log.reason == "업무가 닫혀 캘린더 일정을 지웠습니다"
+        # 다음 주기에 닫힌 업무를 다시 고르지 않는다
         _sync(db, aid, google_fake)
-        ev = google_fake.events[event_id_for(task, _salt(db, aid))]
-        assert ev["summary"].startswith("✓ ")
-        assert db.get(Task, tid).calendar_state == "synced"
+        assert len(_calls(google_fake, "delete")) == 1
 
 
 def test_cancel_after_user_deleted_untouched(setup, google_fake):
@@ -520,18 +528,54 @@ def test_clear_deadline_user_deleted_event_is_gone(setup, google_fake):
         assert db.get(Task, tid).calendar_state == "none"
 
 
-def test_closed_task_still_gets_check_mark(setup, google_fake):
+def test_completed_task_removes_event_and_reopen_restores(setup, google_fake):
+    """완료로 닫으면 일정을 지우고, 다시 열리면(상대 새 메일 · 합치기 되돌리기) 같은 번호의 일정을 되살린다."""
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid)
         _sync(db, aid, google_fake)
         task = db.get(Task, tid)
         eid = event_id_for(task, _salt(db, aid))
-        orchestrator.cancel_task(db, db.get(User, uid), task, "")
+        task.status = TaskStatus.COMPLETED
+        mark_calendar_dirty(task)
+        db.commit()
         _sync(db, aid, google_fake)
-        assert _calls(google_fake, "delete") == []
-        assert google_fake.events[eid]["summary"].startswith("✓ ")
-        assert db.get(Task, tid).calendar_state == "synced"
+        assert _calls(google_fake, "delete") == [("delete", eid)]
+        assert db.get(Task, tid).calendar_event_id is None
+        task = db.get(Task, tid)
+        task.status = TaskStatus.ACTION_REQUIRED
+        mark_calendar_dirty(task)
+        db.commit()
+        _sync(db, aid, google_fake)
+        task = db.get(Task, tid)
+        assert task.calendar_state == "synced" and task.calendar_event_id == eid
+        assert google_fake.calendar_get("t", eid).status == "confirmed"
+        assert not google_fake.events[eid]["summary"].startswith("✓ ")
+
+
+def test_already_closed_synced_events_removed(setup, google_fake):
+    """이번 변경 전에 닫혀 ✓만 붙은 일정(synced 상태로 남음)도 다음 주기에 지운다(사용자 결정)."""
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        task = db.get(Task, tid)
+        eid = event_id_for(task, _salt(db, aid))
+        task.status = TaskStatus.CANCELLED  # 예전 코드가 ✓를 붙이고 synced로 둔 상태
+        db.commit()
+        r = _sync(db, aid, google_fake)
+        assert r.removed == 1 and _calls(google_fake, "delete") == [("delete", eid)]
+        assert db.get(Task, tid).calendar_state == "none"
+
+
+def test_closed_task_foreign_or_user_deleted_event_untouched(setup, google_fake):
+    """닫힌 업무라도 사용자가 지운 일정(deleted_by_user)은 건드리지 않는다."""
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid, status=TaskStatus.CANCELLED, state="deleted_by_user", event_id="fuag0000000100000001")
+        _sync(db, aid, google_fake)
+        assert google_fake.calendar_calls == []
+        assert db.get(Task, tid).calendar_state == "deleted_by_user"
 
 
 def test_intake_marks_dirty():
