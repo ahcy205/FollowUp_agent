@@ -36,6 +36,7 @@ FOREIGN_EVENT_MESSAGE = "같은 번호의 다른 캘린더 일정이 있어 반�
 _BASE32HEX = "0123456789abcdefghijklmnopqrstuv"  # 캘린더 일정 ID에 쓸 수 있는 글자
 _SALT_LEN = 8
 _MARKER_KEY = "followupTask"
+_REMOVED_KEY = "followupRemoved"  # 앱이 기한 삭제로 지운 일정에 붙인다 (사용자가 지운 일정과 구분)
 
 NONE, PENDING, SYNCED, DELETED, ERROR = "none", "pending", "synced", "deleted_by_user", "error"
 
@@ -148,8 +149,11 @@ def _remove_event(db: Session, task: Task, client: GoogleClient, token: str, sal
     except GoogleNotFound:
         existing = None
     removed = False
-    if existing is not None and existing.status != "cancelled"             and existing.private.get(_MARKER_KEY) == private_marker(task, salt):
+    if (existing is not None and existing.status != "cancelled"
+            and existing.private.get(_MARKER_KEY) == private_marker(task, salt)):
         try:
+            # 앱이 지운 일정임을 남긴다. 같은 번호로 기한이 다시 생기면 이 표식으로 되살릴지 판단한다.
+            client.calendar_patch(token, event_id, {"extendedProperties": {"private": {_REMOVED_KEY: "1"}}})
             client.calendar_delete(token, event_id)
             removed = True
         except GoogleNotFound:
@@ -165,8 +169,26 @@ def _remove_event(db: Session, task: Task, client: GoogleClient, token: str, sal
     return "skipped"
 
 
+def _restore(db: Session, task: Task, client: GoogleClient, token: str, body: dict) -> str:
+    """앱이 지운 일정을 되살린다. 취소된 일정은 id가 남아 insert가 409이므로 status=confirmed로 patch한다."""
+    patch_body = {k: v for k, v in body.items() if k != "id"}
+    patch_body["status"] = "confirmed"
+    patch_body["extendedProperties"] = {"private": {**body["extendedProperties"]["private"], _REMOVED_KEY: None}}
+    for key in ("start", "end"):
+        part = dict(patch_body[key])
+        if "dateTime" in part:
+            part["date"] = None
+        else:
+            part["dateTime"] = None
+            part["timeZone"] = None
+        patch_body[key] = part
+    event = client.calendar_patch(token, task.calendar_event_id, patch_body)
+    _synced(db, task, event, created=True)
+    return "created"
+
+
 def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str, public_url: str, salt: str) -> str:
-    """업무 1개를 반영한다. 결과: created | updated | deleted | error | skipped. GoogleError는 호출한 쪽이 처리한다."""
+    """업무 1개를 반영한다. 결과: created | updated | deleted | removed | error | skipped. GoogleError는 호출한 쪽이 처리한다."""
     if not task.calendar_event_id:
         if task.deadline_at is None or task.status in _CLOSED:
             # 완료 · 취소된 업무는 이미 있는 일정에만 ✓를 붙인다. 새 일정은 만들지 않는다.
@@ -186,6 +208,9 @@ def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str,
             if existing.html_link:
                 task.calendar_event_url = existing.html_link
             if existing.status == "cancelled":
+                if existing.private.get(_REMOVED_KEY) == "1":
+                    # 기한이 없어져 앱이 지웠던 일정이다. 기한이 다시 생겼으니 같은 번호로 되살린다.
+                    return _restore(db, task, client, token, body)
                 _deleted(db, task)
                 return "deleted"
             return _patch(db, task, client, token, body)

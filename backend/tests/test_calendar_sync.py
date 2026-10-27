@@ -468,6 +468,31 @@ def test_clear_deadline_foreign_event_not_deleted(setup, google_fake, marker):
         assert task.calendar_state == "none" and task.calendar_event_id is None
 
 
+def test_new_deadline_after_remove_recreates_event(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        _clear_deadline(db, tid)
+        _sync(db, aid, google_fake)
+        assert eid not in google_fake.events and db.get(Task, tid).calendar_state == "none"
+        task = db.get(Task, tid)
+        task.deadline_at = datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc)
+        mark_calendar_dirty(task)
+        db.commit()
+        r = _sync(db, aid, google_fake)
+        assert r.created == 1 and r.deleted_by_user == 0 and r.errors == 0
+        task = db.get(Task, tid)
+        assert task.calendar_state == "synced" and task.calendar_event_id == eid
+        assert eid in google_fake.events and eid not in google_fake.deleted_events
+        ev = google_fake.events[eid]
+        assert ev["start"] == {"date": "2026-11-06"} and ev["status"] == "confirmed"
+        assert "followupRemoved" not in ev["extendedProperties"]["private"]
+        assert google_fake.calendar_get("t", eid).status == "confirmed"
+        assert len(_logs(db, tid, "CALENDAR_SYNCED")) == 2  # 처음 만들 때 + 되살릴 때
+
+
 def test_clear_deadline_already_gone(setup, google_fake):
     uid, aid = setup
     with SessionLocal() as db:

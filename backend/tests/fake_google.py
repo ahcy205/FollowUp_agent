@@ -177,6 +177,9 @@ class FakeGoogle:
 
     def calendar_patch(self, access_token: str, event_id: str, body: dict) -> CalendarEvent:
         self._calendar_enter("patch", event_id)
+        if event_id in self.deleted_events and body.get("status") == "confirmed":
+            # Google처럼 status=confirmed로 patch하면 취소된 일정이 되살아난다
+            self.events[event_id] = self.deleted_events.pop(event_id)
         if event_id in self.deleted_events or event_id not in self.events:
             raise GoogleNotFound("event not found")
         merged = _merge_patch(self.events[event_id], body)
