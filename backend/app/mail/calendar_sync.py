@@ -47,6 +47,7 @@ class CalendarSyncResult:
     deleted_by_user: int = 0
     errors: int = 0
     skipped: int = 0
+    removed: int = 0
 
 
 class _StopSync(Exception):
@@ -139,6 +140,31 @@ def _patch(db: Session, task: Task, client: GoogleClient, token: str, body: dict
     return "updated"
 
 
+def _remove_event(db: Session, task: Task, client: GoogleClient, token: str, salt: str) -> str:
+    """기한이 없어진 업무의 일정을 지운다. 이 업무가 만든 일정(비공개 표식 일치)만 지우고, 이미 없으면 조용히 넘어간다."""
+    event_id = task.calendar_event_id
+    try:
+        existing = client.calendar_get(token, event_id)
+    except GoogleNotFound:
+        existing = None
+    removed = False
+    if existing is not None and existing.status != "cancelled"             and existing.private.get(_MARKER_KEY) == private_marker(task, salt):
+        try:
+            client.calendar_delete(token, event_id)
+            removed = True
+        except GoogleNotFound:
+            pass
+    task.calendar_event_id = None
+    task.calendar_event_url = ""
+    task.calendar_attempts = 0
+    task.calendar_error = ""
+    if removed:
+        _set_state(db, task, NONE, "CALENDAR_REMOVED", reason="기한이 없어져 캘린더 일정을 지웠습니다")
+        return "removed"
+    task.calendar_state = NONE
+    return "skipped"
+
+
 def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str, public_url: str, salt: str) -> str:
     """업무 1개를 반영한다. 결과: created | updated | deleted | error | skipped. GoogleError는 호출한 쪽이 처리한다."""
     if not task.calendar_event_id:
@@ -167,9 +193,11 @@ def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str,
         return "created"
 
     if task.deadline_at is None:
-        # 기한 삭제에 따른 일정 정리는 이 단계 범위가 아니다. 일정은 그대로 둔다.
-        task.calendar_state = SYNCED
-        return "skipped"
+        if task.status in _CLOSED:
+            # 닫힌 업무는 일정을 지우지 않고 그대로 둔다 (✓ 표시는 이미 반영되어 있다).
+            task.calendar_state = SYNCED
+            return "skipped"
+        return _remove_event(db, task, client, token, salt)
     return _patch(db, task, client, token, build_event(task, tz=tz, public_url=public_url, salt=salt))
 
 
@@ -217,6 +245,8 @@ def _sync_one(db: Session, task_id: int, client: GoogleClient, token: str, tz: s
         result.updated += 1
     elif outcome == "deleted":
         result.deleted_by_user += 1
+    elif outcome == "removed":
+        result.removed += 1
     elif outcome == "error":
         result.errors += 1
     else:
@@ -249,6 +279,7 @@ def sync_calendars(db: Session, account: GoogleAccount, client: GoogleClient, *,
     except Exception as e:  # noqa: BLE001 - 캘린더 오류가 메일 동기화 주기를 멈추면 안 된다
         db.rollback()
         log.warning("calendar sync for user %s aborted: %s", user_id, type(e).__name__)
-    log.info("calendar sync for user %s: created=%d updated=%d deleted_by_user=%d errors=%d skipped=%d",
-             user_id, result.created, result.updated, result.deleted_by_user, result.errors, result.skipped)
+    log.info("calendar sync for user %s: created=%d updated=%d deleted_by_user=%d removed=%d errors=%d skipped=%d",
+             user_id, result.created, result.updated, result.deleted_by_user, result.removed, result.errors,
+             result.skipped)
     return result

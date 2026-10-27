@@ -21,7 +21,6 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
   const [editing, setEditing] = useState(false)
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
-  const [calendarKept, setCalendarKept] = useState(false) // 기한을 없앴지만 캘린더 일정은 남아 있음
 
   const run = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key)
@@ -41,7 +40,6 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
     setDate(task.deadline_at ? localDateValue(task.deadline_at) : '')
     setTime(task.deadline_at && !task.deadline_all_day ? localTimeValue(task.deadline_at) : '')
     setError('')
-    setCalendarKept(false)
     setEditing(true)
   }
 
@@ -54,11 +52,7 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
   }
 
   const clear = async () => {
-    const hadEvent = task.calendar_state === 'synced'
-    if (await run('clear', () => act('/deadline', { clear: true }))) {
-      setEditing(false)
-      setCalendarKept(hadEvent) // 기한을 없애도 캘린더 일정은 지우지 않는다 (6단계에서 정함)
-    }
+    if (await run('clear', () => act('/deadline', { clear: true }))) setEditing(false)
   }
 
   const cp = brief.counterpart
@@ -196,9 +190,6 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
           </div>
         )}
 
-        {calendarKept && !task.deadline_at && (
-          <div className="muted small">캘린더 일정은 그대로 남습니다. 필요하면 캘린더에서 지워 주세요.</div>
-        )}
         {calendarLine}
       </div>
 

@@ -421,20 +421,92 @@ def test_mark_calendar_dirty_rules():
     assert t4.calendar_state == "pending"
 
 
-def test_deadline_removed_keeps_event(setup, google_fake):
+def _clear_deadline(db, tid):
+    task = db.get(Task, tid)
+    task.deadline_at = None
+    mark_calendar_dirty(task)
+    db.commit()
+
+
+def test_clear_deadline_deletes_own_event(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        _clear_deadline(db, tid)
+        r = _sync(db, aid, google_fake)
+        assert r.removed == 1 and r.errors == 0
+        assert eid not in google_fake.events and _calls(google_fake, "delete") == [("delete", eid)]
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+        (log,) = _logs(db, tid, "CALENDAR_REMOVED")
+        assert log.reason == "기한이 없어져 캘린더 일정을 지웠습니다"
+        assert SUMMARY not in str(log.output_data)
+        # 다시 돌려도 아무 호출이 없다
+        n = len(google_fake.calendar_calls)
+        _sync(db, aid, google_fake)
+        assert len(google_fake.calendar_calls) == n
+
+
+@pytest.mark.parametrize("marker", [None, "othersalt:1"])
+def test_clear_deadline_foreign_event_not_deleted(setup, google_fake, marker):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        priv = google_fake.events[eid]["extendedProperties"]["private"]
+        if marker is None:
+            priv.pop("followupTask")
+        else:
+            priv["followupTask"] = marker
+        _clear_deadline(db, tid)
+        _sync(db, aid, google_fake)
+        assert _calls(google_fake, "delete") == [] and eid in google_fake.events
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+
+
+def test_clear_deadline_already_gone(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        google_fake.events.pop(eid)  # 404
+        _clear_deadline(db, tid)
+        r = _sync(db, aid, google_fake)
+        assert r.errors == 0 and _calls(google_fake, "delete") == []
+        task = db.get(Task, tid)
+        assert task.calendar_state == "none" and task.calendar_event_id is None
+
+
+def test_clear_deadline_user_deleted_event_is_gone(setup, google_fake):
+    uid, aid = setup
+    with SessionLocal() as db:
+        tid = _task(db, uid)
+        _sync(db, aid, google_fake)
+        eid = event_id_for(db.get(Task, tid), _salt(db, aid))
+        google_fake.delete_event(eid)  # cancelled
+        _clear_deadline(db, tid)
+        _sync(db, aid, google_fake)
+        assert _calls(google_fake, "delete") == []
+        assert db.get(Task, tid).calendar_state == "none"
+
+
+def test_closed_task_still_gets_check_mark(setup, google_fake):
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid)
         _sync(db, aid, google_fake)
         task = db.get(Task, tid)
-        task.deadline_at = None
-        mark_calendar_dirty(task)
-        db.commit()
-        n = len(google_fake.calendar_calls)
+        eid = event_id_for(task, _salt(db, aid))
+        orchestrator.cancel_task(db, db.get(User, uid), task, "")
         _sync(db, aid, google_fake)
-        assert len(google_fake.calendar_calls) == n
+        assert _calls(google_fake, "delete") == []
+        assert google_fake.events[eid]["summary"].startswith("✓ ")
         assert db.get(Task, tid).calendar_state == "synced"
-        assert event_id_for(task, _salt(db, aid)) in google_fake.events
 
 
 def test_intake_marks_dirty():
