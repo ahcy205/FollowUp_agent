@@ -96,7 +96,7 @@ def test_evidence_in_ignores_whitespace_and_rejects_short():
 
 def test_schema_shape():
     item = CHANGES_SCHEMA["properties"]["changes"]["items"]["properties"]
-    assert item["field"]["enum"] == ["title", "summary", "requests", "deadline", "todo_add"]
+    assert item["field"]["enum"] == ["title", "summary", "requests", "deadline", "todo_add", "todo_update"]
     assert item["kind"]["enum"] == ["confirmed", "question"]
     assert set(CHANGES_SCHEMA["required"]) == {"changes", "needs_reply", "suspicious"}
 
@@ -692,3 +692,119 @@ def test_promoted_mail_on_analyzed_task_queued_for_changes(monkeypatch):
         llm = ScriptedLLM(structured_steps=[_result(_change())])
         _run(db, uid, llm)
         assert db.get(Task, t.id).brief["requests"] == ["수량 150개 납품"]
+
+
+# ---------------------------------------------------------------- 캘린더 다시 반영 · 할 일 고치기 (실제 계정 점검 반영)
+
+def _synced_task(db, uid, **over):
+    return _task(db, uid, deadline_at=datetime(2026, 10, 29, 15, 0, tzinfo=UTC), deadline_all_day=True,
+                 deadline_kind="explicit", deadline_source="10월 30일", calendar_state="synced",
+                 calendar_event_id="ev-1", **over)
+
+
+@pytest.mark.parametrize("item", [
+    _change(),  # 요청 → 일정 설명
+    _change(field="summary", before="B상사 납품 요청", after="B상사 150개 납품 요청"),  # 요약 → 일정 제목
+    _change(field="todo_add", before="", after="수량 150개로 견적 수정"),  # 할 일 → 일정 설명
+])
+def test_brief_changes_mark_calendar_dirty(item):
+    """일정 제목은 한 줄 요약, 설명은 요청 · 할 일로 만든다. 그것이 바뀌면 일정도 다시 반영해야 한다."""
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _synced_task(db, uid)
+        _add(db, [_mail(uid)])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(item)]))
+        t = db.get(Task, t.id)
+        assert t.change_log[0]["status"] == "applied"
+        assert t.calendar_state == "pending"
+
+
+def test_undo_request_change_marks_calendar_dirty():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _synced_task(db, uid)
+        _add(db, [_mail(uid)])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(_change())]))
+        t = db.get(Task, t.id)
+        t.calendar_state = "synced"
+        undo_change(t, 1)
+        assert t.brief["requests"] == ["수량 100개 납품"]
+        assert t.calendar_state == "pending"
+
+
+def _todo_update(before="수량 100개 견적서 작성", after="수량 150개 견적서 작성", kind="confirmed"):
+    return _change(field="todo_update", before=before, after=after, kind=kind)
+
+
+def _plan_100(done=False):
+    return [{"id": 1, "title": "수량 100개 견적서 작성", "done": done, "evidence": "메모: 단가표 확인",
+             "due_at": None, "source": "agent"},
+            {"id": 2, "title": "샘플 발송", "done": False, "evidence": "", "due_at": None, "source": "agent"}]
+
+
+def test_todo_update_renames_keeps_memo_and_unchecks():
+    """내용이 바뀐 할 일은 새로 만들지 않고 그 할 일의 제목을 고친다. 메모는 남기고, 끝낸 할 일은 다시 하도록 체크를 푼다."""
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _synced_task(db, uid, plan=_plan_100(done=True))
+        _add(db, [_mail(uid)])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(_todo_update())]))
+        t = db.get(Task, t.id)
+        assert len(t.plan) == 2
+        assert t.plan[0] == {"id": 1, "title": "수량 150개 견적서 작성", "done": False, "evidence": "메모: 단가표 확인",
+                             "due_at": None, "source": "agent"}
+        assert t.plan[1]["title"] == "샘플 발송"
+        (entry,) = t.change_log
+        assert entry["field"] == "todo_update" and entry["status"] == "applied"
+        assert entry["before"] == "수량 100개 견적서 작성" and entry["after"] == "수량 150개 견적서 작성"
+        assert t.calendar_state == "pending"
+        assert t.status == TaskStatus.ACTION_REQUIRED
+        assert _logs(db, t.id, "TASK_CHANGED")[0].reason == "할 일: 수량 100개 견적서 작성 → 수량 150개 견적서 작성"
+
+
+def test_todo_update_unknown_before_falls_back_to_add():
+    """고칠 할 일을 찾지 못하면(LLM이 before를 틀리게 씀) 전처럼 새 할 일로 추가한다."""
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid, plan=_plan_100())
+        _add(db, [_mail(uid)])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(_todo_update(before="없는 할 일"))]))
+        t = db.get(Task, t.id)
+        assert [p["title"] for p in t.plan] == ["수량 100개 견적서 작성", "샘플 발송", "수량 150개 견적서 작성"]
+        assert t.change_log[0]["field"] == "todo_add"
+
+
+def test_todo_update_question_not_applied():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid, plan=_plan_100())
+        _add(db, [_mail(uid, content="혹시 수량을 150개로 늘려 주세요 라고 해도 될까요?")])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(_todo_update(kind="question"))]))
+        t = db.get(Task, t.id)
+        assert t.plan == _plan_100()
+        assert t.change_log[0]["status"] == "question"
+
+
+def test_undo_todo_update_restores_title_and_check():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid, plan=_plan_100(done=True))
+        _add(db, [_mail(uid)])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(_todo_update())]))
+        t = db.get(Task, t.id)
+        undo_change(t, 1)
+        assert t.plan == _plan_100(done=True)
+        assert t.change_log[0]["status"] == "undone"
+
+
+def test_undo_todo_update_conflicts_after_user_edit():
+    with SessionLocal() as db:
+        uid = _user(db)
+        t = _task(db, uid, plan=_plan_100())
+        _add(db, [_mail(uid)])
+        _run(db, uid, ScriptedLLM(structured_steps=[_result(_todo_update())]))
+        t = db.get(Task, t.id)
+        t.plan = [dict(p, done=True) if p["id"] == 1 else p for p in t.plan]  # 사용자가 고친 뒤 체크함
+        with pytest.raises(ActionError) as e:
+            undo_change(t, 1)
+        assert e.value.status == 409

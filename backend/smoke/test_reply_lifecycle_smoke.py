@@ -102,6 +102,8 @@ def _run_change(db, llm, case) -> dict:
 
 
 def _fact_hits(fact: dict, entry: dict) -> bool:
+    if "field" in fact and entry["field"] != fact["field"]:
+        return False
     if "date" in fact:
         return entry["field"] == "deadline" and _local_date((entry.get("value") or {}).get("at")) == fact["date"]
     return any(tok in (entry.get("after") or "") for tok in fact["match"])

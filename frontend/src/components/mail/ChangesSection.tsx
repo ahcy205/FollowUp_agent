@@ -8,6 +8,7 @@ const LABELS: Record<ChangeEntry['field'], string> = {
   requests: '요청',
   deadline: '기한',
   todo_add: '할 일',
+  todo_update: '할 일',
 }
 
 function line(c: ChangeEntry) {

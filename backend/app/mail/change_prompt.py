@@ -14,7 +14,7 @@ from app.mail import intake
 from app.mail.intake import ITEM_CHARS, MAX_ITEMS, _InvalidResult, _str
 from app.models import Email, Task
 
-FIELDS = ("title", "summary", "requests", "deadline", "todo_add")
+FIELDS = ("title", "summary", "requests", "deadline", "todo_add", "todo_update")
 KINDS = ("confirmed", "question")
 EVIDENCE_CHARS = 500
 CONTEXT_MAILS = 5
@@ -40,13 +40,18 @@ CHANGES_SYSTEM = """당신은 이미 정리된 업무 카드를, 같은 스레�
 사용자는 메일을 받은 사람입니다. 업무의 지금 상태와 새 메일을 비교해 무엇이 바뀌었는지만 찾으세요.
 
 changes 작성 규칙(바뀐 것이 없으면 []):
-- field: title(제목) · summary(한 줄 요약) · requests(상대 요청 한 항목) · deadline(업무 기한) · todo_add(새로 생긴 사용자 할 일) 중 하나.
-- before: 지금 상태의 값(요청이면 바뀌는 항목 문장 그대로, 새 항목이면 ""). after: 바뀐 뒤 값(한국어 1줄).
+- field: title(제목) · summary(한 줄 요약) · requests(상대 요청 한 항목) · deadline(업무 기한) · todo_add(새로 생긴 사용자 할 일) ·
+  todo_update(기존 할 일의 내용이 바뀜) 중 하나.
+- before: 지금 상태의 값(요청 · 할 일이면 바뀌는 항목 문장 그대로, 새 항목이면 ""). after: 바뀐 뒤 값(한국어 1줄).
 - evidence: 그 변경의 근거가 되는 문장을 **새 메일 본문에서 글자 그대로** 옮기세요. 앞선 메일이나 업무 상태에서 가져오면 안 됩니다.
+- 한 가지 내용(수량 · 품목 · 장소 등)이 바뀌면, 업무 상태에서 그 옛 값이 들어 있는 곳을 **모두** 고치세요: 제목 · 한 줄 요약 ·
+  상대 요청 · 할 일마다 각각 하나씩 변경을 냅니다(같은 evidence를 써도 됩니다). 옛 값이 없는 곳은 내지 마세요.
 - kind: 상대가 확정해서 바꾼 것이면 "confirmed", 묻거나 제안만 한 것이면 "question".
 - deadline: field가 deadline이면 text(메일 속 원문 표현), date(YYYY-MM-DD), time(HH:MM, 없으면 ""), kind(explicit/estimated)를
   새 메일의 수신 시각 기준으로 채우세요. 그 밖의 field는 text · date · time을 ""로, kind를 "none"으로 두세요.
-- 할 일은 새로 생긴 것만 todo_add로 내세요. 기존 할 일을 지우거나 완료로 바꾸지 마세요. 중요도는 다루지 않습니다.
+- 할 일: 기존 할 일의 내용(수량 · 품목 · 대상 등)이 바뀌었으면 새로 만들지 말고 todo_update로 내세요. before는 지금 상태의
+  할 일 제목을 글자 그대로, after는 바뀐 제목입니다. 전혀 새로운 일만 todo_add로 내세요.
+  기존 할 일을 지우거나 완료로 바꾸지 마세요. 중요도는 다루지 않습니다.
 needs_reply: 사용자가 새 메일에 답장해야 하면 true("감사합니다"처럼 답이 필요 없으면 false).
 
 보안:

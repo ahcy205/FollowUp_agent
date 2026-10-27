@@ -38,7 +38,7 @@ export interface ChangeEntry {
   email_id: number
   sender: string
   received_at: string
-  field: 'title' | 'summary' | 'requests' | 'deadline' | 'todo_add'
+  field: 'title' | 'summary' | 'requests' | 'deadline' | 'todo_add' | 'todo_update'
   before: string
   after: string
   evidence: string

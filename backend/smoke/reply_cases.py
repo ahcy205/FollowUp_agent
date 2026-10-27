@@ -10,7 +10,8 @@
 
 정답 형식
 - change expected:
-  facts: [{name, match: [after에 들어 있어야 할 글자] | date: "YYYY-MM-DD"(기한), status: applied|question|suggested}]
+  facts: [{name, match: [after에 들어 있어야 할 글자] | date: "YYYY-MM-DD"(기한), status: applied|question|suggested,
+           field(선택): 그 항목 종류여야 맞음(예: todo_update)}]
   no_applied: True면 반영(applied)된 변경이 하나라도 있으면 잘못이다.
   forbidden: 반영된 값(after)에 들어 있으면 잘못인 글자.
   needs_reply: True/False/None(어느 쪽이든 괜찮음). thanks: True면 brief.thanks_email_id가 있어야 한다.
@@ -66,6 +67,23 @@ CHANGE_CASES = [
                 NEW_AT, "RE: [견적 요청] 온도 센서 TS-200", new=True),
         ],
         "expected": {"facts": [{"name": "수량 150개", "match": ["150"], "status": "applied"}], "needs_reply": None},
+    },
+    {
+        "name": "할 일 내용 변경(수량)",
+        "task": {"title": "[견적 요청] 온도 센서 TS-200 100개", "summary": "한빛부품이 TS-200 온도 센서 100개 견적을 요청",
+                 "requests": ["TS-200 온도 센서 100개 견적서 송부"],
+                 "plan": [("TS-200 100개 견적서 작성", False), ("납기 일정 확인", False)],
+                 "deadline": ("이번 주 금요일", "2026-10-30"), "status": "ACTION_REQUIRED"},
+        "mails": [
+            _in(JIHOON, QUOTE_ORIGINAL, ORIG_AT, "[견적 요청] 온도 센서 TS-200"),
+            _in(JIHOON, "박지훈입니다.\n\n죄송하지만 수량을 150개로 변경 부탁드립니다. 나머지 조건은 같습니다.\n\n감사합니다.",
+                NEW_AT, "RE: [견적 요청] 온도 센서 TS-200", new=True),
+        ],
+        "expected": {"facts": [{"name": "할 일 150개로 고침", "match": ["150"], "field": "todo_update",
+                                "status": "applied"},
+                               {"name": "요약 150개", "match": ["150"], "field": "summary", "status": "applied"},
+                               {"name": "요청 150개", "match": ["150"], "field": "requests", "status": "applied"}],
+                     "needs_reply": None},
     },
     {
         "name": "인용된 옛 내용",

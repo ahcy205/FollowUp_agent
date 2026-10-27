@@ -2,7 +2,8 @@
 
 같은 스레드에 상대 메일이 오면 업무 하나에 LLM 분석 1회(그 주기의 새 메일을 묶어서)를 돌린다.
 - 코드가 거른다: 근거(evidence)가 새 메일 본문에 그대로 없으면 버리고, 기한은 수신 시각 기준으로 다시 계산한다.
-- 반영: 제목 · 요약 · 요청 · 기한은 바로 바꾸고(사용자가 정한 기한은 제안만), 할 일은 추가만 한다. 질문은 반영하지 않는다.
+- 반영: 제목 · 요약 · 요청 · 기한은 바로 바꾸고(사용자가 정한 기한은 제안만), 할 일은 추가하거나 내용이 바뀐 할 일의
+  제목을 고친다(메모는 남기고 체크는 푼다, 지우지는 않는다). 질문은 반영하지 않는다. 일정에 쓰이는 값이 바뀌면 캘린더도 다시 반영한다.
 - 변경마다 전후 값 · 근거 · 보낸 메일을 change_log에 남겨 항목별로 되돌릴 수 있게 한다.
 - LLMError(장애)는 아무것도 바꾸지 않고 메일 번호를 brief[PENDING_KEY]에 남겨 다음 주기에 다시 분석한다.
   형식 오류는 1회 다시 묻고, 또 틀리면 brief.change_failed_at을 남기고 처리할 일로 올린다.
@@ -39,7 +40,7 @@ REPLIED_STEP = "상대가 다시 답장했습니다"
 FAILED_STEP = "새 메일 자동 분석에 실패했습니다 — 메일을 직접 확인해 주세요"
 CONFLICT_MESSAGE = "그 뒤에 직접 고친 내용이 있어 되돌릴 수 없습니다."
 _CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
-_LABELS = {"title": "제목: ", "summary": "요약: ", "requests": "요청: ", "deadline": "기한 "}
+_LABELS = {"title": "제목: ", "summary": "요약: ", "requests": "요청: ", "deadline": "기한 ", "todo_update": "할 일: "}
 
 
 def _cut(text) -> str:
@@ -221,6 +222,7 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str, me
                 continue
             entry.update(before=old, after=new, prev=old)
             brief["summary"] = new
+            mark_calendar_dirty(task)  # 일정 제목은 한 줄 요약으로 만든다
         elif field == "requests":
             reqs = [r for r in brief.get("requests") or [] if isinstance(r, str)]
             if after in reqs:
@@ -234,6 +236,7 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str, me
             entry.update(before=prev or "", prev=prev)
             brief["requests"] = reqs[:MAX_ITEMS]
             task.goal = "\n".join(brief["requests"]) or brief.get("summary") or task.title
+            mark_calendar_dirty(task)  # 일정 설명에 요청 목록이 있다
         elif field == "deadline":
             dl = c["deadline"]
             due = normalize_deadline(dl["text"], dl["date"], dl["time"], dl["kind"], intake._reference_time(src), tz)
@@ -247,13 +250,27 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str, me
             else:
                 entry["prev"] = _deadline_value(task)
                 _set_deadline(task, value)
-        else:  # todo_add: 추가만 한다
+        else:  # todo_update: 그 할 일의 제목을 고친다 / todo_add: 추가한다. 할 일을 지우지는 않는다
             title = after[:ITEM_CHARS]
             if any(isinstance(p, dict) and intake._norm(str(p.get("title", ""))) == intake._norm(title) for p in plan):
                 continue
-            new_id = max((p["id"] for p in plan if isinstance(p, dict) and isinstance(p.get("id"), int)), default=0) + 1
-            plan.append({"id": new_id, "title": title, "done": False, "evidence": "", "due_at": None, "source": "agent"})
-            entry.update(before="", after=title, prev=new_id)
+            idx = None
+            if field == "todo_update" and c["before"]:
+                idx = next((i for i, p in enumerate(plan) if isinstance(p, dict)
+                            and intake._norm(str(p.get("title", ""))) == intake._norm(c["before"])), None)
+            if idx is not None:
+                old = plan[idx]
+                # 메모(evidence)는 남기고, 내용이 바뀌었으니 끝낸 할 일도 다시 하도록 체크를 푼다(사용자 결정)
+                plan[idx] = {**old, "title": title, "done": False}
+                entry.update(before=old.get("title", ""), after=title,
+                             prev={"id": old.get("id"), "title": old.get("title", ""), "done": bool(old.get("done"))})
+            else:  # 고칠 할 일을 못 찾으면 전처럼 새 할 일로 추가한다
+                new_id = max((p["id"] for p in plan if isinstance(p, dict) and isinstance(p.get("id"), int)),
+                             default=0) + 1
+                plan.append({"id": new_id, "title": title, "done": False, "evidence": "", "due_at": None,
+                             "source": "agent"})
+                entry.update(field="todo_add", before="", after=title, prev=new_id)
+            mark_calendar_dirty(task)  # 일정 설명에 할 일 목록이 있다
         entries.append(entry)
         next_id += 1
 
@@ -322,6 +339,7 @@ def undo_change(task: Task, change_id: int) -> None:
         if (brief.get("summary") or "") != after:
             raise ActionError(CONFLICT_MESSAGE, 409)
         brief["summary"] = prev or ""
+        mark_calendar_dirty(task)
     elif field == "requests":
         reqs = list(brief.get("requests") or [])
         if after not in reqs:
@@ -333,12 +351,22 @@ def undo_change(task: Task, change_id: int) -> None:
             reqs[i] = prev
         brief["requests"] = reqs
         task.goal = "\n".join(reqs) or brief.get("summary") or task.title
+        mark_calendar_dirty(task)
     elif field == "deadline":
         value = entry.get("value") or {}
         if (_iso(task.deadline_at) != value.get("at") or bool(task.deadline_all_day) != bool(value.get("all_day"))
                 or (task.deadline_source or "") != (value.get("source") or "")):
             raise ActionError(CONFLICT_MESSAGE, 409)  # 같은 날짜라도 사용자가 다시 정했으면 덮지 않는다
         _set_deadline(task, prev or {})
+    elif field == "todo_update":  # 제목 · 체크를 고치기 전으로. 그 뒤 고쳤거나 체크했으면 그대로 둔다
+        prev = prev if isinstance(prev, dict) else {}
+        plan = [dict(p) if isinstance(p, dict) else p for p in task.plan or []]
+        i = next((i for i, p in enumerate(plan) if isinstance(p, dict) and p.get("id") == prev.get("id")), None)
+        if i is None or plan[i].get("done") or plan[i].get("title") != after:
+            raise ActionError(CONFLICT_MESSAGE, 409)
+        plan[i] = {**plan[i], "title": prev.get("title", ""), "done": bool(prev.get("done"))}
+        task.plan = plan
+        mark_calendar_dirty(task)
     else:  # todo_add: 그 할 일을 지운다. 체크했거나 고쳤으면 그대로 둔다
         plan = [dict(p) if isinstance(p, dict) else p for p in task.plan or []]
         i = next((i for i, p in enumerate(plan) if isinstance(p, dict) and p.get("id") == prev), None)
