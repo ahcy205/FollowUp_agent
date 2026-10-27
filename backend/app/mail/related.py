@@ -99,7 +99,8 @@ def candidates_block(candidates: list[Task]) -> str:
     text = "\n".join(lines)
     return ("\n\n## 관련 업무 후보\n같은 상대(또는 같은 회사)의 진행 중인 업무입니다. 이 메일이 그중 하나의 수정 · 추가 요청이면 "
             "relation=\"change\", 같은 건의 이어지는 연락이면 relation=\"followup\"으로 하고 related_task에 그 번호, "
-            "relation_evidence에 이 메일 본문에서 그대로 옮긴 근거 문장을 적으세요. 관계가 없거나 확실하지 않으면 "
+            "relation_evidence에 이 메일 본문에서 그대로 옮긴 근거 문장을 적으세요. 관계가 없거나 확실하지 않으면, "
+            "또는 메일이 후보와 별개의 건이라고 밝히거나 다른 품목 · 다른 일을 새로 요청하면(후보를 언급하더라도) "
             "related_task=null, relation=\"none\", relation_evidence=\"\"입니다.\n"
             + wrap_untrusted("related task candidates", text, max_chars=len(text)))
 
