@@ -8,17 +8,17 @@
 - 타임라인에는 건수만 남긴다. 본문 · 주소 · 제목은 남기지 않는다. 커밋은 호출한 쪽이 한다.
 """
 import logging
-import re
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
 from app.agent.audit import log_action
-from app.agent.guard import EMAIL_RE, PHONE_RE, detect_injection, wrap_untrusted
+from app.agent.guard import EMAIL_RE, detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
 from app.agent.orchestrator import CLOSED_TASK_STATUSES
 from app.config import get_settings
+from app.mail.draft_checks import PLACEHOLDER_RE, draft_warnings, placeholders  # noqa: F401 - 다시 내보낸다
 from app.mail.errors import ActionError
 from app.mail.inbox import _utc
 from app.mail.intake import _format_received, _one_line
@@ -26,8 +26,6 @@ from app.models import Email, EmailDirection, GoogleAccount, ReplyDraft, Task, U
 
 log = logging.getLogger(__name__)
 
-PLACEHOLDER_RE = re.compile(r"\[\[[^\[\]]{1,80}\]\]")
-_NUMBER_RE = re.compile(r"\d[\d,.:/-]*\d|\d")
 THREAD_CHARS = 12000
 INPUT_CHARS = 2000
 CC_MAX = 10
@@ -44,6 +42,7 @@ INVALID = "초안을 만들지 못했습니다. 다시 시도해 주세요."
 OUTAGE = "AI 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."
 LOCKED = "초안을 보내는 중이거나 발송 여부를 확인하는 중이라 바꿀 수 없습니다. 잠시 후 다시 확인해 주세요."
 NOT_EDITABLE = "보내는 중이거나 이미 보낸 초안은 고치거나 지울 수 없습니다."
+NO_COUNTERPART = "답장할 상대를 찾지 못했습니다."
 
 DRAFT_SCHEMA = {"type": "object", "properties": {
     "subject": {"type": "string"},
@@ -80,10 +79,6 @@ class _InvalidResult(Exception):
     """LLM 응답이 스키마와 맞지 않는다."""
 
 
-def placeholders(text: str) -> list[str]:
-    return PLACEHOLDER_RE.findall(text or "")
-
-
 # ---------------------------------------------------------------- 받는 사람 (코드만 정한다)
 
 def _split(value) -> list[str]:
@@ -100,13 +95,18 @@ def _emails(db: Session, task: Task) -> list[Email]:
 
 
 def reply_recipients(db: Session, task: Task, my_address: str) -> tuple[str, list[str]]:
-    """(받는 사람, 참조 후보). 받는 사람 = 가장 최근 받은 메일의 보낸 사람. 받은 메일이 없으면 ("", [])."""
-    inbound = [e for e in _emails(db, task) if e.direction == EmailDirection.INBOUND]
+    """(받는 사람, 참조 후보). 받는 사람 = 내가 아닌 사람이 보낸 가장 최근 받은 메일의 보낸 사람.
+
+    나에게 보낸 메일(보낸 사람 = 내 주소)은 건너뛴다. 그런 메일이 없으면 ("", []).
+    """
+    me = (my_address or "").strip().lower()
+    inbound = [e for e in _emails(db, task) if e.direction == EmailDirection.INBOUND
+               and (_split(e.sender) or [""])[0] not in ("", me)]
     if not inbound:
         return "", []
     latest, first = inbound[0], inbound[-1]
-    to = (_split(latest.sender) or [""])[0]
-    skip = {(my_address or "").strip().lower(), to, ""}
+    to = _split(latest.sender)[0]
+    skip = {me, to, ""}
     out: list[str] = []
     for addr in [*_split(latest.receiver), *_split(latest.cc), *_split(first.sender)]:
         if addr not in skip and addr not in out:
@@ -131,29 +131,13 @@ def _memos(task: Task) -> list[str]:
 
 
 def _context_texts(db: Session, task: Task, user_input: str) -> tuple[str, str]:
-    """(sources, thread_text). sources = 메모 · 사용자 입력 · 스레드 본문, thread_text = 본문 + 주소 머리글."""
+    """(sources, header_text). sources = 메모 · 사용자 입력 · 스레드 본문(숫자 · 날짜 근거).
+    header_text = 보낸 사람 · 받는 사람 · 참조 머리글(연락처 근거). 본문에만 있는 연락처는 근거로 보지 않는다."""
     emails = _emails(db, task)
     bodies = [e.content or "" for e in emails]
     heads = [" ".join([e.sender or "", e.receiver or "", *[c for c in (e.cc or []) if isinstance(c, str)]])
              for e in emails]
-    return "\n".join([*_memos(task), user_input or "", *bodies]), "\n".join([*heads, *bodies])
-
-
-def draft_warnings(draft_body: str, sources: str, thread_text: str) -> dict:
-    body = draft_body or ""
-    plain_sources = (sources or "").replace(",", "")
-    unsupported: list[str] = []
-    for token in _NUMBER_RE.findall(body):
-        t = token.replace(",", "")
-        if t not in plain_sources and t not in unsupported:
-            unsupported.append(t)
-    thread_l = (thread_text or "").lower()
-    outside: list[str] = []
-    for c in [*EMAIL_RE.findall(body), *PHONE_RE.findall(body)]:
-        if c.lower() not in thread_l and c not in outside:
-            outside.append(c)
-    return {"placeholders": len(placeholders(body)), "unsupported": unsupported[:MAX_ITEMS],
-            "outside_contacts": outside[:MAX_ITEMS], "suspicious": []}
+    return "\n".join([*_memos(task), user_input or "", *bodies]), "\n".join(heads)
 
 
 # ---------------------------------------------------------------- 프롬프트
@@ -225,6 +209,8 @@ def ensure_can_generate(db: Session, task: Task) -> None:
         raise ActionError(LOCKED, 409)
     if not any(e.direction == EmailDirection.INBOUND for e in _emails(db, task)):
         raise ActionError("받은 메일이 없어 답장할 상대를 정할 수 없습니다.", 409)
+    if not reply_recipients(db, task, _my_address(db, task.user_id))[0]:
+        raise ActionError(NO_COUNTERPART, 409)
 
 
 def _ask(llm: LLMClient, prompt: str) -> dict:
@@ -250,9 +236,9 @@ def generate_draft(db: Session, task: Task, user: User, llm: LLMClient, *, purpo
 
     to, candidates = reply_recipients(db, task, _my_address(db, user.id))
     if not to:
-        raise ActionError("받은 메일이 없어 답장할 상대를 정할 수 없습니다.", 409)
-    sources, thread_text = _context_texts(db, task, user_input)
-    warnings = draft_warnings(data["body"], sources, thread_text)
+        raise ActionError(NO_COUNTERPART, 409)
+    sources, header_text = _context_texts(db, task, user_input)
+    warnings = draft_warnings(data["body"], sources, header_text)
     flags = [label for e in emails if e.direction == EmailDirection.INBOUND for label in detect_injection(e.content or "")]
     warnings["suspicious"] = list(dict.fromkeys([*data["suspicious"], *flags]))[:MAX_ITEMS]
     values = dict(purpose=purpose, to_addr=to, cc_candidates=candidates, cc_selected=[], subject=_subject(emails),
@@ -308,8 +294,8 @@ def update_draft(draft: ReplyDraft, *, subject: str, body: str, cc_selected: lis
     if not chosen <= set(allowed):
         raise ActionError("참조는 후보 목록에 있는 주소만 고를 수 있습니다.", 400)
     task = db.get(Task, draft.task_id)
-    sources, thread_text = _context_texts(db, task, draft.user_input)
-    warnings = draft_warnings(body, sources, thread_text)
+    sources, header_text = _context_texts(db, task, draft.user_input)
+    warnings = draft_warnings(body, sources, header_text)
     warnings["suspicious"] = list((draft.warnings or {}).get("suspicious") or [])
     values = dict(subject=subject, body=body, cc_selected=[c for c in allowed if c in chosen], warnings=warnings)
     _guarded(db, draft, ReplyDraft.status == "draft", values, NOT_EDITABLE)
