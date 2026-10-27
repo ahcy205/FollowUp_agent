@@ -433,9 +433,9 @@ def _qty_change(evidence="견적 수량을 150개로 변경 부탁드립니다")
             "needs_reply": True, "suspicious": []}
 
 
-def _run_ma(db, uid, llm):
+def _run_ma(db, uid, llm, now=None):
     from app.mail.merge_analysis import run_merge_analyses
-    n = run_merge_analyses(db, uid, llm, TZ)
+    n = run_merge_analyses(db, uid, llm, TZ, now=now or NOW + timedelta(minutes=1))
     db.commit()
     db.expire_all()
     return n
@@ -577,3 +577,255 @@ def test_merge_api_wakes_worker_and_shows_analyzing(client, monkeypatch):
     r = client.post(f"/api/tasks/{b_id}/merge", json={"into_task_id": a_id})
     assert r.status_code == 200, r.text
     assert r.json()["mail"]["merge_analyzing"] is True and woke == [1]
+
+
+# ---------------------------------------------------------------- 6단계 수정 1회차: 되돌리기 상태 · 순서 · 시간 초과
+
+def _waiting(a, *, reply_sent_at, asked_at=NOW - timedelta(hours=1)):
+    a.status, a.waiting_for, a.current_step, a.next_action = TaskStatus.WAITING, "견적 회신 대기", "답장 보냄", ""
+    a.reply_sent_at, a.no_reply_asked_at, a.changed_unseen = reply_sent_at, asked_at, False
+    a.brief = {**a.brief, "needs_reply": False}
+
+
+def test_undo_restores_waiting_target_state(monkeypatch):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, bm, _ = _qty_pair(db, u.id)
+        _waiting(a, reply_sent_at=NOW - timedelta(days=2))  # B 메일(NOW-1h)은 답장 뒤에 왔다
+        db.commit()
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        # 끝나지 않은 할 일이 들어왔다 → 처리할 일
+        assert a.status == TaskStatus.ACTION_REQUIRED and a.current_step == merge.MERGED_TODO_STEP
+        assert a.waiting_for == ""
+        _run_ma(db, u.id, ScriptedLLM(structured_steps=[_qty_change()]))
+        a = db.get(Task, a.id)
+        assert a.brief["needs_reply"] is True and a.no_reply_asked_at is None and a.changed_unseen is True
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=5))
+        db.commit()
+        db.expire_all()
+        a = db.get(Task, a.id)
+        assert a.status == TaskStatus.WAITING and a.waiting_for == "견적 회신 대기"
+        assert a.current_step == "답장 보냄" and a.next_action == ""
+        assert a.brief["needs_reply"] is False and a.changed_unseen is False
+        assert merge._utc(a.no_reply_asked_at) == NOW - timedelta(hours=1)
+        assert "thanks_email_id" not in a.brief and a.brief["requests"] == ["수량 100개 견적"]
+
+
+def test_waiting_target_not_raised_by_done_todos(monkeypatch):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _, _ = _qty_pair(db, u.id)
+        _waiting(a, reply_sent_at=NOW - timedelta(days=2))
+        b.plan = [_todo(1, "이미 끝낸 일", done=True)]
+        db.commit()
+        merge.merge(db, u, b, a, NOW)
+        assert a.status == TaskStatus.WAITING
+
+
+def test_merge_mode_never_sets_thanks(monkeypatch):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _, _ = _qty_pair(db, u.id)
+        _waiting(a, reply_sent_at=NOW - timedelta(days=2))
+        b.plan = []
+        db.commit()
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        _run_ma(db, u.id, ScriptedLLM(structured_steps=[{"changes": [], "needs_reply": False, "suspicious": []}]))
+        a = db.get(Task, a.id)
+        assert a.status == TaskStatus.WAITING and "thanks_email_id" not in a.brief
+        assert a.merge_analysis["state"] == "done"
+
+
+@pytest.mark.parametrize("reply_days_ago, cleared", [(2, True), (0, False)])
+def test_merge_mode_clears_wait_only_for_mail_after_reply(monkeypatch, reply_days_ago, cleared):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _, _ = _qty_pair(db, u.id)
+        _waiting(a, reply_sent_at=NOW - timedelta(days=reply_days_ago))  # 0이면 답장이 B 메일(NOW-1h)보다 나중
+        b.plan = []
+        db.commit()
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        _run_ma(db, u.id, ScriptedLLM(structured_steps=[{"changes": [], "needs_reply": True, "suspicious": []}]))
+        a = db.get(Task, a.id)
+        assert (a.no_reply_asked_at is None) is cleared
+        assert a.brief["needs_reply"] is cleared  # 이미 답한 옛 메일은 '답장 필요'로 돌리지 않는다
+        assert (a.status == TaskStatus.ACTION_REQUIRED) is cleared
+
+
+def _second_source(db, uid):
+    b2 = _task(db, uid, created_at=NOW - timedelta(hours=1), plan=[],
+               brief={"analysis": "done", "summary": "납기 문의", "needs_reply": True, "requests": ["납기 확인"]})
+    m = _mail(uid, thread=b2.gmail_thread_id, task_id=b2.id)
+    m.content = "납기 일정도 함께 알려 주시면 감사하겠습니다."
+    db.add(m)
+    db.commit()
+    return b2
+
+
+def test_second_merge_while_pending_rejected(monkeypatch):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _, _ = _qty_pair(db, u.id)
+        b2 = _second_source(db, u.id)
+        c = _task(db, u.id, created_at=NOW - timedelta(days=5))
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        for src, dst in ((b2, a), (a, c)):  # 대상이 분석 중 · 원본이 분석 중
+            with pytest.raises(ActionError) as e:
+                merge.merge(db, u, src, dst, NOW)
+            assert e.value.status == 409 and str(e.value) == merge.ANALYZING
+        assert b2.merged_into_id is None and a.merged_into_id is None
+
+
+def test_undo_older_merge_keeps_other_pending(monkeypatch):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _, _ = _qty_pair(db, u.id)
+        b2 = _second_source(db, u.id)
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        _run_ma(db, u.id, ScriptedLLM(structured_steps=[_qty_change()]))
+        a, b2 = db.get(Task, a.id), db.get(Task, b2.id)
+        merge.merge(db, u, b2, a, NOW + timedelta(minutes=2))
+        db.commit()
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=3))
+        db.commit()
+        assert a.merge_analysis["state"] == "pending" and a.merge_analysis["source_id"] == b2.id
+        assert a.brief["requests"] == ["수량 100개 견적"]
+
+
+def test_newer_thread_mail_not_overwritten_by_merge_analysis(monkeypatch):
+    from datetime import datetime
+    from app.agent.llm import set_llm_override
+    from app.mail import sync
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _, _ = _qty_pair(db, u.id)
+        merge.merge(db, u, b, a, datetime.now(UTC))
+        db.commit()
+        newer = _mail(u.id, thread=b.gmail_thread_id)  # 합친 뒤 B 스레드로 온 더 새 메일 → A에 붙는다
+        newer.content, newer.received_at = "수량을 200개로 다시 변경 부탁드립니다.", NOW
+        db.add(newer)
+        db.commit()
+        # LLM 장애 중이면 A의 재답장 대기열은 합친 내용 분석이 끝날 때까지 미룬다
+        intake.intake_work_mails(db, u.id, ScriptedLLM(structured_steps=[AssertionError("no call")]),
+                                 max_mails=5, tz=TZ)
+        db.expire_all()
+        assert db.get(Email, newer.id).task_id == a.id
+        assert db.get(Task, a.id).brief.get(intake.CHANGES_PENDING_KEY) == [newer.id]
+
+        later = {"changes": [{"field": "requests", "before": "수량 150개 견적", "after": "수량 200개 견적",
+                              "evidence": "수량을 200개로 다시 변경 부탁드립니다", "kind": "confirmed",
+                              "deadline": {"text": "", "date": "", "time": "", "kind": "none"}}],
+                 "needs_reply": True, "suspicious": []}
+        llm = ScriptedLLM(structured_steps=[_qty_change(), later])
+        set_llm_override(llm)
+        sync.process_inbox(db, u.id)
+        db.expire_all()
+        assert len(llm.structured_prompts) == 2
+        new_part = llm.structured_prompts[0].split("## 새로 온 메일")[1]  # 먼저 옮겨 온 옛 메일만 '새 메일'로 분석한다
+        assert B_BODY in new_part and "200개" not in new_part
+        a = db.get(Task, a.id)
+        assert a.brief["requests"] == ["수량 200개 견적"] and a.merge_analysis["state"] == "done"
+
+
+def test_stale_pending_merge_falls_back_without_llm(monkeypatch):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _, _ = _qty_pair(db, u.id)
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        n = _run_ma(db, u.id, ScriptedLLM(structured_steps=[AssertionError("no call")]),
+                    now=NOW + timedelta(minutes=11))
+        a = db.get(Task, a.id)
+        assert n == 1 and a.merge_analysis["state"] == "fallback"
+        assert a.brief["requests"] == ["수량 100개 견적", "수량 150개 견적"]
+
+
+def test_cycle_finishes_stale_merge_when_llm_unavailable(client, google_fake, monkeypatch):
+    from datetime import datetime
+    from app.agent.llm import LLMError
+    from app.mail import sync
+    from tests.test_mail_pipeline import _add_account
+    _on(monkeypatch)
+    me = register(client)
+    google_fake.valid_refresh_tokens.add("1//fake-refresh")
+    _add_account(me["id"])
+
+    def no_llm():
+        raise LLMError("no key")
+    monkeypatch.setattr(sync, "get_llm", no_llm)
+    with SessionLocal() as db:
+        u = db.get(merge.User, me["id"])
+        a, b, _, _ = _qty_pair(db, me["id"])
+        merge.merge(db, u, b, a, datetime.now(UTC) - timedelta(minutes=11))
+        db.commit()
+        a_id = a.id
+    assert sync.run_sync_cycle() == 1
+    with SessionLocal() as db:
+        a = db.get(Task, a_id)
+        assert a.merge_analysis["state"] == "fallback"
+        assert a.brief["requests"] == ["수량 100개 견적", "수량 150개 견적"]
+
+
+def test_merge_mode_writes_nothing_before_llm_and_nothing_on_drop(monkeypatch):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _, _ = _qty_pair(db, u.id)
+        _waiting(a, reply_sent_at=NOW - timedelta(days=2))
+        b.plan = []
+        db.commit()
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        seen = []
+
+        def meanwhile(prompt, schema):
+            seen.append((set(db.dirty), set(db.new)))
+            merge.undo_merge(db, u, db.get(Task, a.id), b.id, NOW + timedelta(minutes=1))
+            db.commit()
+            return _qty_change()
+
+        _run_ma(db, u.id, ScriptedLLM(structured_steps=[meanwhile]))
+        assert seen == [(set(), set())]  # LLM을 기다리는 동안 쓰지 않은 변경이 없다
+        a = db.get(Task, a.id)
+        assert merge._utc(a.no_reply_asked_at) == NOW - timedelta(hours=1)  # 버린 분석은 '답 없음'도 건드리지 않는다
+        assert a.status == TaskStatus.WAITING and a.change_log == []
+
+
+def test_merging_analyzing_flag_false_on_merged_task(client):
+    me = register(client)
+    with SessionLocal() as db:
+        a = _task(db, me["id"])
+        b = _task(db, me["id"], status=TaskStatus.COMPLETED, merged_into_id=a.id,
+                  merge_analysis={"state": "pending", "source_id": 999, "email_ids": [], "at": NOW.isoformat()})
+        b_id = b.id
+    assert client.get(f"/api/tasks/{b_id}").json()["mail"]["merge_analyzing"] is False
+
+
+def test_undo_on_closed_target_keeps_unrevertable_changes(monkeypatch):
+    _on(monkeypatch)
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, bm, _ = _qty_pair(db, u.id)
+        merge.merge(db, u, b, a, NOW)
+        db.commit()
+        _run_ma(db, u.id, ScriptedLLM(structured_steps=[_qty_change()]))
+        a = db.get(Task, a.id)
+        a.status = TaskStatus.COMPLETED
+        db.commit()
+        merge.undo_merge(db, u, a, b.id, NOW + timedelta(minutes=5))
+        db.commit()
+        assert [e["email_id"] for e in a.change_log] == [bm]  # 되돌리지 못한 변경 기록은 남긴다
+        assert a.brief["requests"] == ["수량 150개 견적"]

@@ -22,7 +22,7 @@ from app.google.oauth import access_token_for, forget_access_token
 from app.mail.calendar_sync import sync_calendars
 from app.mail import lifecycle
 from app.mail.intake import intake_work_mails
-from app.mail.merge_analysis import run_merge_analyses
+from app.mail.merge_analysis import finish_stale_merges, run_merge_analyses
 from app.mail.parse import parse_raw
 from app.mail.triage import triage_pending
 from app.models import Email, EmailDirection, GoogleAccount
@@ -325,10 +325,11 @@ def process_inbox(db: Session, user_id: int) -> None:
     try:
         db.rollback()  # start from a clean transaction
         triage_pending(db, user_id, llm, max_batches=settings.mail_triage_batches_per_cycle)
+        # 합친 내용 분석(설계 7.3)은 재답장 분석보다 먼저: 옮겨 온 옛 메일이 그 뒤에 온 새 메일의 변경을 덮지 않게
+        run_merge_analyses(db, user_id, llm, settings.user_timezone)
         # intake also retries analyses that failed earlier, so it runs even if triage did nothing
         intake_work_mails(db, user_id, llm, max_mails=settings.mail_intake_per_cycle,
                           tz=settings.user_timezone)
-        run_merge_analyses(db, user_id, llm, settings.user_timezone)  # 합친 내용 분석(설계 7.3)
     except Exception as e:  # noqa: BLE001 - processing must never undo or fail the sync
         log.warning("mail processing for user %s failed: %s", user_id, type(e).__name__)
         try:
@@ -342,6 +343,19 @@ def _finish_merges_without_llm(db: Session, user_id: int, tz: str) -> None:
     try:
         db.rollback()
         run_merge_analyses(db, user_id, None, tz)
+    except Exception as e:  # noqa: BLE001 - 동기화를 실패시키지 않는다
+        log.warning("merge finishing for user %s failed: %s", user_id, type(e).__name__)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+
+
+def _finish_stale_merges_for(db: Session, user_id: int) -> None:
+    """합친 지 10분이 지난 '분석 중'을 LLM 없이 5단계 규칙으로 마무리한다. LLM 준비 여부와 관계없이 매 주기 돈다."""
+    try:
+        db.rollback()
+        finish_stale_merges(db, user_id, datetime.now(timezone.utc))
     except Exception as e:  # noqa: BLE001 - 동기화를 실패시키지 않는다
         log.warning("merge finishing for user %s failed: %s", user_id, type(e).__name__)
         try:
@@ -418,6 +432,7 @@ def run_sync_cycle(now: datetime | None = None, user_id: int | None = None, proc
                     if process:
                         process_inbox(db, account.user_id)
                         _check_no_reply_for(db, account.user_id)
+                        _finish_stale_merges_for(db, account.user_id)
                         _sync_calendar_for(db, account_id, client)
                 finally:
                     try:

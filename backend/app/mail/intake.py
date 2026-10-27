@@ -505,7 +505,9 @@ def _thread_mail(db: Session, task: Task, email: Email, analyzed_now: set[int], 
 def _change_tasks(db: Session, user_id: int) -> list[Task]:
     tasks = db.scalars(select(Task).where(Task.user_id == user_id, Task.origin == "mail",
                                           Task.merged_into_id.is_(None)).order_by(Task.id)).all()
-    return [t for t in tasks if isinstance(t.brief, dict) and t.brief.get(CHANGES_PENDING_KEY)]
+    # 합친 내용 분석이 남은 업무는 미룬다: 옮겨 온 옛 메일을 먼저 분석해야 새 메일의 변경이 덮이지 않는다(설계 7.3)
+    return [t for t in tasks if isinstance(t.brief, dict) and t.brief.get(CHANGES_PENDING_KEY)
+            and (t.merge_analysis or {}).get("state") != "pending"]
 
 
 def _run_changes(db: Session, user_id: int, llm: LLMClient, tz: str, budget: int, result: IntakeResult,

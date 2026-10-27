@@ -300,7 +300,9 @@ def merge_candidates(db: Session, task: Task, now: datetime) -> list[Task]:
     if judged.get("state") == "suggested":
         from app.mail.related import qualifies  # related → inbox 순환 import를 피한다
         target_id = judged.get("task_id")
-        target = db.scalar(select(Task).where(Task.id == target_id, Task.user_id == task.user_id))             if isinstance(target_id, int) else None
+        target = None
+        if isinstance(target_id, int):
+            target = db.scalar(select(Task).where(Task.id == target_id, Task.user_id == task.user_id))
         return [target] if target is not None and qualifies(task, target, now) else []
     if judged.get("state") == "none":
         return []

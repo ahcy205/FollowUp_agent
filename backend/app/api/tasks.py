@@ -178,7 +178,7 @@ def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
         no_reply=mail_inbox.no_reply_active(task), reply_sent_at=task.reply_sent_at,
         draft=_draft_out(db, task, now),
         remaining_todos_prompt=reply_send.remaining_todos_prompt(task),
-        merge_analyzing=(task.merge_analysis or {}).get("state") == "pending",
+        merge_analyzing=task.merged_into_id is None and (task.merge_analysis or {}).get("state") == "pending",
     )
 
 

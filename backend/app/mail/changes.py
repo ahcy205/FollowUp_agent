@@ -112,7 +112,8 @@ def run_analysis(db: Session, task: Task, emails: list[Email], llm: LLMClient, t
     merge_mode = still_wanted is not None
     emails = sorted(emails, key=lambda e: (intake._reference_time(e), e.id))
     ids = [e.id for e in emails]
-    clear_wait_on_inbound(task)  # 상대 메일이 왔으므로 '답 없음' 물음을 거둔다
+    if not merge_mode:  # 합치기 모드는 LLM 호출 전에 아무것도 쓰지 않는다(쓰기 잠금을 잡은 채 기다리지 않게)
+        clear_wait_on_inbound(task)  # 상대 메일이 왔으므로 '답 없음' 물음을 거둔다
     prompt = _build_prompt(db, task, emails, tz)
     data = None
     for _ in range(2):  # 형식 오류는 한 번만 다시 묻는다
@@ -143,7 +144,7 @@ def run_analysis(db: Session, task: Task, emails: list[Email], llm: LLMClient, t
         return INVALID
     try:
         with db.begin_nested():  # 반영 중 오류면 이 저장점만 되돌린다(호출한 쪽의 커밋 전 작업은 남는다)
-            _apply(db, task, emails, data, tz)
+            _apply(db, task, emails, data, tz, merge_mode=merge_mode)
     except Exception as e:  # noqa: BLE001 - 반쯤 반영한 것을 버리고 실패로 남겨야 같은 메일을 끝없이 다시 분석하지 않는다
         log.warning("change analysis for task %s failed while applying: %s", task_id, type(e).__name__)
         task = db.get(Task, task_id)
@@ -170,7 +171,17 @@ def _source_mail(evidence: str, emails: list[Email]) -> Email | None:
     return next((e for e in reversed(emails) if evidence_in(evidence, e.content or "")), None)
 
 
-def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str) -> None:
+def _newer_than_reply(task: Task, email: Email) -> bool:
+    sent = task.reply_sent_at
+    if sent is None:
+        return True
+    sent = sent.replace(tzinfo=UTC) if sent.tzinfo is None else sent
+    return intake._reference_time(email) > sent
+
+
+def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str, merge_mode: bool = False) -> None:
+    """merge_mode(합친 메일 분석): '답장 필요 없음' 표시(thanks_email_id)는 남기지 않고, 옮겨 온 메일이 내가 답장을
+    보낸 뒤에 온 것일 때만 답장 필요 여부 · '답 없음' 물음을 그 메일 기준으로 고친다(이미 답한 옛 메일이 상태를 되돌리지 않게)."""
     sus = data["suspicious"]
     brief = dict(task.brief or {})
     plan = [dict(p) if isinstance(p, dict) else p for p in task.plan or []]
@@ -245,14 +256,19 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str) ->
         entries.append(entry)
         next_id += 1
 
-    brief["needs_reply"] = data["needs_reply"]
     newest = emails[-1]
-    if data["needs_reply"] or entries:
+    current = not merge_mode or _newer_than_reply(task, newest)
+    needs_reply = data["needs_reply"] if current else False
+    if current:
+        brief["needs_reply"] = data["needs_reply"]
+        if merge_mode:
+            clear_wait_on_inbound(task)
+    if needs_reply or entries:
         brief.pop("thanks_email_id", None)
         _raise_to_todo(task, CHANGED_STEP if entries else REPLIED_STEP)
         undone = [p for p in plan if isinstance(p, dict) and not p.get("done")]
         task.next_action = undone[0]["title"] if undone else ""
-    elif str(task.status) == TaskStatus.WAITING.value:
+    elif str(task.status) == TaskStatus.WAITING.value and not merge_mode:
         brief["thanks_email_id"] = newest.id  # 화면: "상대가 답장했습니다(답장 필요 없음) [완료로 닫기]"
     task.brief = brief
     task.plan = plan
