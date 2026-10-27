@@ -654,9 +654,9 @@ def test_merge_mode_clears_wait_only_for_mail_after_reply(monkeypatch, reply_day
         db.commit()
         _run_ma(db, u.id, ScriptedLLM(structured_steps=[{"changes": [], "needs_reply": True, "suspicious": []}]))
         a = db.get(Task, a.id)
-        assert (a.no_reply_asked_at is None) is cleared
-        assert a.brief["needs_reply"] is cleared  # 이미 답한 옛 메일은 '답장 필요'로 돌리지 않는다
-        assert (a.status == TaskStatus.ACTION_REQUIRED) is cleared
+        assert (a.no_reply_asked_at is None) is cleared  # '답 없음' 물음은 답장 뒤에 온 메일일 때만 거둔다
+        # 답장 필요는 옛 메일이라도 따른다: 다른 스레드의 메일이라 A의 답장이 그 메일에 답한 것이 아니다(Ruling 13)
+        assert a.brief["needs_reply"] is True and a.status == TaskStatus.ACTION_REQUIRED
 
 
 def _second_source(db, uid):

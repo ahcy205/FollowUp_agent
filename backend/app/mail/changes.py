@@ -180,8 +180,9 @@ def _newer_than_reply(task: Task, email: Email) -> bool:
 
 
 def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str, merge_mode: bool = False) -> None:
-    """merge_mode(합친 메일 분석): '답장 필요 없음' 표시(thanks_email_id)는 남기지 않고, 옮겨 온 메일이 내가 답장을
-    보낸 뒤에 온 것일 때만 답장 필요 여부 · '답 없음' 물음을 그 메일 기준으로 고친다(이미 답한 옛 메일이 상태를 되돌리지 않게)."""
+    """merge_mode(합친 메일 분석): '답장 필요 없음' 표시(thanks_email_id)는 남기지 않는다. '답 없음' 물음은 옮겨 온 메일이
+    내가 답장을 보낸 뒤에 온 것일 때만 거둔다. 답장 필요(needs_reply)는 옛 메일이라도 따른다: 다른 스레드에서 온 메일이라
+    A에 보낸 답장이 그 메일에 답한 것이 아니기 때문이다."""
     sus = data["suspicious"]
     brief = dict(task.brief or {})
     plan = [dict(p) if isinstance(p, dict) else p for p in task.plan or []]
@@ -257,13 +258,10 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str, me
         next_id += 1
 
     newest = emails[-1]
-    current = not merge_mode or _newer_than_reply(task, newest)
-    needs_reply = data["needs_reply"] if current else False
-    if current:
-        brief["needs_reply"] = data["needs_reply"]
-        if merge_mode:
-            clear_wait_on_inbound(task)
-    if needs_reply or entries:
+    brief["needs_reply"] = data["needs_reply"]
+    if merge_mode and _newer_than_reply(task, newest):
+        clear_wait_on_inbound(task)
+    if data["needs_reply"] or entries:
         brief.pop("thanks_email_id", None)
         _raise_to_todo(task, CHANGED_STEP if entries else REPLIED_STEP)
         undone = [p for p in plan if isinstance(p, dict) and not p.get("done")]
