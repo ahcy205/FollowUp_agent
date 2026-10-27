@@ -39,6 +39,7 @@ from app.schemas import (
     GoalIn,
     GoalUpdateIn,
     MailExtras,
+    NoReplyIn,
     MergeIn,
     MergeUndoIn,
     PriorityIn,
@@ -50,6 +51,7 @@ from app.schemas import (
     TodoOpIn,
 )
 from app.mail import inbox as mail_inbox
+from app.mail import lifecycle
 from app.mail import merge as mail_merge
 from app.mail import sync as mail_sync
 from app.mail import task_actions
@@ -162,6 +164,7 @@ def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
         merged_sources=_merged_sources(db, task),
         merged_into_id=task.merged_into_id, deadline_badge=mail_inbox.deadline_badge(task, now, tz),
         priority_source=task.priority_source,
+        no_reply=mail_inbox.no_reply_active(task), reply_sent_at=task.reply_sent_at,
     )
 
 
@@ -332,6 +335,15 @@ def close_task(task_id: int, body: CloseTaskIn, user: User = Depends(get_current
     """답장 필요 없음으로 닫기."""
     task = _mail_task(db, task_id, user)
     _act(task_actions.close_without_reply, db, user, task, body.reason)
+    return _done(db, task, user)
+
+
+@router.post("/tasks/{task_id}/no-reply", response_model=TaskDetail)
+def answer_no_reply(task_id: int, body: NoReplyIn, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    """상대 답장 없음 물음에 답한다: 다시 연락 · 더 기다리기 · 완료로 닫기."""
+    task = _mail_task(db, task_id, user)
+    _act(lifecycle.answer_no_reply, db, user, task, body.choice, datetime.now(timezone.utc))
     return _done(db, task, user)
 
 

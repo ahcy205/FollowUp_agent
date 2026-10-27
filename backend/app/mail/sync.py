@@ -20,6 +20,7 @@ from app.google.client import (
 )
 from app.google.oauth import access_token_for, forget_access_token
 from app.mail.calendar_sync import sync_calendars
+from app.mail import lifecycle
 from app.mail.intake import intake_work_mails
 from app.mail.parse import parse_raw
 from app.mail.triage import triage_pending
@@ -324,6 +325,19 @@ def _sync_calendar_for(db: Session, account_id: int, client: GoogleClient) -> No
             pass
 
 
+def _check_no_reply_for(db: Session, user_id: int) -> None:
+    """Move sent tasks nobody answered for 3 business days back to the to-do tab. No LLM; never raises."""
+    try:
+        db.rollback()
+        lifecycle.check_no_reply(db, user_id, datetime.now(timezone.utc), get_settings().user_timezone)
+    except Exception as e:  # noqa: BLE001 - this check must never fail the sync cycle
+        log.warning("no-reply check for user %s failed: %s", user_id, type(e).__name__)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+
+
 def run_sync_cycle(now: datetime | None = None, user_id: int | None = None, process: bool = True) -> int:
     """Sync every connected account (or one user's). Returns how many were processed.
 
@@ -360,6 +374,7 @@ def run_sync_cycle(now: datetime | None = None, user_id: int | None = None, proc
                     processed += 1
                     if process:
                         process_inbox(db, account.user_id)
+                        _check_no_reply_for(db, account.user_id)
                         _sync_calendar_for(db, account_id, client)
                 finally:
                     try:

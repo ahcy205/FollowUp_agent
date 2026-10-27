@@ -166,6 +166,8 @@ export interface MailExtras {
   merged_into_id: number | null
   deadline_badge: DeadlineBadge
   priority_source: string
+  no_reply?: boolean
+  reply_sent_at?: string | null
 }
 
 // 메일 업무 동작 하나를 보내고 응답(TaskDetail)으로 화면을 바꾼다. 실패하면 ApiError를 던진다.
@@ -183,6 +185,7 @@ export interface GoogleRecentMail {
   subject: string
   sender: string
   received_at: string | null
+  no_reply?: boolean
   triage: 'pending' | 'work' | 'not_work' | 'filtered' | null
   triage_reason: string
   task_id: number | null
@@ -222,6 +225,7 @@ export interface InboxCard {
   has_merge_candidates: boolean
   analysis: string
   received_at: string | null
+  no_reply?: boolean
 }
 
 export interface SnoozedCard extends InboxCard {
@@ -235,6 +239,7 @@ export interface NotWorkMail {
   triage: string
   triage_reason: string
   received_at: string | null
+  no_reply?: boolean
 }
 
 export interface InboxCounts {

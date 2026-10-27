@@ -192,6 +192,11 @@ def nudge_days(task: Task, latest_inbound_at: datetime | None, now: datetime, tz
     return elapsed.days
 
 
+def no_reply_active(task: Task) -> bool:
+    """상대 답장이 없어 다시 연락할지 묻는 중인 처리할 일 업무."""
+    return task.no_reply_asked_at is not None and tab_of(task) == TAB_TODO
+
+
 def _alert(kind: str, key_suffix: str, task: Task, text: str) -> dict:
     return {"key": f"{kind}:{task.id}:{key_suffix}", "kind": kind, "task_id": task.id, "text": text}
 
@@ -223,6 +228,9 @@ def alerts_for(task: Task, latest_inbound_id: int | None, latest_inbound_at: dat
     days = nudge_days(task, latest_inbound_at, now, tz)
     if days is not None and latest_inbound_id is not None:
         out.append(_alert("nudge", str(latest_inbound_id), task, f"[답장 {days}일째 없음] {summary}"))
+    if no_reply_active(task):
+        since = _utc(task.wait_from or task.no_reply_asked_at)
+        out.append(_alert("no-reply", since.isoformat(timespec="seconds"), task, f"[답 없음] {summary}"))
     return out
 
 

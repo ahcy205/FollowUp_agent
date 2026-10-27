@@ -45,7 +45,7 @@ def test_inbox_groups_and_order(client, monkeypatch):
     card = todo["now"][0]
     assert set(card) == {"task_id", "title", "summary", "sender_name", "sender_org", "priority", "deadline_badge",
                          "todo_done", "todo_total", "nudge_days", "returned", "has_merge_candidates", "analysis",
-                         "received_at"}
+                         "received_at", "no_reply"}
     assert card["deadline_badge"]["text"] == "D-1 내일" and card["todo_total"] == 2 and card["todo_done"] == 0
     assert body["triage_enabled"] is False
 

@@ -148,6 +148,8 @@ class MailExtras(BaseModel):
     merged_into_id: int | None
     deadline_badge: dict
     priority_source: str
+    no_reply: bool = False
+    reply_sent_at: datetime | None = None
 
 
 class TaskDetail(BaseModel):
@@ -228,6 +230,10 @@ class CloseTaskIn(_Strict):
     reason: str = Field(default="", max_length=500)
 
 
+class NoReplyIn(_Strict):
+    choice: Literal["followup", "wait", "close"]
+
+
 class MergeIn(_Strict):
     into_task_id: int
 
@@ -302,6 +308,7 @@ class InboxCard(BaseModel):
     has_merge_candidates: bool
     analysis: str
     received_at: datetime | None
+    no_reply: bool = False  # 보낸 지 영업일 3일째 답이 없어 다시 연락할지 묻는 중
 
 
 class SnoozedCard(InboxCard):
