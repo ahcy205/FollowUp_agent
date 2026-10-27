@@ -16,13 +16,15 @@ from app.agent.audit import log_action
 from app.mail import task_actions
 from app.mail.errors import ActionError
 from app.mail.inbox import _utc
-from app.models import Email, EmailDirection, Task, TaskStatus, User
+from app.mail.merge import resolve_merged
+from app.models import Email, EmailDirection, ReplyDraft, Task, TaskStatus, User
 
 NO_REPLY_BUSINESS_DAYS = 3
 NO_REPLY_STEP = "상대 답장 없음 — 다시 연락할까요?"
 NO_REPLY_CLOSE_REASON = "상대 답장 없음으로 닫음"
 NOT_ASKED_MESSAGE = "다시 연락할지 묻는 업무가 아닙니다."
 CHOICES = ("followup", "wait", "close")
+SENT_MATCH_WINDOW = timedelta(minutes=10)
 _CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 
 
@@ -139,3 +141,68 @@ def answer_no_reply(db: Session, user: User, task: Task, choice: str, now: datet
 def clear_wait_on_inbound(task: Task) -> None:
     """상대 메일이 오면 '답 없음' 물음을 거둔다."""
     task.no_reply_asked_at = None
+
+
+def task_for_thread(db: Session, user_id: int, thread_id: str | None) -> Task | None:
+    """이 스레드에 메일 업무가 있으면 그 업무(합쳐졌으면 최종 대상)를 돌려준다. 합쳐진 업무는 스레드를 여러 개 가진다."""
+    if not thread_id:
+        return None
+    task = db.scalar(select(Task).where(Task.user_id == user_id, Task.origin == "mail",
+                                        Task.gmail_thread_id == thread_id).order_by(Task.id).limit(1))
+    if task is None:
+        task = db.scalar(select(Task).join(Email, Email.task_id == Task.id).where(
+            Task.user_id == user_id, Task.origin == "mail", Email.user_id == user_id,
+            Email.gmail_thread_id == thread_id).order_by(Task.id).limit(1))
+    return resolve_merged(db, task) if task is not None else None
+
+
+def _reply_subject(subject: str | None) -> str:
+    s = (subject or "").strip()
+    while s[:3].lower() == "re:":
+        s = s[3:].strip()
+    return s
+
+
+def _addresses(field: str | None) -> set[str]:
+    out = set()
+    for part in str(field or "").split(","):
+        part = part.strip().lower()
+        if "<" in part and ">" in part:
+            part = part[part.rindex("<") + 1:part.index(">", part.rindex("<"))].strip()
+        if part:
+            out.add(part)
+    return out
+
+
+def _resolves_draft(draft: ReplyDraft, email: Email) -> bool:
+    if draft.gmail_message_id and draft.gmail_message_id == email.gmail_message_id:
+        return True
+    if draft.sending_at is None:
+        return False
+    when = _utc(email.received_at or email.sent_at or draft.sending_at)
+    start = _utc(draft.sending_at)
+    return (start <= when <= start + SENT_MATCH_WINDOW
+            and _reply_subject(draft.subject) == _reply_subject(email.subject)
+            and (draft.to_addr or "").strip().lower() in _addresses(email.receiver))
+
+
+def record_sent_mail(db: Session, user_id: int, email: Email, now: datetime) -> None:
+    """Gmail에서 보낸 메일(OUTBOUND)을 스레드 업무에 붙이고 답장 보냄으로 옮긴다. 커밋하지 않는다.
+
+    같은 gmail_message_id의 메일이 이미 다른 행으로 저장돼 있으면(앱이 보낸 사본) 업무 상태는 건드리지 않는다.
+    """
+    task = task_for_thread(db, user_id, email.gmail_thread_id)
+    if task is None:
+        return
+    duplicate = email.gmail_message_id is not None and db.scalar(
+        select(Email.id).where(Email.user_id == user_id, Email.gmail_message_id == email.gmail_message_id,
+                               Email.id != email.id).limit(1)) is not None
+    email.task_id = task.id
+    email.processed = True
+    email.triage = "sent"
+    draft = db.scalar(select(ReplyDraft).where(ReplyDraft.user_id == user_id, ReplyDraft.task_id == task.id))
+    if draft is not None and draft.status in ("sending", "unknown") and _resolves_draft(draft, email):
+        draft.status = "sent"
+        draft.gmail_message_id = email.gmail_message_id
+    if not duplicate:
+        mark_reply_sent(db, task, email, now, source="gmail")

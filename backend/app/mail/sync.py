@@ -41,6 +41,7 @@ class SyncResult:
     stored: int
     skipped_sent: int
     complete: bool
+    sent_stored: int = 0
 
 
 def _utc(dt: datetime) -> datetime:
@@ -195,6 +196,29 @@ def _store(db: Session, user_id: int, msg) -> bool:
     return True
 
 
+def _store_sent(db: Session, account: GoogleAccount, msg, now: datetime) -> bool:
+    """업무가 있는 스레드의 보낸 메일을 OUTBOUND로 저장하고 답장 보냄 처리한다. 업무가 없으면 False(저장 안 함)."""
+    if lifecycle.task_for_thread(db, account.user_id, msg.thread_id) is None:
+        return False
+    try:
+        row = _build_email(account.user_id, msg)
+    except Exception as e:  # noqa: BLE001 - one unparseable mail must not stop the cycle
+        log.warning("gmail message %s skipped: %s", msg.id, type(e).__name__)
+        return False
+    row.direction = EmailDirection.OUTBOUND
+    row.sender = (account.google_email or "")[:ADDRESS_MAX]
+    try:
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+            lifecycle.record_sent_mail(db, account.user_id, row, now)
+    except IntegrityError as e:  # a concurrent sync stored it first
+        log.info("gmail message %s skipped: %s", msg.id, type(e).__name__)
+        return False
+    db.commit()
+    return True
+
+
 # --- sync ---
 
 def _fail(db: Session, account: GoogleAccount, message: str, result: SyncResult) -> SyncResult:
@@ -242,6 +266,9 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
                 log.info("gmail message %s could not be fetched; skipped", mid)
                 _mark_skipped(account.id, mid)
                 continue
+            if "SENT" in msg.label_ids and _store_sent(db, account, msg, now):
+                result.sent_stored += 1
+                continue
             if "INBOX" not in msg.label_ids or "SENT" in msg.label_ids:
                 result.skipped_sent += 1
                 _mark_skipped(account.id, mid)
@@ -273,8 +300,8 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
     db.commit()
     if result.complete:
         clear_skipped(account.id)
-    log.info("gmail sync for account %s: listed %d, stored %d, skipped %d, deferred %d",
-             account.id, result.listed, result.stored, result.skipped_sent, len(deferred))
+    log.info("gmail sync for account %s: listed %d, stored %d, sent_stored %d, skipped %d, deferred %d",
+             account.id, result.listed, result.stored, result.sent_stored, result.skipped_sent, len(deferred))
     return result
 
 
