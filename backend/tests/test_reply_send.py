@@ -116,7 +116,7 @@ def test_send_success_waiting(fake):
         out = db.scalars(select(Email).where(Email.task_id == tid, Email.direction == EmailDirection.OUTBOUND)).all()
         assert len(out) == 1
         assert out[0].gmail_message_id == draft.gmail_message_id and out[0].gmail_thread_id == "thr-1"
-        assert out[0].rfc_message_id is None and out[0].receiver == "park@partner.co.kr"
+        assert out[0].rfc_message_id == m["Message-ID"] and out[0].receiver == "park@partner.co.kr"
         logs = db.scalars(select(AgentActionLog).where(AgentActionLog.task_id == tid,
                                                        AgentActionLog.action_type == "REPLY_SENT")).all()
         assert len(logs) == 1 and logs[0].reason == "답장을 보냈습니다 (받는 사람 1명, 참조 1명)"
@@ -466,3 +466,24 @@ def test_draft_edit_after_reply_can_send(fake):
         db.commit()
         _send(db, tid, now=datetime.now(UTC), client=fake)
         assert db.get(ReplyDraft, did).status == "sent"
+
+
+def test_mime_has_message_id_with_sender_domain():
+    m = _parse(rs.build_mime(from_addr=ME, to_addr="a@x.com", cc=[], subject="s", body="b",
+                             in_reply_to=None, references=[]))
+    assert m["Message-ID"] and m["Message-ID"].strip().endswith("@gmail.com>")
+    m2 = _parse(rs.build_mime(from_addr=ME, to_addr="a@x.com", cc=[], subject="s", body="b", in_reply_to=None,
+                              references=[], message_id="<fixed@gmail.com>"))
+    assert m2["Message-ID"] == "<fixed@gmail.com>"
+
+
+def test_sent_copy_keeps_message_id_for_later_references(fake):
+    """앱이 보낸 사본에 Message-ID를 저장해 다음 답장의 References에 들어가게 한다."""
+    with SessionLocal() as db:
+        tid, did = _setup(db, _user(db))
+        _send(db, tid, client=fake)
+        header = _parse(fake.sent[0][0])["Message-ID"]
+        out = db.scalar(select(Email).where(Email.task_id == tid, Email.direction == EmailDirection.OUTBOUND))
+        assert header and out.rfc_message_id == header
+        _thread, _in_reply_to, refs = rs._reply_target(db, db.get(Task, tid), ME)
+        assert header in refs

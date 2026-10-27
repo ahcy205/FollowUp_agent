@@ -8,12 +8,13 @@
 - 동기화가 앱이 보낸 메일을 먼저 저장했을 수 있다: 같은 gmail_message_id 행을 다시 넣지 않고 기록도 한 번만 남긴다.
 - 로그 · 타임라인에는 수신자 수와 예외 타입 이름만 남긴다. 본문 · 제목 · 주소는 남기지 않는다.
 - References: Email이 원래 References 머리글을 저장하지 않으므로, 이 업무에서 같은 스레드 메일들의
-  rfc_message_id를 시간 순으로 이어 쓴다(마지막 10개).
+  rfc_message_id를 시간 순으로 이어 쓴다(마지막 10개). 앱이 보낸 사본도 만든 Message-ID를 저장해 이어지게 한다.
 """
 import logging
 from datetime import UTC, datetime, timedelta
 from email.message import EmailMessage
 from email.policy import default as default_policy
+from email.utils import make_msgid
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -54,10 +55,20 @@ def _reply_subject(subject: str) -> str:
     return s if s[:3].lower() == "re:" else f"Re: {s}".strip()
 
 
+def new_message_id(from_addr: str) -> str:
+    """보내는 사람 도메인으로 Message-ID를 만든다. 앱이 보낸 사본에 저장해 다음 답장의 References에 넣는다."""
+    domain = (from_addr or "").rpartition("@")[2].strip().strip(">") or None
+    return make_msgid(domain=domain)
+
+
 def build_mime(*, from_addr: str, to_addr: str, cc: list[str], subject: str, body: str, in_reply_to: str | None,
-               references: list[str]) -> bytes:
-    """일반 텍스트 utf-8 답장. 머리글에 줄바꿈이 있으면 ValueError(머리글 주입 방지)."""
+               references: list[str], message_id: str | None = None) -> bytes:
+    """일반 텍스트 utf-8 답장. 머리글에 줄바꿈이 있으면 ValueError(머리글 주입 방지).
+
+    message_id를 주지 않으면 보내는 사람 도메인으로 새로 만든다.
+    """
     m = EmailMessage(policy=default_policy)
+    m["Message-ID"] = message_id or new_message_id(from_addr)
     m["From"] = from_addr
     m["To"] = to_addr
     if cc:
@@ -148,7 +159,7 @@ def _to_unknown(db: Session, draft: ReplyDraft, error: Exception) -> None:
 
 
 def _finish_sent(db: Session, task: Task, draft: ReplyDraft, account: GoogleAccount, message_id: str,
-                 thread_id: str | None, subject: str, now: datetime) -> None:
+                 thread_id: str | None, subject: str, now: datetime, rfc_message_id: str | None = None) -> None:
     """보낸 메일 저장 · 초안 sent · 답장 보냄. 동기화가 먼저 저장했으면(같은 gmail_message_id) 다시 넣지 않는다."""
     inserted = False
     exists = db.scalar(select(Email.id).where(Email.user_id == task.user_id, Email.gmail_message_id == message_id))
@@ -156,7 +167,8 @@ def _finish_sent(db: Session, task: Task, draft: ReplyDraft, account: GoogleAcco
         row = Email(user_id=task.user_id, task_id=task.id, sender=account.google_email, receiver=draft.to_addr,
                     cc=list(draft.cc_selected or []), subject=subject, content=draft.body,
                     direction=EmailDirection.OUTBOUND, processed=True, triage="sent", sent_at=now, received_at=now,
-                    gmail_message_id=message_id, gmail_thread_id=thread_id, rfc_message_id=None,
+                    gmail_message_id=message_id, gmail_thread_id=thread_id,
+                    rfc_message_id=rfc_message_id[:500] if rfc_message_id else None,
                     gmail_meta={"labels": ["SENT"], "sent_by_app": True})
         try:
             with db.begin_nested():
@@ -182,8 +194,10 @@ def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: G
     account = ensure_can_send(db, user, task, draft)
     thread_id, in_reply_to, references = _reply_target(db, task, account.google_email)
     subject = _reply_subject(draft.subject)
+    rfc_id = new_message_id(account.google_email)
     raw = build_mime(from_addr=account.google_email, to_addr=draft.to_addr, cc=list(draft.cc_selected or []),
-                     subject=subject, body=draft.body, in_reply_to=in_reply_to, references=references)
+                     subject=subject, body=draft.body, in_reply_to=in_reply_to, references=references,
+                     message_id=rfc_id)
     try:
         token = access_token_for(db, account, client)  # 보내기 전이므로 실패해도 나간 메일은 없다
     except GoogleAuthError:
@@ -214,7 +228,7 @@ def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: G
         db.rollback()
         _to_unknown(db, draft, e)
         return
-    _finish_sent(db, task, draft, account, sent.id, sent.thread_id or thread_id, subject, now)
+    _finish_sent(db, task, draft, account, sent.id, sent.thread_id or thread_id, subject, now, rfc_id)
 
 
 def is_unknown(draft: ReplyDraft, now: datetime) -> bool:
