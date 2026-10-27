@@ -50,7 +50,10 @@ export default function ReplyDraftCard({
   const [body, setBody] = useState(draft.body)
   const [cc, setCc] = useState<string[]>(draft.cc_selected)
   const [base, setBase] = useState(() => snapshot(draft))
-  const [step, setStep] = useState<Step>('edit')
+  // 확인 단계는 그 단계를 연 때의 서버 초안(updated_at)에만 걸린다. 초안이 바뀌면 편집으로 돌아간다.
+  const [stepState, setStepState] = useState<{ step: Step; at: string }>({ step: 'edit', at: draft.updated_at })
+  const step: Step = stepState.at === draft.updated_at ? stepState.step : 'edit'
+  const setStep = (s: Step, at: string = draft.updated_at) => setStepState({ step: s, at })
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => Date.now())
@@ -101,11 +104,17 @@ export default function ReplyDraftCard({
       setCc(saved.cc_selected)
       setBase(snapshot(saved))
     }
+    return saved
   }
 
   const startSend = async () => {
-    if (dirty && !(await run('save', save))) return
-    setStep('confirm-send')
+    let at = draft.updated_at
+    if (dirty) {
+      let saved: ReplyDraft | null | undefined
+      if (!(await run('save', async () => (saved = await save())))) return
+      if (saved) at = saved.updated_at
+    }
+    setStep('confirm-send', at)
   }
 
   const send = async () => {
@@ -155,7 +164,7 @@ export default function ReplyDraftCard({
                   <input
                     type="checkbox"
                     checked={cc.includes(addr)}
-                    disabled={!editable || !!busy}
+                    disabled={!editable || !!busy || step !== 'edit'}
                     onChange={(e) => setCc(e.target.checked ? [...cc, addr] : cc.filter((c) => c !== addr))}
                   />
                   {addr}
@@ -168,13 +177,13 @@ export default function ReplyDraftCard({
 
       <label className="draft-label">
         제목
-        <input value={subject} maxLength={300} disabled={!editable || !!busy} onChange={(e) => setSubject(e.target.value)} />
+        <input value={subject} maxLength={300} disabled={!editable || !!busy || step !== 'edit'} onChange={(e) => setSubject(e.target.value)} />
       </label>
       {subjectDrift && <div className="muted small text-amber">제목을 바꾸면 Gmail에서 다른 대화로 보일 수 있습니다.</div>}
 
       <label className="draft-label">
         본문
-        <textarea className="draft-body" rows={12} maxLength={20000} value={body} disabled={!editable || !!busy} onChange={(e) => setBody(e.target.value)} />
+        <textarea className="draft-body" rows={12} maxLength={20000} value={body} disabled={!editable || !!busy || step !== 'edit'} onChange={(e) => setBody(e.target.value)} />
       </label>
 
       {blanks.length > 0 && (
@@ -241,10 +250,10 @@ export default function ReplyDraftCard({
       {editable && step === 'confirm-send' && !sentLater && (
         <div className="inline-panel draft-confirm">
           <span>
-            <b>{draft.to_addr}</b>에게 보냅니다 · 참조 {cc.length}명
+            <b>{draft.to_addr}</b>에게 보냅니다 · 참조 {draft.cc_selected.length}명
           </span>
           <div className="draft-actions">
-            <button type="button" className="btn btn-primary btn-sm" disabled={!!busy} onClick={send}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={!!busy || dirty || blanks.length > 0 || sentLater} onClick={send}>
               {busy === 'send' ? '보내는 중…' : '정말 보내기'}
             </button>
             <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => setStep('edit')}>

@@ -72,8 +72,8 @@ export default function MailBanners({
   const noReply = mail.no_reply && !closed
   const thanks = task.status === 'WAITING' && task.brief.thanks_email_id != null
   const todosKept = mail.reply_sent_at != null && (keptFor === mail.reply_sent_at || keptTodos(task.id, mail.reply_sent_at))
-  const todosPrompt = mail.remaining_todos_prompt && !todosKept && !closed
   const remaining = task.plan.filter((p) => !p.done).length
+  const todosPrompt = mail.remaining_todos_prompt && remaining > 0 && !todosKept && !closed
   const hasAny =
     failed ||
     candidates.length > 0 ||
@@ -135,7 +135,7 @@ export default function MailBanners({
         </div>
       )}
 
-      {todosPrompt && remaining > 0 && (
+      {todosPrompt && (
         <div className="alert alert-slate alert-action">
           <span>남은 할 일을 완료로 정리할까요?</span>
           <span className="mail-banner-buttons">

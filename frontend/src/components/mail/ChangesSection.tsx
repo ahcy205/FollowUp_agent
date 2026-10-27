@@ -18,11 +18,17 @@ function line(c: ChangeEntry) {
   return `${LABELS[c.field]}: ${c.before || '없음'} → ${c.after}`
 }
 
+/** 받은 시각(ms). 없거나 잘못됐으면 0 — 가장 오래된 것으로 보고 화면에 시각을 쓰지 않는다. */
+function receivedMs(e: ChangeEntry) {
+  const t = typeof e.received_at === 'string' && e.received_at ? parseDate(e.received_at).getTime() : NaN
+  return Number.isNaN(t) ? 0 : t
+}
+
 /** 메일별로 묶는다. 가장 최근에 받은 메일의 묶음이 맨 앞이다. */
 function byMail(entries: ChangeEntry[]): ChangeEntry[][] {
   const groups = new Map<number, ChangeEntry[]>()
   for (const e of entries) groups.set(e.email_id, [...(groups.get(e.email_id) ?? []), e])
-  const at = (g: ChangeEntry[]) => Math.max(...g.map((e) => parseDate(e.received_at).getTime()))
+  const at = (g: ChangeEntry[]) => Math.max(...g.map(receivedMs))
   return [...groups.values()].sort((a, b) => at(b) - at(a) || b[0].id - a[0].id)
 }
 
@@ -67,7 +73,7 @@ export default function ChangesSection({ log, act, closed }: { log: ChangeEntry[
       {c.evidence && <div className="change-evidence small">"{c.evidence}"</div>}
       <div className="muted small">
         {c.sender || '보낸 사람 모름'}
-        {c.received_at && ` · ${shortDate(c.received_at)} 받음`}
+        {receivedMs(c) > 0 && ` · ${shortDate(c.received_at)} 받음`}
       </div>
     </li>
   )
