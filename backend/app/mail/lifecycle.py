@@ -29,15 +29,13 @@ _CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 def add_business_days(start: datetime, days: int, tz: str) -> datetime:
     """같은 지역 시각을 유지하며 토 · 일을 건너뛰고 days 영업일 뒤를 돌려준다(UTC).
 
-    시작이 주말이면 다음 월요일 00:00(지역)부터 센다. 이때 월요일 자체가 첫 영업일이다
-    (토 10:00 + 3 → 수 00:00).
+    시작이 주말이면 다음 월요일 00:00(지역)으로 옮긴 뒤 센다(토 10:00 + 3 → 목 00:00).
     """
     zone = ZoneInfo(tz)
     local = _utc(start).astimezone(zone)
     if local.weekday() >= 5:
         monday = local.date() + timedelta(days=7 - local.weekday())
         local = datetime.combine(monday, time(0, 0), tzinfo=zone)
-        days -= 1
     day = local.date()
     while days > 0:
         day += timedelta(days=1)
@@ -73,9 +71,23 @@ def mark_reply_sent(db: Session, task: Task, email: Email | None, now: datetime,
 
 
 def _inbound_after(db: Session, task: Task, since: datetime) -> bool:
+    """wait_from 뒤에 온 상대 메일이 있는가. 아직 업무에 붙지 않은 같은 스레드 메일도 센다.
+
+    답장은 intake(LLM 스위치 필요)를 거쳐야 task_id가 붙으므로, 업무에 연결된 스레드(합쳐진 업무의 스레드 포함)도 본다.
+    """
     at = func.coalesce(Email.received_at, Email.created_at)
+    threads = {t for t in db.scalars(select(Email.gmail_thread_id).where(
+        Email.user_id == task.user_id, Email.task_id == task.id, Email.gmail_thread_id.is_not(None)))}
+    if task.gmail_thread_id:
+        threads.add(task.gmail_thread_id)
+    for t in db.scalars(select(Task.gmail_thread_id).where(
+            Task.user_id == task.user_id, Task.merged_into_id == task.id, Task.gmail_thread_id.is_not(None))):
+        threads.add(t)
+    match = Email.task_id == task.id
+    if threads:
+        match = match | Email.gmail_thread_id.in_(threads)
     return db.scalar(
-        select(Email.id).where(Email.user_id == task.user_id, Email.task_id == task.id,
+        select(Email.id).where(Email.user_id == task.user_id, match,
                                Email.direction == EmailDirection.INBOUND.value, at > since).limit(1)
     ) is not None
 

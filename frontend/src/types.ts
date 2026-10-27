@@ -185,7 +185,6 @@ export interface GoogleRecentMail {
   subject: string
   sender: string
   received_at: string | null
-  no_reply?: boolean
   triage: 'pending' | 'work' | 'not_work' | 'filtered' | null
   triage_reason: string
   task_id: number | null
@@ -239,7 +238,6 @@ export interface NotWorkMail {
   triage: string
   triage_reason: string
   received_at: string | null
-  no_reply?: boolean
 }
 
 export interface InboxCounts {

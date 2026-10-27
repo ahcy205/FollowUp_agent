@@ -59,7 +59,11 @@ def test_business_days_friday_evening_kst():
 
 
 def test_business_days_from_saturday():
-    assert lifecycle.add_business_days(kst(2026, 10, 24, 10), 3, TZ) == kst(2026, 10, 28, 0)  # 수 00:00
+    assert lifecycle.add_business_days(kst(2026, 10, 24, 10), 3, TZ) == kst(2026, 10, 29, 0)  # 목 00:00
+
+
+def test_business_days_from_sunday():
+    assert lifecycle.add_business_days(kst(2026, 10, 25, 23), 3, TZ) == kst(2026, 10, 29, 0)  # 목 00:00
 
 
 def test_check_no_reply_moves_after_3_days():
@@ -251,3 +255,19 @@ def test_cycle_survives_no_reply_failure(client, google_fake, monkeypatch):
         raise RuntimeError("x")
     monkeypatch.setattr(sync.lifecycle, "check_no_reply", boom)
     assert run_sync_cycle() == 1
+
+
+def test_check_no_reply_sees_unattached_thread_reply():
+    # 트리아지가 꺼져 intake가 안 돌면 상대 답장에 task_id가 없다. 같은 스레드면 답이 온 것으로 본다.
+    with SessionLocal() as db:
+        u = _user(db)
+        t = _waiting(db, u.id, kst(2026, 10, 26, 10))
+        n = next(_seq)
+        db.add(Email(user_id=u.id, sender="kim@partner.co.kr", receiver="me@example.com", subject="s",
+                     content="c", direction=EmailDirection.INBOUND, processed=False,
+                     received_at=kst(2026, 10, 27, 10), gmail_message_id=f"m-{n}",
+                     gmail_thread_id=t.gmail_thread_id, triage="pending", task_id=None, gmail_meta={}))
+        db.commit()
+        assert lifecycle.check_no_reply(db, u.id, kst(2026, 11, 5, 10), TZ) == 0
+        db.refresh(t)
+        assert t.status == TaskStatus.WAITING
