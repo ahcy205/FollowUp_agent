@@ -17,7 +17,7 @@ from app.config import get_settings
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.errors import ActionError
 from app.mail.inbox import finalize_snooze
-from app.models import Email, Task, TaskStatus, User
+from app.models import Email, ReplyDraft, Task, TaskStatus, User
 
 MAX_HOPS = 5
 UNDO_WINDOW = timedelta(minutes=10)
@@ -31,6 +31,7 @@ _PRIORITY_KEYS = ("priority", "priority_source")
 CANNOT_MERGE = "합칠 수 없는 업무입니다."
 NOTHING_TO_UNDO = "되돌릴 수 있는 합치기가 없습니다."
 ANALYZING = "합친 내용을 분석하는 중입니다. 잠시 후 다시 합쳐 주세요."
+SENDING = "보내는 중인 답장이 있어 합칠 수 없습니다. 발송 결과를 확인한 뒤 다시 시도해 주세요."
 MERGED_TODO_STEP = "합친 업무에서 할 일이 생겼습니다"
 
 
@@ -187,6 +188,10 @@ def merge(db: Session, user: User, source: Task, target: Task, now: datetime) ->
         raise ActionError(CANNOT_MERGE, 409)
     if any((t.merge_analysis or {}).get("state") == "pending" for t in (source, target)):
         raise ActionError(ANALYZING, 409)  # 대상마다 합친 내용 분석은 하나씩(분석 결과가 섞이지 않게)
+    if db.scalar(select(ReplyDraft.id).where(ReplyDraft.user_id == user.id,
+                                             ReplyDraft.task_id.in_([source.id, target.id]),
+                                             ReplyDraft.status.in_(("sending", "unknown"))).limit(1)) is not None:
+        raise ActionError(SENDING, 409)  # 발송 결과(보낸 메일 · 답장 보냄)가 어느 업무로 갈지 흐려지지 않게
     now = _utc(now)
     before = _fields(target)
     state_before = _state(target)

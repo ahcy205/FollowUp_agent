@@ -829,3 +829,22 @@ def test_undo_on_closed_target_keeps_unrevertable_changes(monkeypatch):
         db.commit()
         assert [e["email_id"] for e in a.change_log] == [bm]  # 되돌리지 못한 변경 기록은 남긴다
         assert a.brief["requests"] == ["수량 150개 견적"]
+
+
+@pytest.mark.parametrize("which", ["source", "target"])
+@pytest.mark.parametrize("state", ["sending", "unknown"])
+def test_merge_rejects_while_reply_sending(which, state):
+    """보내는 중(sending) · 결과 불분명(unknown) 답장이 있는 업무는 합치지 않는다(발송 결과가 엉뚱한 업무로 가지 않게)."""
+    from app.models import ReplyDraft
+    with SessionLocal() as db:
+        u = _user(db)
+        a, b, _ = _pair(db, u.id)
+        owner = b if which == "source" else a
+        db.add(ReplyDraft(user_id=u.id, task_id=owner.id, to_addr="kim@partner.co.kr", subject="Re: 견적",
+                          body="회신", status=state, sending_at=NOW))
+        db.commit()
+        with pytest.raises(ActionError) as e:
+            merge.merge(db, u, b, a, NOW)
+        assert e.value.status == 409
+        assert str(e.value) == "보내는 중인 답장이 있어 합칠 수 없습니다. 발송 결과를 확인한 뒤 다시 시도해 주세요."
+        assert db.get(Task, b.id).merged_into_id is None
