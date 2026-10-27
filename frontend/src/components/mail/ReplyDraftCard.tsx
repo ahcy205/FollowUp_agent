@@ -133,7 +133,8 @@ export default function ReplyDraftCard({
   const w = draft.warnings
   // 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다. 서버도 보내기를 409로 막는다.
   const replyAt = data.mail?.reply_sent_at
-  const sentLater = replyAt != null && parseDate(replyAt).getTime() > parseDate(draft.updated_at).getTime()
+  const sentLater = draft.replied_after === true
+    || (replyAt != null && parseDate(replyAt).getTime() > parseDate(draft.updated_at).getTime())
   const confirmable = unknownAt != null && now >= unknownAt + UNKNOWN_CONFIRM_MS
 
   if (draft.status === 'sent') {

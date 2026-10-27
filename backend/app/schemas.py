@@ -152,6 +152,7 @@ class ReplyDraftOut(BaseModel):
     can_send: bool  # 빈칸이 없고 상태가 draft일 때만
     unknown_since: datetime | None  # 발송 결과가 불분명해진 시각 (status == "unknown"일 때만)
     updated_at: datetime  # 만들기 · 고치기 · 초안으로 되돌리기 시각. reply_sent_at이 더 늦으면 이미 답장을 보낸 것
+    replied_after: bool = False  # 이 초안 이후 보낸 답장이 확인됐다(Gmail 보낸 메일은 메일 시각이 더 이를 수 있어 서버가 판단)
 
 
 class MailExtras(BaseModel):

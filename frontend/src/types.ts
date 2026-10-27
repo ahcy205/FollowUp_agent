@@ -210,6 +210,7 @@ export interface ReplyDraft {
   warnings: ReplyDraftWarnings
   can_send: boolean
   unknown_since: string | null
+  replied_after?: boolean
   updated_at: string // 만들기 · 고치기 · 초안으로 되돌리기 시각. reply_sent_at이 더 늦으면 이미 답장을 보낸 것
 }
 

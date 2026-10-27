@@ -25,6 +25,7 @@ NO_REPLY_CLOSE_REASON = "상대 답장 없음으로 닫음"
 NOT_ASKED_MESSAGE = "다시 연락할지 묻는 업무가 아닙니다."
 CHOICES = ("followup", "wait", "close")
 SENT_MATCH_WINDOW = timedelta(minutes=10)
+SENT_MATCH_LEAD = timedelta(minutes=2)  # Gmail 시각(internalDate)과 서버 시계 차이: 보내기 직전 시각도 맞춘다
 _CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 
 
@@ -186,16 +187,26 @@ def _resolves_draft(draft: ReplyDraft, email: Email) -> bool:
         return False
     when = _utc(email.received_at or email.sent_at or draft.sending_at)
     start = _utc(draft.sending_at)
-    return (start <= when <= start + SENT_MATCH_WINDOW
+    return (start - SENT_MATCH_LEAD <= when <= start + SENT_MATCH_WINDOW
             and _reply_subject(draft.subject) == _reply_subject(email.subject)
             and (draft.to_addr or "").strip().lower() in _addresses(email.receiver))
+
+
+def mail_time(email: Email, fallback: datetime) -> datetime:
+    """메일 자체의 시각(Gmail internalDate → received_at, 없으면 보낸 시각). 동기화 시각이 아니다."""
+    return _utc(email.received_at or email.sent_at or fallback)
 
 
 def record_sent_mail(db: Session, user_id: int, email: Email, now: datetime) -> None:
     """Gmail에서 보낸 메일(OUTBOUND)을 스레드 업무에 붙이고 답장 보냄으로 옮긴다. 커밋하지 않는다.
 
-    같은 gmail_message_id의 메일이 이미 다른 행으로 저장돼 있으면(앱이 보낸 사본) 업무 상태는 건드리지 않는다.
+    - 답장 보냄 시각 · 기다림 시작은 동기화 시각이 아니라 메일 자체의 시각이다(앱을 늦게 켜도 '답 없음'이 제때 온다).
+    - 같은 gmail_message_id의 메일이 이미 다른 행으로 저장돼 있으면(앱이 보낸 사본) 업무 상태는 건드리지 않는다.
+    - 이미 더 늦은 답장 보냄 시각이 있으면(늦게 발견된 옛 보낸 메일) 시각을 되돌리지 않는다.
+    - 업무가 아직 없으면(받은 메일 접수 전) 저장만 한다. 접수가 업무를 만들 때 붙인다(app.mail.intake).
     """
+    email.processed = True
+    email.triage = "sent"
     task = task_for_thread(db, user_id, email.gmail_thread_id)
     if task is None:
         return
@@ -203,11 +214,10 @@ def record_sent_mail(db: Session, user_id: int, email: Email, now: datetime) -> 
         select(Email.id).where(Email.user_id == user_id, Email.gmail_message_id == email.gmail_message_id,
                                Email.id != email.id).limit(1)) is not None
     email.task_id = task.id
-    email.processed = True
-    email.triage = "sent"
     draft = db.scalar(select(ReplyDraft).where(ReplyDraft.user_id == user_id, ReplyDraft.task_id == task.id))
     if draft is not None and draft.status in ("sending", "unknown") and _resolves_draft(draft, email):
         draft.status = "sent"
         draft.gmail_message_id = email.gmail_message_id
-    if not duplicate:
-        mark_reply_sent(db, task, email, now, source="gmail")
+    sent_at = mail_time(email, now)
+    if not duplicate and (task.reply_sent_at is None or _utc(task.reply_sent_at) < sent_at):
+        mark_reply_sent(db, task, email, sent_at, source="gmail")

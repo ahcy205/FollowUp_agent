@@ -197,9 +197,23 @@ def _store(db: Session, user_id: int, msg) -> bool:
     return True
 
 
+def _known_thread(db: Session, user_id: int, thread_id: str | None) -> bool:
+    """업무가 있거나, 이 사용자의 받은 메일이 저장된 스레드인가(업무가 아직 없어도 된다)."""
+    if not thread_id:
+        return False
+    if lifecycle.task_for_thread(db, user_id, thread_id) is not None:
+        return True
+    return db.scalar(select(Email.id).where(Email.user_id == user_id, Email.gmail_thread_id == thread_id,
+                                            Email.direction == EmailDirection.INBOUND.value).limit(1)) is not None
+
+
 def _store_sent(db: Session, account: GoogleAccount, msg, now: datetime) -> bool:
-    """업무가 있는 스레드의 보낸 메일을 OUTBOUND로 저장하고 답장 보냄 처리한다. 업무가 없으면 False(저장 안 함)."""
-    if lifecycle.task_for_thread(db, account.user_id, msg.thread_id) is None:
+    """업무가 있거나 받은 메일이 저장된 스레드의 보낸 메일을 OUTBOUND로 저장한다. 모르는 스레드면 False(저장 안 함).
+
+    업무가 있으면 답장 보냄으로 옮긴다. 업무가 아직 없으면(받은 메일 접수 전) 저장만 하고, 접수가 업무를 만들 때
+    이 메일이 최신 받은 메일보다 늦으면 답장 보냄으로 둔다(app.mail.intake).
+    """
+    if not _known_thread(db, account.user_id, msg.thread_id):
         return False
     try:
         row = _build_email(account.user_id, msg)
@@ -258,6 +272,7 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
         remaining = [i for i in ids if i not in have and i not in skipped]
         cap = max(1, get_settings().mail_sync_max_per_cycle)
         batch, deferred = remaining[:cap], remaining[cap:]
+        sent_msgs = []  # 보낸 메일은 받은 메일을 다 저장한 뒤에 본다: 같은 묶음의 받은 메일로 스레드를 알 수 있게
         for mid in batch:
             try:
                 msg = client.gmail_get_raw(token, mid)
@@ -267,10 +282,10 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
                 log.info("gmail message %s could not be fetched; skipped", mid)
                 _mark_skipped(account.id, mid)
                 continue
-            if "SENT" in msg.label_ids and _store_sent(db, account, msg, now):
-                result.sent_stored += 1
+            if "SENT" in msg.label_ids:
+                sent_msgs.append(msg)
                 continue
-            if "INBOX" not in msg.label_ids or "SENT" in msg.label_ids:
+            if "INBOX" not in msg.label_ids:
                 result.skipped_sent += 1
                 _mark_skipped(account.id, mid)
                 continue
@@ -278,6 +293,12 @@ def sync_account(db: Session, account: GoogleAccount, client: GoogleClient,
                 result.stored += 1
             else:
                 _mark_skipped(account.id, mid)
+        for msg in sent_msgs:
+            if _store_sent(db, account, msg, now):
+                result.sent_stored += 1
+            else:
+                result.skipped_sent += 1
+                _mark_skipped(account.id, msg.id)
     except GoogleTransientError:
         log.info("gmail sync for account %s interrupted (transient); stored %d", account.id, result.stored)
         return _fail(db, account, TRANSIENT_MESSAGE, result)

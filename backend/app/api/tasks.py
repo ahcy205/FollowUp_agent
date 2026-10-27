@@ -194,6 +194,7 @@ def _draft_out(db: Session, task: Task, now: datetime) -> ReplyDraftOut | None:
         status="unknown" if unknown else d.status, warnings=warnings,
         can_send=d.status == "draft" and not reply_draft.placeholders(d.body),
         unknown_since=d.sending_at if unknown else None, updated_at=d.updated_at,
+        replied_after=d.status == "draft" and reply_send.replied_after_draft(db, task, d),
     )
 
 

@@ -487,3 +487,29 @@ def test_sent_copy_keeps_message_id_for_later_references(fake):
         assert header and out.rfc_message_id == header
         _thread, _in_reply_to, refs = rs._reply_target(db, db.get(Task, tid), ME)
         assert header in refs
+
+
+def test_draft_out_shows_reply_found_after_not_sent(fake):
+    """Gmail 보낸 메일의 시각이 초안을 되돌린 시각보다 일러도, 그 뒤에 확인됐으면 화면에 '이미 답장' 안내를 띄운다."""
+    from app.api.tasks import _draft_out
+    from app.mail import lifecycle
+    start = datetime.now(UTC) - timedelta(minutes=10)
+    with SessionLocal() as db:
+        tid, did = _setup(db, _user(db), status="unknown")
+        d = db.get(ReplyDraft, did)
+        d.sending_at = start
+        db.commit()
+        _confirm(db, tid, did, False, now=datetime.now(UTC))
+        db.commit()
+        assert _draft_out(db, db.get(Task, tid), datetime.now(UTC)).replied_after is False
+        uid = db.get(Task, tid).user_id
+        row = Email(user_id=uid, sender=ME, receiver="park@partner.co.kr", subject="Re: 견적 문의", content="x",
+                    direction=EmailDirection.OUTBOUND, processed=False, received_at=start,
+                    gmail_message_id="sent-elsewhere", gmail_thread_id="thr-1", cc=[], gmail_meta={})
+        db.add(row)
+        db.flush()
+        lifecycle.record_sent_mail(db, uid, row, datetime.now(UTC))
+        db.commit()
+        task = db.get(Task, tid)
+        assert rs._utc(task.reply_sent_at) == start  # 메일 자체의 시각
+        assert _draft_out(db, task, datetime.now(UTC)).replied_after is True

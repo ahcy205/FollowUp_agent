@@ -47,6 +47,7 @@ PENDING_GOAL = "메일 분석 대기 중"
 PENDING_STEP = "메일 분석 대기"
 FAILED_STEP = "자동 분석에 실패했습니다 — 메일을 직접 확인해 주세요"
 REFERENCE_STEP = "참고용 메일 — 답장이 필요 없어 보입니다"
+REPLIED_STEP = "답장 보냄"  # lifecycle.mark_reply_sent와 같은 문구
 REOPENED_STEP = "새 메일로 다시 열림"  # task_actions.REOPENED_STEP과 같은 문구 (순환 import 때문에 여기에도 둔다)
 ATTACHED_REASON = "같은 스레드에 새 메일이 왔습니다"
 NO_SUBJECT = "(제목 없음)"
@@ -304,6 +305,37 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
     return True
 
 
+def _newest_inbound_time(db: Session, task: Task, email: Email) -> datetime:
+    """분석한 받은 메일(_intake_prompt와 같은 범위) 중 가장 늦은 시각."""
+    mails = db.scalars(select(Email).where(Email.user_id == task.user_id, Email.task_id == task.id,
+                                           Email.direction == EmailDirection.INBOUND)).all()
+    return max(_reference_time(m) for m in [*mails, email])
+
+
+def _replied_after_inbound(db: Session, task: Task, email: Email) -> bool:
+    """분석한 받은 메일보다 늦은 답장이 있는가. 업무에 붙은 보낸 메일이 더 늦으면 그 시각으로 답장 보냄 처리한다."""
+    from app.mail import lifecycle  # lifecycle → task_actions → intake 순환 import를 피한다
+    newest_in = _newest_inbound_time(db, task, email)
+    out = db.scalars(select(Email).where(Email.user_id == task.user_id, Email.task_id == task.id,
+                                         Email.direction == EmailDirection.OUTBOUND)).all()
+    latest = max(out, key=lambda m: (_reference_time(m), m.id), default=None)
+    if latest is not None:
+        sent_at = _reference_time(latest)
+        if sent_at > newest_in and (task.reply_sent_at is None or _as_utc(task.reply_sent_at) < sent_at):
+            lifecycle.mark_reply_sent(db, task, latest, sent_at, source="gmail")
+    return task.reply_sent_at is not None and _as_utc(task.reply_sent_at) > newest_in
+
+
+def _attach_thread_sent(db: Session, task: Task) -> None:
+    """업무가 생기기 전에 저장된 같은 스레드의 보낸 메일(app.mail.sync)을 업무에 붙인다. 커밋하지 않는다."""
+    if not task.gmail_thread_id:
+        return
+    for m in db.scalars(select(Email).where(Email.user_id == task.user_id, Email.task_id.is_(None),
+                                            Email.gmail_thread_id == task.gmail_thread_id,
+                                            Email.direction == EmailDirection.OUTBOUND)):
+        m.task_id = task.id
+
+
 def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
     ref = _reference_time(email)
     # 기록에 남기는 의심 문장은 개수와 길이를 제한한다. 걸러내기에는 전부 쓴다.
@@ -360,7 +392,11 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
     else:
         task.deadline_at, task.deadline_all_day, task.deadline_kind, task.deadline_source = None, False, "none", ""
     mark_calendar_dirty(task)  # 기한이 생기거나 바뀌면 다음 주기에 캘린더에 반영한다
-    if not data["needs_reply"] and not plan:
+    if _replied_after_inbound(db, task, email):
+        # 분석한 받은 메일보다 늦게 답장을 보냈다(분석이 늦게 끝남 · 접수 전에 폰으로 답장): 처리할 일로 덮지 않는다
+        task.status, task.waiting_for, task.current_step = TaskStatus.WAITING, "상대 회신", REPLIED_STEP
+        task.next_action = plan[0]["title"] if plan else ""
+    elif not data["needs_reply"] and not plan:
         task.status, task.current_step, task.next_action = TaskStatus.PENDING, REFERENCE_STEP, ""
     else:
         task.status = TaskStatus.ACTION_REQUIRED
@@ -419,6 +455,7 @@ def _create_task(db: Session, user_id: int, email: Email) -> Task | None:
     try:
         db.flush()
         email.task_id = task.id
+        _attach_thread_sent(db, task)
         db.commit()
     except IntegrityError:
         db.rollback()

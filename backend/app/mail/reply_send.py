@@ -16,7 +16,7 @@ from email.message import EmailMessage
 from email.policy import default as default_policy
 from email.utils import make_msgid
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
@@ -46,6 +46,7 @@ CHECKING = "아직 발송 여부를 확인하는 중입니다. 잠시 후 다시
 NOT_UNKNOWN = "발송 여부를 확인할 초안이 아닙니다."
 CLOSED = "닫혔거나 다른 업무에 합쳐진 업무에서는 답장을 보낼 수 없습니다."
 ALREADY_REPLIED = "이미 답장을 보낸 것으로 확인됐습니다. 초안을 지우거나 다시 만들어 주세요."
+FOUND_IN_GMAIL = "Gmail에서 이 답장이 이미 보내진 것으로 확인됩니다. 보낸편지함을 확인해 주세요."
 
 
 # ---------------------------------------------------------------- MIME
@@ -91,14 +92,29 @@ def _account(db: Session, user_id: int) -> GoogleAccount | None:
     return db.scalar(select(GoogleAccount).where(GoogleAccount.user_id == user_id))
 
 
+def replied_after_draft(db: Session, task: Task, draft: ReplyDraft) -> bool:
+    """초안을 만들거나 고치거나 되돌린(updated_at) 뒤에 보낸 답장이 확인됐는가.
+
+    답장 보냄 시각(reply_sent_at)은 Gmail에서 보낸 메일이면 메일 자체의 시각이라 초안을 되돌린 시각보다 이를 수 있다.
+    그래서 보낸 메일을 저장한(확인한) 시각(created_at)도 본다.
+    """
+    if draft.updated_at is None:
+        return False
+    since = _utc(draft.updated_at)
+    if task.reply_sent_at is not None and _utc(task.reply_sent_at) > since:
+        return True
+    found = db.scalar(select(func.max(Email.created_at)).where(
+        Email.user_id == task.user_id, Email.task_id == task.id, Email.direction == EmailDirection.OUTBOUND))
+    return found is not None and _utc(found) > since
+
+
 def ensure_can_send(db: Session, user: User, task: Task, draft: ReplyDraft) -> GoogleAccount:
     """보내기 직전 확인(Google을 부르지 않는다). API는 호출 횟수 제한보다 먼저 부른다."""
     if task.status in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
         raise ActionError(CLOSED, 409)
     if draft.status != "draft":
         raise ActionError(ALREADY, 409)
-    if (task.reply_sent_at is not None and draft.updated_at is not None
-            and _utc(task.reply_sent_at) > _utc(draft.updated_at)):
+    if replied_after_draft(db, task, draft):
         # 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다('안 보내졌어요' 뒤 동기화가 찾은 경우 등). 두 번 보내지 않는다.
         raise ActionError(ALREADY_REPLIED, 409)
     account = _account(db, user.id)
@@ -253,6 +269,10 @@ def confirm_unknown(db: Session, user: User, task: Task, draft: ReplyDraft, *, s
         lifecycle.mark_reply_sent(db, task, None, now, source="app", reason=_sent_reason(draft),
                                   recipients=1 + len(draft.cc_selected or []))
     else:
+        if (task.reply_sent_at is not None
+                and _utc(task.reply_sent_at) >= _utc(draft.sending_at) - lifecycle.SENT_MATCH_LEAD):
+            # 동기화가 보낸 답장을 이미 확인했다(초안과 맞추지 못했을 뿐). 초안으로 되돌리면 다시 보낼 수 있게 된다.
+            raise ActionError(FOUND_IN_GMAIL, 409)
         if not _set(db, draft, (draft.status,), status="draft", sending_at=None, updated_at=now):
             raise ActionError(NOT_UNKNOWN, 409)
         db.refresh(draft)
