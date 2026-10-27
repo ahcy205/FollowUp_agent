@@ -136,7 +136,7 @@ def test_detail_mail_extras(client, monkeypatch):
     m = client.get(f"/api/tasks/{older_id}").json()["mail"]
     assert m["is_snoozed"] is True and m["wake_at"] and m["merge_candidates"] == []
     m = client.get(f"/api/tasks/{newer_id}").json()["mail"]
-    assert m["merge_candidates"] == [{"task_id": older_id, "title": "견적 요청"}]
+    assert m["merge_candidates"] == [{"task_id": older_id, "title": "견적 요청", "evidence": None}]
     assert m["undoable_merges"] == [] and m["deadline_badge"]["text"] == "기한 없음"
     assert m["priority_source"] is not None and m["merged_into_id"] is None
 

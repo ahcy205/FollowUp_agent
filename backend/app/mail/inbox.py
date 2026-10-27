@@ -258,6 +258,15 @@ def _norm_addr(addr: str | None) -> str:
     return (addr or "").strip().lower()
 
 
+def merge_evidence(task: Task, candidate: Task) -> str | None:
+    """후보가 "수정 요청으로 보임" 판단의 대상이면 그 근거 문장."""
+    judged = task.related if isinstance(task.related, dict) else {}
+    if judged.get("state") == "suggested" and judged.get("task_id") == candidate.id:
+        evidence = judged.get("evidence")
+        return evidence if isinstance(evidence, str) else None
+    return None
+
+
 def _source_sender(db: Session, task: Task) -> str:
     """원본 메일 보낸 사람 주소(소문자). brief.email_id, 없으면 이 업무의 가장 이른 상대 메일."""
     email_id = _brief(task).get("email_id")
@@ -276,12 +285,24 @@ def _source_sender(db: Session, task: Task) -> str:
 
 
 def merge_candidates(db: Session, task: Task, now: datetime) -> list[Task]:
-    """같은 보낸 사람의 더 먼저 만들어진 진행 중 메일 업무. 최근 것부터 최대 3개.
+    """합치기 후보 (설계 7.3).
 
+    - 접수 때 "수정 요청으로 보임" 판단(task.related)이 있으면 그 업무 하나(지금도 후보 조건을 만족할 때).
+    - 관계없다고 판단했으면 없음. 같은 보낸 사람이어도 띄우지 않는다.
+    - 판단을 못 했으면(분석 실패 · 판별 꺼짐 · 기록 없음) 5단계 규칙: 같은 보낸 사람의 더 먼저 만들어진 진행 중 메일 업무,
+      최근 것부터 최대 3개.
     분석 대기 중인 업무는 합칠 수 없으므로(합치기가 409) 후보를 내지 않는다.
     """
     if (task.origin != "mail" or task.merged_into_id is not None or task.merge_dismissed
             or str(task.status) in _CLOSED_STATUSES or _brief(task).get("analysis") == "pending"):
+        return []
+    judged = task.related if isinstance(task.related, dict) else {}
+    if judged.get("state") == "suggested":
+        from app.mail.related import qualifies  # related → inbox 순환 import를 피한다
+        target_id = judged.get("task_id")
+        target = db.scalar(select(Task).where(Task.id == target_id, Task.user_id == task.user_id))             if isinstance(target_id, int) else None
+        return [target] if target is not None and qualifies(task, target, now) else []
+    if judged.get("state") == "none":
         return []
     sender = _source_sender(db, task)
     if not sender:

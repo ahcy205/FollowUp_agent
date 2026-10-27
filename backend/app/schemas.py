@@ -125,6 +125,7 @@ class RunOut(ORM):
 class MergeCandidateOut(BaseModel):
     task_id: int
     title: str
+    evidence: str | None = None  # "수정 요청으로 보임" 판단의 근거 문장(설계 7.3). 5단계 규칙 후보는 None
 
 
 class UndoableMergeOut(BaseModel):
@@ -167,6 +168,7 @@ class MailExtras(BaseModel):
     reply_sent_at: datetime | None = None
     draft: ReplyDraftOut | None = None
     remaining_todos_prompt: bool = False  # 답장을 보냈는데(WAITING) 남은 할 일이 있다: "모두 완료" 안내
+    merge_analyzing: bool = False  # 합친 내용을 분석하는 중(설계 7.3)
 
 
 class TaskDetail(BaseModel):

@@ -2,6 +2,8 @@
 
 같은 상대가 새 스레드로 보낸 메일 업무(B, 원본)를 기존 업무(A, 대상)에 합치고, 10분 안에 되돌린다.
 합쳐진 업무(merged_into_id가 있음)로 오는 메일과 동작은 합쳐진 대상 업무로 간다.
+판별(MAIL_TRIAGE_ENABLED)이 켜져 있으면 요청 · 기한 · 요약은 합칠 때 바꾸지 않고, 워커가 옮긴 메일로 변경 분석을 해서
+고친다(설계 7.3, app.mail.merge_analysis). 꺼져 있거나 분석이 실패하면 5단계 규칙(요청 합집합 · 이른 기한)으로 마무리한다.
 - 커밋하지 않는다. API가 커밋한다.
 - 타임라인에는 업무 번호만 남긴다. 할 일 제목 · 요청 · 메일 내용은 남기지 않는다.
 """
@@ -165,24 +167,11 @@ def merge(db: Session, user: User, source: Task, target: Task, now: datetime) ->
     target.plan = target_plan
     source.plan = kept
 
-    # 상대 요청
-    reqs = _requests(target)
-    seen = {r.strip() for r in reqs if isinstance(r, str)}
-    added_requests = []
-    for r in _requests(source):
-        if isinstance(r, str) and r.strip() and r.strip() not in seen:
-            seen.add(r.strip())
-            added_requests.append(r)
-    if added_requests:
-        target.brief = {**(target.brief or {}), "requests": reqs + added_requests}
-
-    # 기한: B가 더 이르거나 A에 없으면 B 것
-    s_due, t_due = _utc(source.deadline_at), _utc(target.deadline_at)
-    if s_due is not None and (t_due is None or s_due < t_due):
-        target.deadline_at = source.deadline_at
-        target.deadline_all_day = source.deadline_all_day
-        target.deadline_kind = source.deadline_kind
-        target.deadline_source = source.deadline_source
+    # 상대 요청 · 기한: 판별이 켜져 있으면 합친 내용 분석이 고친다. 꺼져 있으면 5단계 규칙.
+    analyze = get_settings().mail_triage_enabled
+    added_requests = [] if analyze else _union_requests(source, target)
+    if not analyze:
+        _take_earlier_deadline(source, target)
 
     # 중요도: 높은 쪽
     if _RANK.get(source.priority, 0) > _RANK.get(target.priority, 0):
@@ -207,11 +196,83 @@ def merge(db: Session, user: User, source: Task, target: Task, now: datetime) ->
         "before": before, "after": _fields(target), "source_before": source_before,
     }
     target.merge_undo = records
+    if analyze:
+        target.merge_analysis = {"state": "pending", "source_id": source.id, "email_ids": moved_email_ids,
+                                 "at": now.isoformat()}
+    else:
+        target.merge_analysis = {}  # 이전 합치기의 분석 상태가 이번 합치기로 보이지 않게
     mark_calendar_dirty(source)  # 일정이 있으면 ✓를 붙인다
     mark_calendar_dirty(target)
     data = {"source_id": source.id, "target_id": target.id}
     _log(db, user, target, "TASK_MERGED", data, f"업무 #{source.id}을 이 업무에 합쳤습니다")
     _log(db, user, source, "TASK_MERGED", data, f"업무 #{target.id}에 합쳤습니다")
+
+
+def _union_requests(source: Task, target: Task) -> list[str]:
+    """5단계: B의 상대 요청 중 A에 없는 것을 A에 더한다. 더한 요청을 돌려준다."""
+    reqs = _requests(target)
+    seen = {r.strip() for r in reqs if isinstance(r, str)}
+    added = []
+    for r in _requests(source):
+        if isinstance(r, str) and r.strip() and r.strip() not in seen:
+            seen.add(r.strip())
+            added.append(r)
+    if added:
+        target.brief = {**(target.brief or {}), "requests": reqs + added}
+    return added
+
+
+def _take_earlier_deadline(source: Task, target: Task) -> None:
+    """5단계: B가 더 이르거나 A에 없으면 B 기한."""
+    s_due, t_due = _utc(source.deadline_at), _utc(target.deadline_at)
+    if s_due is not None and (t_due is None or s_due < t_due):
+        target.deadline_at = source.deadline_at
+        target.deadline_all_day = source.deadline_all_day
+        target.deadline_kind = source.deadline_kind
+        target.deadline_source = source.deadline_source
+
+
+def finish_by_stage5_rules(db: Session, target: Task, source: Task) -> None:
+    """합친 내용 분석을 못 했을 때(형식 오류 두 번 · 판별 꺼짐) 5단계 규칙으로 마무리한다. 커밋하지 않는다.
+
+    되돌리기 기록도 함께 고친다: 더한 요청, 그리고 기한을 바꿨으면 '합친 직후 값'. 합친 뒤 사용자가 A 기한을 직접
+    바꿨으면 기한은 건드리지 않는다(사용자 수정을 덮지 않는다).
+    """
+    records = dict(target.merge_undo or {})
+    rec = dict(records.get(str(source.id)) or {})
+    added = _union_requests(source, target)
+    after = dict(rec.get("after") or {})
+    current = _fields(target)
+    if all(current[k] == after.get(k) for k in _DEADLINE_KEYS):
+        _take_earlier_deadline(source, target)
+        after.update({k: v for k, v in _fields(target).items() if k in _DEADLINE_KEYS})
+    if rec:
+        rec["added_requests"] = [*(rec.get("added_requests") or []), *added]
+        rec["after"] = after
+        records[str(source.id)] = rec
+        target.merge_undo = records
+    mark_calendar_dirty(target)
+    log_action(db, user_id=target.user_id, task_id=target.id, run_id=None, action_type="MERGE_ANALYSIS_FALLBACK",
+               output_data={"source_id": source.id},
+               reason=f"업무 #{source.id}의 내용을 자동 분석하지 못해 요청을 합치고 이른 기한을 골랐습니다")
+
+
+def _revert_merge_changes(target: Task, email_ids: set[int]) -> None:
+    """합친 내용 분석 · 그 뒤 재답장 분석이 이 메일들로 바꾼 것을 최근 것부터 되돌리고 기록에서 지운다.
+
+    그 뒤 사용자가 고친 값은 덮지 않는다(되돌리지 못한 항목은 지금 값 그대로 두고 기록만 지운다).
+    """
+    from app.mail import changes  # changes → intake → merge 순환 import를 피한다
+    from app.mail.errors import ActionError as _ActionError
+    entries = [e for e in target.change_log or [] if isinstance(e, dict) and e.get("email_id") in email_ids]
+    for entry in sorted(entries, key=lambda e: e.get("id") or 0, reverse=True):
+        if entry.get("status") == "applied":
+            try:
+                changes.undo_change(target, entry["id"])
+            except _ActionError:
+                pass
+    target.change_log = [e for e in target.change_log or []
+                         if not (isinstance(e, dict) and e.get("email_id") in email_ids)]
 
 
 # ---------------------------------------------------------------- 되돌리기
@@ -244,6 +305,8 @@ def undo_merge(db: Session, user: User, target: Task, source_id: int, now: datet
     if source.gmail_thread_id:
         emails += db.scalars(select(Email).where(Email.user_id == user.id, Email.task_id == target.id,
                                                  Email.gmail_thread_id == source.gmail_thread_id)).all()
+    _revert_merge_changes(target, {e.id for e in emails})
+    target.merge_analysis = {}  # 아직 분석 중이면 워커가 결과를 버린다
     for email in emails:
         email.task_id = source.id
 

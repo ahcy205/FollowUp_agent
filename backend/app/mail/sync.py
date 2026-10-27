@@ -22,6 +22,7 @@ from app.google.oauth import access_token_for, forget_access_token
 from app.mail.calendar_sync import sync_calendars
 from app.mail import lifecycle
 from app.mail.intake import intake_work_mails
+from app.mail.merge_analysis import run_merge_analyses
 from app.mail.parse import parse_raw
 from app.mail.triage import triage_pending
 from app.models import Email, EmailDirection, GoogleAccount
@@ -314,6 +315,7 @@ def process_inbox(db: Session, user_id: int) -> None:
     """
     settings = get_settings()
     if not settings.mail_triage_enabled:
+        _finish_merges_without_llm(db, user_id, settings.user_timezone)
         return
     try:
         llm = get_llm()
@@ -326,8 +328,22 @@ def process_inbox(db: Session, user_id: int) -> None:
         # intake also retries analyses that failed earlier, so it runs even if triage did nothing
         intake_work_mails(db, user_id, llm, max_mails=settings.mail_intake_per_cycle,
                           tz=settings.user_timezone)
+        run_merge_analyses(db, user_id, llm, settings.user_timezone)  # 합친 내용 분석(설계 7.3)
     except Exception as e:  # noqa: BLE001 - processing must never undo or fail the sync
         log.warning("mail processing for user %s failed: %s", user_id, type(e).__name__)
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            pass
+
+
+def _finish_merges_without_llm(db: Session, user_id: int, tz: str) -> None:
+    """판별이 꺼진 동안 남은 '합친 내용 분석 중'을 5단계 규칙으로 마무리한다(설계 7.3). 메일은 LLM으로 가지 않는다."""
+    try:
+        db.rollback()
+        run_merge_analyses(db, user_id, None, tz)
+    except Exception as e:  # noqa: BLE001 - 동기화를 실패시키지 않는다
+        log.warning("merge finishing for user %s failed: %s", user_id, type(e).__name__)
         try:
             db.rollback()
         except SQLAlchemyError:

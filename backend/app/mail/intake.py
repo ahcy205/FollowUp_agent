@@ -24,6 +24,7 @@ from app.config import get_settings
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.deadline import USER_DEADLINE_SOURCE, Deadline, earliest, normalize_deadline
 from app.mail.inbox import is_snoozed
+from app.mail import related
 from app.mail.merge import resolve_merged
 from app.models import Email, EmailDirection, RiskLevel, Task, TaskStatus
 
@@ -65,9 +66,16 @@ INTAKE_SCHEMA = {"type": "object", "properties": {
         "required": ["text", "date", "time", "kind"], "additionalProperties": False},
     "priority": {"type": "string", "enum": ["HIGH", "NORMAL", "LOW"]},
     "needs_reply": {"type": "boolean"},
-    "suspicious": {"type": "array", "items": {"type": "string"}}},
+    "suspicious": {"type": "array", "items": {"type": "string"}},
+    # 다른 스레드 수정 요청 판단(설계 7.2). 후보가 없을 때는 빠뜨려도 된다(검증이 기본값으로 채운다).
+    "related_task": {"type": ["integer", "null"]},
+    "relation": {"type": "string", "enum": ["change", "followup", "none"]},
+    "relation_evidence": {"type": "string"}},
     "required": ["summary", "counterpart", "requests", "todos", "deadline", "priority", "needs_reply", "suspicious"],
     "additionalProperties": False}
+# 후보가 있을 때만 쓰는 스키마: 판단 필드를 반드시 채우게 한다
+RELATED_SCHEMA = {**INTAKE_SCHEMA, "required": [*INTAKE_SCHEMA["required"], "related_task", "relation",
+                                                "relation_evidence"]}
 
 INTAKE_SYSTEM = """당신은 사용자가 받은 업무 메일을 읽고 업무 카드로 정리하는 비서입니다.
 사용자는 이 메일을 받은 사람입니다. 보낸 사람(상대)이 사용자에게 무엇을 원하는지, 사용자가 무엇을 해야 하는지 정리하세요.
@@ -82,6 +90,10 @@ INTAKE_SYSTEM = """당신은 사용자가 받은 업무 메일을 읽고 업무 
 - priority: HIGH(급하거나 중요함), NORMAL, LOW 중 하나.
 - needs_reply: 사용자가 이 메일에 답장해야 하면 true, 아니면 false.
 - 값이 없으면 "" 또는 []로 두세요.
+- related_task · relation · relation_evidence: 프롬프트에 "관련 업무 후보"가 있을 때만 판단하세요. 이 메일이 후보 업무의
+  수정 · 추가 요청이면 relation="change", 같은 건의 이어지는 연락이면 "followup", 아니면 "none"입니다.
+  relation_evidence에는 근거 문장을 이 메일 본문에서 글자 그대로 옮기세요. 후보가 없거나 관계가 없으면
+  related_task=null, relation="none", relation_evidence=""로 두세요. 같은 회사라는 것만으로 관계가 있다고 하지 마세요.
 
 날짜 계산:
 - 프롬프트에 주어진 수신 시각과 요일을 기준으로 상대 표현을 실제 날짜로 바꾸세요. 예: "이번 주 금요일", "다음 주 중", "내일 오전".
@@ -212,6 +224,10 @@ def _validate(raw) -> dict:
         "priority": priority if priority in PRIORITIES else "NORMAL",
         "needs_reply": raw["needs_reply"],
         "suspicious": [s for s in (_str(x, ITEM_CHARS) for x in suspicious) if s],
+        # 관계 판단은 빠뜨려도 형식 오류가 아니다. 값 검사는 related.judge_related가 한다.
+        "related_task": raw.get("related_task"),
+        "relation": raw.get("relation") if isinstance(raw.get("relation"), str) else "none",
+        "relation_evidence": _str(raw.get("relation_evidence"), ITEM_CHARS),
     }
 
 
@@ -249,6 +265,7 @@ def _record_failure(task: Task) -> None:
         brief["analysis"] = "failed"
         task.current_step = FAILED_STEP
     task.brief = brief  # 새 dict를 넣어야 JSON 컬럼 변경이 감지된다
+    task.related = dict(related.UNJUDGED)  # 판단을 못 했다: 5단계 "같은 보낸 사람" 규칙으로 제안한다(설계 7.3)
 
 
 def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz: str) -> bool:
@@ -260,12 +277,16 @@ def analyze_into_task(db: Session, task: Task, email: Email, llm: LLMClient, tz:
     """
     task_id, email_id = task.id, email.id
     try:
-        data = _validate(llm.structured(INTAKE_SYSTEM, _intake_prompt(db, task, email, tz), INTAKE_SCHEMA))
+        candidates = related.related_candidates(db, task, email.sender or "", datetime.now(timezone.utc))
+        prompt = _intake_prompt(db, task, email, tz) + related.candidates_block(candidates)
+        data = _validate(llm.structured(INTAKE_SYSTEM, prompt, RELATED_SCHEMA if candidates else INTAKE_SCHEMA))
         db.flush()  # 아직 쓰지 않은 변경을 refresh가 버리지 않게
         db.refresh(task)  # 분석하는 동안 사용자가 닫았거나 합쳤을 수 있다. 그런 업무를 다시 열지 않는다.
         if task.status in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
             log.info("mail intake: task %s was closed or merged during analysis; result dropped", task_id)
             return True
+        task.related = (related.judge_related(data, candidates, email.content or "") if candidates
+                        else dict(related.NONE))
         _apply(db, task, email, data, tz)
     except LLMError as e:
         log.warning("mail intake analysis for task %s email %s postponed: %s", task_id, email_id, type(e).__name__)

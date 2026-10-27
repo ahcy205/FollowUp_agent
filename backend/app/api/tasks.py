@@ -169,7 +169,8 @@ def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
         is_snoozed=mail_inbox.is_snoozed(task, now, tz), wake_at=wake,
         returned=mail_inbox.returned_at(task, now, tz) is not None,
         nudge_days=mail_inbox.nudge_days(task, latest_at, now, tz),
-        merge_candidates=[{"task_id": c.id, "title": c.title} for c in candidates],
+        merge_candidates=[{"task_id": c.id, "title": c.title, "evidence": mail_inbox.merge_evidence(task, c)}
+                          for c in candidates],
         undoable_merges=[{"source_id": i, "title": titles.get(i, "")} for i in source_ids],
         merged_sources=_merged_sources(db, task),
         merged_into_id=task.merged_into_id, deadline_badge=mail_inbox.deadline_badge(task, now, tz),
@@ -177,6 +178,7 @@ def _mail_extras(db: Session, task: Task, emails: list[Email]) -> MailExtras:
         no_reply=mail_inbox.no_reply_active(task), reply_sent_at=task.reply_sent_at,
         draft=_draft_out(db, task, now),
         remaining_todos_prompt=reply_send.remaining_todos_prompt(task),
+        merge_analyzing=(task.merge_analysis or {}).get("state") == "pending",
     )
 
 
@@ -475,7 +477,10 @@ def merge_task(task_id: int, body: MergeIn, user: User = Depends(get_current_use
     source = _mail_task(db, task_id, user)
     target = get_owned(db, Task, body.into_task_id, user)
     _act(mail_merge.merge, db, user, source, target, datetime.now(timezone.utc))
-    return _done(db, target, user)
+    detail = _done(db, target, user)
+    if (target.merge_analysis or {}).get("state") == "pending" and target.calendar_state != "pending":
+        mail_sync.wake()  # 합친 내용 분석은 워커가 바로 이어서 한다(설계 7.3)
+    return detail
 
 
 @router.post("/tasks/{task_id}/merge/undo", response_model=TaskDetail)

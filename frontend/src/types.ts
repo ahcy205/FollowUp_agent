@@ -160,7 +160,7 @@ export interface MailExtras {
   wake_at: string | null
   returned: boolean
   nudge_days: number | null
-  merge_candidates: { task_id: number; title: string }[]
+  merge_candidates: { task_id: number; title: string; evidence?: string | null }[] // evidence: 수정 요청으로 보인 근거 문장
   undoable_merges: { source_id: number; title: string }[]
   merged_sources: { task_id: number; title: string; summary: string; merged_at: string | null }[]
   merged_into_id: number | null
@@ -170,6 +170,7 @@ export interface MailExtras {
   reply_sent_at?: string | null
   draft?: ReplyDraft | null
   remaining_todos_prompt?: boolean // 답장을 보냈는데 남은 할 일이 있다: "모두 완료" 안내
+  merge_analyzing?: boolean // 합친 내용을 분석하는 중
 }
 
 export interface ReplyDraftWarnings {

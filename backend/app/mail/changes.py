@@ -9,6 +9,7 @@
 - 커밋하지 않는다. 로그에는 메일 · 업무 번호와 예외 타입만, 타임라인에는 전후 값 한 줄(각 40자)만 남긴다.
 """
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -94,6 +95,21 @@ def _raise_to_todo(task: Task, step: str) -> None:
 
 def analyze_changes(db: Session, task: Task, emails: list[Email], llm: LLMClient, tz: str) -> bool:
     """새 메일 묶음으로 변경 분석 1회. 반영했으면 True. 커밋하지 않는다."""
+    return run_analysis(db, task, emails, llm, tz) in (APPLIED, DROPPED)
+
+
+APPLIED, DROPPED, OUTAGE, INVALID = "applied", "dropped", "outage", "invalid"
+
+
+def run_analysis(db: Session, task: Task, emails: list[Email], llm: LLMClient, tz: str,
+                 still_wanted: Callable[[Task], bool] | None = None) -> str:
+    """변경 분석 1회. 결과: applied / dropped(분석 사이 합쳐짐 · 원하지 않게 됨) / outage(LLM 장애) / invalid.
+
+    still_wanted가 없으면(재답장) 장애 때 메일을 대기열에 남기고, 형식 오류 두 번 · 반영 중 오류는 실패로 기록한다.
+    still_wanted가 있으면(합친 내용 분석, 설계 7.3) 대기열 · 실패 기록은 부른 쪽이 정한다. 분석 직후 업무를 다시 읽어
+    still_wanted(task)가 거짓이면(되돌려짐) 결과를 버린다.
+    """
+    merge_mode = still_wanted is not None
     emails = sorted(emails, key=lambda e: (intake._reference_time(e), e.id))
     ids = [e.id for e in emails]
     clear_wait_on_inbound(task)  # 상대 메일이 왔으므로 '답 없음' 물음을 거둔다
@@ -104,35 +120,37 @@ def analyze_changes(db: Session, task: Task, emails: list[Email], llm: LLMClient
             data = _validate(llm.structured(CHANGES_SYSTEM, prompt, CHANGES_SCHEMA))
             break
         except LLMError as e:
-            brief = dict(task.brief or {})
-            brief[PENDING_KEY] = list(dict.fromkeys([*(brief.get(PENDING_KEY) or []), *ids]))
-            task.brief = brief
+            if not merge_mode:
+                brief = dict(task.brief or {})
+                brief[PENDING_KEY] = list(dict.fromkeys([*(brief.get(PENDING_KEY) or []), *ids]))
+                task.brief = brief
             log.warning("change analysis for task %s postponed: %s", task.id, type(e).__name__)
-            return False
+            return OUTAGE
         except Exception as e:  # noqa: BLE001 - 형식 오류 · 예상 밖 오류도 횟수 제한 안에서만 다시 묻는다
             log.warning("change analysis for task %s got an invalid result: %s", task.id, type(e).__name__)
     task_id = task.id
     db.flush()
-    db.refresh(task)  # 분석하는 동안 합쳐졌을 수 있다
+    db.refresh(task)  # 분석하는 동안 합쳐졌거나 합치기가 되돌려졌을 수 있다
     brief = dict(task.brief or {})
     _drop_pending(brief, ids)
     task.brief = brief
-    if task.merged_into_id is not None:
-        log.info("change analysis: task %s was merged during analysis; result dropped", task_id)
-        return True
+    if task.merged_into_id is not None or (merge_mode and not still_wanted(task)):
+        log.info("change analysis: task %s changed during analysis; result dropped", task_id)
+        return DROPPED
     if data is None:
-        _fail(db, task, ids)
-        return False
+        if not merge_mode:
+            _fail(db, task, ids)
+        return INVALID
     try:
         with db.begin_nested():  # 반영 중 오류면 이 저장점만 되돌린다(호출한 쪽의 커밋 전 작업은 남는다)
             _apply(db, task, emails, data, tz)
     except Exception as e:  # noqa: BLE001 - 반쯤 반영한 것을 버리고 실패로 남겨야 같은 메일을 끝없이 다시 분석하지 않는다
         log.warning("change analysis for task %s failed while applying: %s", task_id, type(e).__name__)
         task = db.get(Task, task_id)
-        if task is not None:
+        if task is not None and not merge_mode:
             _fail(db, task, ids)
-        return False
-    return True
+        return INVALID
+    return APPLIED
 
 
 def _fail(db: Session, task: Task, ids: list[int]) -> None:
