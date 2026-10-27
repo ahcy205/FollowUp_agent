@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from app.google.client import (
     REQUIRED_SCOPES, AccessToken, CalendarEvent, GmailProfile, GoogleAuthError, GoogleConflict, GoogleError,
-    GoogleHistoryGone, GoogleNotFound, GoogleTransientError, IdPage, RawMessage, TokenGrant,
+    GoogleHistoryGone, GoogleNotFound, GoogleTransientError, IdPage, RawMessage, SentMessage, TokenGrant,
 )
 
 
@@ -70,6 +70,7 @@ class FakeGoogle:
         self.calendar_fail: GoogleError | None = None
         self.calendar_fail_times: int = 0
         self.calendar_calls: list[tuple[str, str]] = []
+        self.sent: list[tuple[bytes, str]] = []  # gmail_send 기록: (raw, thread_id)
         self._seq = 0
         self._tokens = 0
 
@@ -134,6 +135,11 @@ class FakeGoogle:
             raise GoogleError(f"message not found: {message_id}")
         return self.mailbox[message_id]
 
+    def gmail_send(self, access_token: str, raw_rfc822: bytes, thread_id: str) -> SentMessage:
+        mid = self.deliver(raw_rfc822, labels=("SENT",), thread_id=thread_id)
+        self.sent.append((raw_rfc822, thread_id))
+        return SentMessage(id=mid, thread_id=thread_id)
+
     # --- Calendar ---
     def _calendar_enter(self, method: str, event_id: str) -> None:
         self.calendar_calls.append((method, event_id))
@@ -180,6 +186,12 @@ class FakeGoogle:
                 raise GoogleError("400 invalid start/end: both date and dateTime")
         self.events[event_id] = merged
         return self._event(event_id, merged.get("status", "confirmed"), merged)
+
+    def calendar_delete(self, access_token: str, event_id: str) -> None:
+        self._calendar_enter("delete", event_id)
+        if event_id in self.deleted_events or event_id not in self.events:
+            raise GoogleNotFound("event not found")
+        self.deleted_events[event_id] = self.events.pop(event_id)
 
     def delete_event(self, event_id: str) -> None:
         """Simulate the user deleting the event in Google Calendar."""

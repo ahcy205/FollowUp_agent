@@ -63,6 +63,12 @@ class RawMessage:
 
 
 @dataclass(frozen=True)
+class SentMessage:
+    id: str
+    thread_id: str
+
+
+@dataclass(frozen=True)
 class CalendarEvent:
     id: str
     html_link: str
@@ -106,6 +112,8 @@ class GoogleClient(Protocol):
     def calendar_insert(self, access_token: str, body: dict) -> CalendarEvent: ...
     def calendar_get(self, access_token: str, event_id: str) -> CalendarEvent: ...
     def calendar_patch(self, access_token: str, event_id: str, body: dict) -> CalendarEvent: ...
+    def calendar_delete(self, access_token: str, event_id: str) -> None: ...
+    def gmail_send(self, access_token: str, raw_rfc822: bytes, thread_id: str) -> SentMessage: ...
 
 
 _TRANSIENT_403_REASONS = frozenset({"rateLimitExceeded", "userRateLimitExceeded", "backendError"})
@@ -236,6 +244,13 @@ class HttpGoogleClient:
         return RawMessage(id=d["id"], thread_id=d.get("threadId", d["id"]), label_ids=list(d.get("labelIds", [])),
                           internal_date_ms=int(d.get("internalDate", 0)), raw=data)
 
+    def gmail_send(self, access_token: str, raw_rfc822: bytes, thread_id: str) -> SentMessage:
+        raw = base64.urlsafe_b64encode(raw_rfc822).decode("ascii")
+        resp = self._send("POST", f"{GMAIL_BASE}/messages/send", json={"raw": raw, "threadId": thread_id},
+                          headers={"Authorization": f"Bearer {access_token}"})
+        d = resp.json()
+        return SentMessage(id=d["id"], thread_id=d.get("threadId", thread_id))
+
     # --- Calendar ---
     def _calendar(self, method: str, access_token: str, event_id: str | None = None,
                   body: dict | None = None) -> CalendarEvent:
@@ -256,6 +271,10 @@ class HttpGoogleClient:
 
     def calendar_patch(self, access_token: str, event_id: str, body: dict) -> CalendarEvent:
         return self._calendar("PATCH", access_token, event_id, body)
+
+    def calendar_delete(self, access_token: str, event_id: str) -> None:
+        self._send("DELETE", f"{CALENDAR_EVENTS_URL}/{event_id}",
+                   headers={"Authorization": f"Bearer {access_token}"})
 
 
 _override: GoogleClient | None = None

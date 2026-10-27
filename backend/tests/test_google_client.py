@@ -327,3 +327,51 @@ def test_fake_deleted_event_semantics():
     assert f.calendar_get("t", "e1").status == "cancelled"
     with pytest.raises(GoogleNotFound):
         f.calendar_patch("t", "e1", {"summary": "b"})
+
+
+GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+
+def test_httpx_gmail_send_posts_raw_and_thread():
+    seen = {}
+
+    def handler(req):
+        seen["method"], seen["url"] = req.method, str(req.url)
+        seen["auth"] = req.headers["authorization"]
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"id": "m1", "threadId": "thr-1", "labelIds": ["SENT"]})
+
+    raw = "제목: 안녕\r\n\r\n본문".encode()
+    sent = client_with(handler).gmail_send("tok", raw, "thr-1")
+    assert (seen["method"], seen["url"]) == ("POST", f"{GMAIL}/messages/send")
+    assert seen["auth"] == "Bearer tok"
+    assert set(seen["body"]) == {"raw", "threadId"}
+    assert seen["body"]["threadId"] == "thr-1"
+    enc = seen["body"]["raw"]
+    assert base64.urlsafe_b64decode(enc + "=" * (-len(enc) % 4)) == raw
+    assert (sent.id, sent.thread_id) == ("m1", "thr-1")
+
+
+def test_httpx_gmail_send_errors_map():
+    for status, exc in [(429, GoogleTransientError), (503, GoogleTransientError), (401, GoogleAuthError)]:
+        c = client_with(lambda req, s=status: httpx.Response(s, json={"error": {"message": "x"}}))
+        with pytest.raises(exc):
+            c.gmail_send("tok", b"x", "t")
+
+
+def test_httpx_calendar_delete_request_and_404():
+    seen = []
+
+    def handler(req):
+        seen.append((req.method, str(req.url)))
+        return httpx.Response(204)
+
+    assert client_with(handler).calendar_delete("tok", "e1") is None
+    assert seen == [("DELETE", f"{CAL}/e1")]
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_httpx_calendar_delete_404_raises_not_found(status):
+    c = client_with(lambda req: httpx.Response(status, json={"error": {"message": "gone"}}))
+    with pytest.raises(GoogleNotFound):
+        c.calendar_delete("tok", "e1")
