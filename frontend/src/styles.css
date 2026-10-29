@@ -470,3 +470,33 @@ a.tag:hover { text-decoration: underline; }
   .draft-actions .btn, .change-line .btn, .mail-banner-buttons .btn { width: 100%; }
   .mail-banner-buttons { flex-direction: column; }
 }
+
+/* ---------- 자료실 (RAG 설계 2.1) · 초안 카드 자료 표시 (5.5) */
+.knowledge-visibility { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.knowledge-visibility legend { padding: 0; margin-bottom: 4px; }
+.knowledge-visibility .check-row { align-items: flex-start; }
+.knowledge-visibility .check-row input { margin-top: 4px; }
+.knowledge-drop { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 24px 16px; border: 2px dashed var(--border-strong); border-radius: 10px; text-align: center; cursor: pointer; background: var(--bg); }
+.knowledge-drop:hover, .knowledge-drop.drag-over { border-color: var(--primary); background: var(--primary-50); }
+.knowledge-drop.busy { cursor: progress; opacity: 0.7; }
+.knowledge-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.knowledge-drop:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+.knowledge-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.knowledge-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.knowledge-card { display: flex; flex-direction: column; gap: 6px; }
+.knowledge-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.knowledge-title { min-width: 0; overflow-wrap: anywhere; }
+.knowledge-tags { flex: none; display: flex; gap: 4px; }
+.knowledge-tags .tag { margin-right: 0; }
+.knowledge-confirm span { font-weight: 600; }
+.draft-facts ul, .draft-sources ul { margin: 4px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.draft-facts li { overflow-wrap: anywhere; }
+.draft-facts .tag { margin: 0 0 0 6px; }
+.draft-sources summary { cursor: pointer; color: var(--muted); }
+.draft-sources li { overflow-wrap: anywhere; }
+.draft-source-unused { color: var(--muted); opacity: 0.6; }
+.draft-internal { margin: 4px 0 0; padding-left: 20px; }
+@media (max-width: 480px) {
+  .knowledge-head { flex-direction: column; gap: 4px; }
+  .knowledge-drop { padding: 18px 12px; }
+}
