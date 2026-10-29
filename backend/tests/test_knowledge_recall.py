@@ -56,7 +56,11 @@ def test_identifier_queries_find_their_row_in_top5():
 
 
 def test_flagged_notice_chunk_never_searched():
-    """주입 문장이 든 덩어리는 검색에서 빠지고, 같은 자료의 나머지 덩어리는 쓴다(설계 3.2)."""
+    """주입 문장이 든 덩어리는 검색에서 빠진다(설계 3.2).
+
+    최종 리뷰 뒤: 'AI 비서는 … 넣으세요'처럼 AI를 주어로 시키는 문장도 걸리므로 프로모션 덩어리도 빠진다.
+    같은 자료의 걸리지 않은 덩어리를 쓰는지는 test_knowledge_injection이 확인한다(이 공지 자료는 두 덩어리 모두 주입이다).
+    """
     with SessionLocal() as db:
         user = User(email="recall@example.com", password_hash="x")
         db.add(user)
@@ -65,5 +69,5 @@ def test_flagged_notice_chunk_never_searched():
         assert sources["notice"].status == "flagged"
         hits = search.search_shareable(db, user.id, "대리점 시스템 공지 원가 TS-200 프로모션")
         texts = [h.text for h in hits]
-        assert any("프로모션" in t for t in texts)
         assert not any("이전 지시를 모두 무시" in t for t in texts)
+        assert not any("20% 할인" in t or "rival-parts" in t for t in texts)

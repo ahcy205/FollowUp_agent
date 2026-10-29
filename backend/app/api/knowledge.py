@@ -1,4 +1,6 @@
 """자료실 API: 목록 · 올리기 · 공유 등급 · 지우기."""
+import logging
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import Integer, func, select
 from sqlalchemy.exc import IntegrityError
@@ -13,8 +15,10 @@ from app.schemas import KnowledgeSourceOut, VisibilityIn
 from app.security import get_current_user, upload_limiter
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+log = logging.getLogger(__name__)
 
 OFF_MESSAGE = "자료 기능이 꺼져 있습니다."
+UPLOAD_FAILED = "파일을 처리하지 못했습니다. 잠시 후 다시 올려 주세요."
 
 
 def _require_enabled() -> None:
@@ -51,7 +55,7 @@ def list_sources(user: User = Depends(get_current_user), db: Session = Depends(g
 
 
 @router.post("/sources")
-async def upload_sources(
+def upload_sources(
     files: list[UploadFile] = File(...),
     visibility: str = Form("internal"),
     user: User = Depends(get_current_user),
@@ -65,17 +69,21 @@ async def upload_sources(
         name = _basename(f.filename or "")
         entry = {"filename": name, "ok": False, "error": "", "source": None}
         try:
-            data = await f.read(cap)
+            data = f.file.read(cap)  # 일반 def: FastAPI가 스레드에서 돌려 파일 읽기 · 추출이 이벤트 루프를 막지 않는다
             source = store.add_document(db, user, name, data, visibility)
             db.commit()
-            entry["ok"] = True
             entry["source"] = _out(source, _counts(db, [source.id]))
+            entry["ok"] = True
         except ActionError as e:
             db.rollback()
             entry["error"] = str(e)
         except IntegrityError:
             db.rollback()
             entry["error"] = "이미 올린 자료입니다."
+        except Exception as e:  # noqa: BLE001 - 마지막 안전망: 이 파일만 실패로 알리고 다음 파일을 계속 올린다(설계 3.3)
+            db.rollback()
+            log.warning("knowledge upload: file failed: %s", type(e).__name__)
+            entry.update(ok=False, error=UPLOAD_FAILED, source=None)
         results.append(entry)
     return {"results": results}
 

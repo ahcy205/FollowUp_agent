@@ -258,10 +258,11 @@ def generate_draft(db: Session, task: Task, user: User, llm: LLMClient, *, purpo
     candidates_facts = [{"text": f.get("text"), "ref": f.get("chunk"), "line": f.get("line")}
                         for f in data["used_facts"] if chunks and f.get("source") == "doc"]
     # 다시 만들기는 sources를 새 dict로 덮어쓴다
+    subject = _subject(emails)
     warnings, sources = draft_sources.compute_checks(
         db, task, data["body"], user_input,
-        {"chunks": chunks, "facts": candidates_facts, "search_failed": search_failed}, suspicious)
-    values = dict(purpose=purpose, to_addr=to, cc_candidates=candidates, cc_selected=[], subject=_subject(emails),
+        {"chunks": chunks, "facts": candidates_facts, "search_failed": search_failed}, suspicious, subject=subject)
+    values = dict(purpose=purpose, to_addr=to, cc_candidates=candidates, cc_selected=[], subject=subject,
                   body=data["body"], status="draft", warnings=warnings, sources=sources, user_input=user_input,
                   gmail_message_id=None, sending_at=None, updated_at=utcnow())
 
@@ -317,7 +318,8 @@ def update_draft(draft: ReplyDraft, *, subject: str, body: str, cc_selected: lis
     task = db.get(Task, draft.task_id)
     # 저장된 덩어리 사본으로 다시 확인한다(외부 호출 없음). refresh_draft_checks와 같은 계산이다.
     warnings, sources = draft_sources.compute_checks(
-        db, task, body, draft.user_input, draft.sources, list((draft.warnings or {}).get("suspicious") or []))
+        db, task, body, draft.user_input, draft.sources, list((draft.warnings or {}).get("suspicious") or []),
+        subject=subject)
     values = dict(subject=subject, body=body, cc_selected=[c for c in allowed if c in chosen], warnings=warnings,
                   sources=sources, updated_at=utcnow())  # Core UPDATE: 시각을 직접 넣는다
     _guarded(db, draft, ReplyDraft.status == "draft", values, NOT_EDITABLE)

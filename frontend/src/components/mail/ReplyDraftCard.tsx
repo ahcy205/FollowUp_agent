@@ -142,7 +142,8 @@ export default function ReplyDraftCard({
     let missingAck = false
     const at = draft.updated_at
     await run('send', () =>
-      act('/reply-draft/send', needsAck ? { internal_ack: acked } : undefined).catch((e: Error) => {
+      // 확인(체크 포함)은 화면이 본 그 버전에만 걸린다: 그사이 초안이 바뀌면 서버가 409로 막는다
+      act('/reply-draft/send', { expected_updated_at: at, ...(needsAck ? { internal_ack: acked } : {}) }).catch((e: Error) => {
         missingAck = e.message === NEED_INTERNAL_ACK
         throw e
       }),
@@ -299,7 +300,7 @@ export default function ReplyDraftCard({
           )}
           {w.suspicious.length > 0 && (
             <div className="alert alert-red">
-              <b>보안 경고</b> — 메일 속 지시를 따르지 않았습니다: {w.suspicious.join(', ')}
+              <b>보안 경고</b> — 메일 · 자료 속 지시를 따르지 않았습니다: {w.suspicious.join(', ')}
             </div>
           )}
           {w.unsupported.length > 0 && (

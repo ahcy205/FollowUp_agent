@@ -258,8 +258,12 @@ class NoReplyIn(_Strict):
 
 
 class ReplySendIn(_Strict):
-    """답장 보내기. 내부용 자료의 값이 든 초안은 '알고 보냅니다'를 체크해야 보낸다 (RAG 설계 5.3)."""
+    """답장 보내기. 내부용 자료의 값이 든 초안은 '알고 보냅니다'를 체크해야 보낸다 (RAG 설계 5.3).
+
+    expected_updated_at: 화면이 확인한 초안의 updated_at. 주면 지금 초안과 같을 때만 보낸다(확인을 그 버전에 묶는다).
+    """
     internal_ack: StrictBool = False
+    expected_updated_at: datetime | None = None
 
 
 class ReplyConfirmIn(_Strict):

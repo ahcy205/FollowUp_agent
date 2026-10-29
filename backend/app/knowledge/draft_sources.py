@@ -164,9 +164,21 @@ def internal_values(db: Session, user_id: int, body: str, allowed_text: str) -> 
     return out[:MAX_FACTS]
 
 
+def outgoing_text(subject: str | None, body: str | None) -> str:
+    """내부용 값 비교 대상: 나가는 제목 + 본문 (5.3). 제목에 원가를 적어도 잡는다."""
+    return f"{subject or ''}\n{body or ''}"
+
+
+def _allowed_text(facts: list[dict], emails: list[Email]) -> str:
+    """내부용 값으로 보지 않는 글: 확인을 통과한 인용 줄 + 스레드 메일 제목 · 본문. 메모 · 입력은 넣지 않는다."""
+    return "\n".join([evidence_lines(facts), *[f"{e.subject or ''}\n{e.content or ''}" for e in emails]])
+
+
 def compute_checks(db: Session, task: Task, body: str, user_input: str, sources: dict,
-                   suspicious: list[str]) -> tuple[dict, dict]:
+                   suspicious: list[str], *, subject: str = "") -> tuple[dict, dict]:
     """(warnings, sources). 저장된 덩어리 사본으로 자료 항목 · 근거 · 내부용 값을 다시 계산한다. 외부 호출 없음.
+
+    내부용 값은 제목(subject)과 본문을 함께 본다.
 
     sources["facts"]의 항목(text · ref · line)을 후보로 다시 확인한다. 만들 때는 LLM의 doc 항목을 이 형태로 넣어 부른다.
     """
@@ -192,8 +204,7 @@ def compute_checks(db: Session, task: Task, body: str, user_input: str, sources:
     context, header_text = _context_texts(db, task, user_input)
     warnings = draft_warnings(body, "\n".join([context, evidence_lines(facts)]), header_text)
     warnings["suspicious"] = list(suspicious or [])
-    allowed = "\n".join([evidence_lines(facts), *[e.content or "" for e in emails]])
-    found = internal_values(db, task.user_id, body, allowed)
+    found = internal_values(db, task.user_id, outgoing_text(subject, body), _allowed_text(facts, emails))
     warnings["internal_values"] = len(found)
     warnings["other_item"] = sum(1 for f in facts if f["other_item"])
     new_sources = {"chunks": chunks, "facts": facts, "internal_values": found,
@@ -206,7 +217,8 @@ def refresh_draft_checks(db: Session, draft: ReplyDraft) -> None:
     """저장된 사본으로 이 초안의 자료 항목 · 경고를 다시 계산해 새 객체로 대입한다(JSON 변경 감지). 커밋은 호출한 쪽이."""
     task = db.get(Task, draft.task_id)
     suspicious = (draft.warnings or {}).get("suspicious") if isinstance(draft.warnings, dict) else []
-    warnings, sources = compute_checks(db, task, draft.body, draft.user_input, draft.sources, suspicious or [])
+    warnings, sources = compute_checks(db, task, draft.body, draft.user_input, draft.sources, suspicious or [],
+                                       subject=draft.subject)
     draft.warnings, draft.sources = warnings, sources
 
 
@@ -234,7 +246,8 @@ def _update_keep_time(db: Session, draft: ReplyDraft, **values) -> None:
 def _refresh_keep_time(db: Session, draft: ReplyDraft) -> None:
     task = db.get(Task, draft.task_id)
     suspicious = (draft.warnings or {}).get("suspicious") if isinstance(draft.warnings, dict) else []
-    warnings, sources = compute_checks(db, task, draft.body, draft.user_input, draft.sources, suspicious or [])
+    warnings, sources = compute_checks(db, task, draft.body, draft.user_input, draft.sources, suspicious or [],
+                                       subject=draft.subject)
     _update_keep_time(db, draft, warnings=warnings, sources=sources)
 
 
@@ -320,5 +333,5 @@ def internal_values_now(db: Session, task: Task, draft: ReplyDraft) -> list[dict
 
     sources = draft.sources if isinstance(draft.sources, dict) else {}
     facts = [f for f in (sources.get("facts") or []) if isinstance(f, dict)]
-    allowed = "\n".join([evidence_lines(facts), *[e.content or "" for e in _emails(db, task)]])
-    return internal_values(db, task.user_id, draft.body, allowed)
+    return internal_values(db, task.user_id, outgoing_text(draft.subject, draft.body),
+                           _allowed_text(facts, _emails(db, task)))

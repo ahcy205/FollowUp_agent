@@ -166,3 +166,26 @@ def test_oversized_table_row_truncated_and_counted():
     assert ex.notes["truncated_rows"] == 1
     assert all(len(c.text) <= 1500 for c in chunk_blocks(ex.blocks))
     assert extract_text("csv", b"a,b\ny,2\n").notes["truncated_rows"] == 0
+
+
+READ_FAILED = "파일을 읽는 중 문제가 생겼습니다. 다른 이름으로 저장해 다시 올려 주세요."
+
+
+@pytest.mark.parametrize("ft,target", [("xlsx", "_xlsx"), ("docx", "_docx"), ("txt", "_text_blocks")])
+def test_unexpected_error_becomes_extract_error(monkeypatch, ft, target):
+    """설계 3.3: 파일 하나가 어떤 이유로 실패해도 실패한 자료로 남고 이유를 보여 준다."""
+    from app.knowledge import extract
+
+    def boom(*a, **k):
+        raise RuntimeError("iteration broke")
+
+    monkeypatch.setattr(extract, target, boom)
+    with pytest.raises(ExtractError) as e:
+        extract_text(ft, b"x")
+    assert str(e.value) == READ_FAILED
+
+
+def test_specific_extract_messages_kept():
+    with pytest.raises(ExtractError) as e:
+        extract_text("xlsx", b"not a zip")
+    assert "엑셀 파일을 열 수 없습니다" in str(e.value)

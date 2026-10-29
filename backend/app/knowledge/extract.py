@@ -12,6 +12,7 @@ from typing import Literal
 
 SUPPORTED = {"xlsx", "csv", "txt", "md", "pdf", "docx"}
 NO_TEXT_MESSAGE = "글자를 읽을 수 없는 파일입니다. 텍스트가 들어 있는 PDF나 문서로 올려 주세요."
+READ_FAILED_MESSAGE = "파일을 읽는 중 문제가 생겼습니다. 다른 이름으로 저장해 다시 올려 주세요."
 MAX_CHARS = 1500
 MAX_HEADING = MAX_CHARS // 2
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.?!。])\s+")
@@ -206,9 +207,23 @@ def _pdf(data: bytes) -> Extracted:
 
 
 def extract_text(file_type: str, data: bytes) -> Extracted:
+    """글을 뽑는다. 실패는 모두 ExtractError(한국어 이유)로 바꾼다: 파일 하나가 어떤 이유로 실패해도
+    실패한 자료로 남고 이유가 보여야 한다(설계 3.3). 이미 정한 구체적인 이유는 그대로 둔다."""
     ft = (file_type or "").lower().lstrip(".")
     if ft not in SUPPORTED:
         raise ExtractError("지원하지 않는 파일 형식입니다. xlsx · csv · txt · md · pdf · docx 파일을 올려 주세요.")
+    try:
+        result = _extract(ft, data)
+    except ExtractError:
+        raise
+    except Exception as e:  # noqa: BLE001 - 표 · 문단을 읽다가 난 예상하지 못한 오류(라이브러리 내부 등)
+        raise ExtractError(READ_FAILED_MESSAGE) from e
+    if not result.blocks:
+        raise ExtractError(NO_TEXT_MESSAGE)
+    return result
+
+
+def _extract(ft: str, data: bytes) -> Extracted:
     if ft == "xlsx":
         result = _xlsx(data)
     elif ft == "csv":
@@ -219,6 +234,4 @@ def extract_text(file_type: str, data: bytes) -> Extracted:
         result = _pdf(data)
     else:
         result = Extracted(_text_blocks(_decode(data)))
-    if not result.blocks:
-        raise ExtractError(NO_TEXT_MESSAGE)
     return result

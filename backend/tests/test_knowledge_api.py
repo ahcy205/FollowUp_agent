@@ -136,3 +136,47 @@ def test_upload_requires_csrf_header(client):
     bare.cookies.update(client.cookies)
     r = bare.post("/api/knowledge/sources", files=[("files", ("a.txt", TXT, "text/plain"))])
     assert r.status_code == 403
+
+
+def test_upload_unexpected_extract_error_saved_as_failed(client, monkeypatch):
+    """설계 3.3: 추출 중 예상하지 못한 오류가 나도 그 파일만 실패한 자료로 남고 나머지는 올라간다."""
+    from app.knowledge import extract
+
+    real = extract._text_blocks
+
+    def flaky(text):
+        if "boom" in text:
+            raise RuntimeError("iteration broke")
+        return real(text)
+
+    monkeypatch.setattr(extract, "_text_blocks", flaky)
+    register(client)
+    r = _up(client, [("a.txt", TXT, "text/plain"), ("b.txt", b"boom", "text/plain")])
+    assert r.status_code == 200
+    res = r.json()["results"]
+    assert res[0]["ok"] is True and res[0]["source"]["status"] == "indexed"
+    assert res[1]["ok"] is True and res[1]["source"]["status"] == "failed"
+    assert res[1]["source"]["error"] == "파일을 읽는 중 문제가 생겼습니다. 다른 이름으로 저장해 다시 올려 주세요."
+
+
+def test_upload_last_resort_error_only_that_file(client, monkeypatch, caplog):
+    """저장 단계에서 어떤 오류가 나도 그 파일만 실패로 알리고 다음 파일을 계속 올린다. 로그에는 예외 타입 이름만."""
+    from app.api import knowledge as api
+    register(client)
+    real = api.store.add_document
+
+    def flaky(db, user, filename, data, visibility):
+        if filename == "b.txt":
+            raise RuntimeError("secret-content-should-not-be-logged")
+        return real(db, user, filename, data, visibility)
+
+    monkeypatch.setattr(api.store, "add_document", flaky)
+    with caplog.at_level("WARNING"):
+        r = _up(client, [("b.txt", TXT + b"1", "text/plain"), ("a.txt", TXT, "text/plain")])
+    assert r.status_code == 200
+    res = r.json()["results"]
+    assert res[0] == {"filename": "b.txt", "ok": False, "error": "파일을 처리하지 못했습니다. 잠시 후 다시 올려 주세요.",
+                      "source": None}
+    assert res[1]["ok"] is True
+    assert "secret-content" not in caplog.text and "RuntimeError" in caplog.text
+    assert len(client.get("/api/knowledge/sources").json()["sources"]) == 1

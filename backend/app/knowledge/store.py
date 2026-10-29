@@ -1,5 +1,6 @@
 """자료 저장: 올리기 · 목록 · 공유 등급 · 지우기. 커밋은 호출하는 쪽이 한다."""
 import hashlib
+import logging
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -13,9 +14,11 @@ from app.knowledge.draft_sources import (
     refresh_drafts_for_new_internal,
     refresh_internal_warnings,
 )
-from app.knowledge.extract import SUPPORTED, ExtractError, extract_text
+from app.knowledge.extract import READ_FAILED_MESSAGE, SUPPORTED, ExtractError, extract_text
 from app.mail.errors import ActionError
 from app.models import KnowledgeChunk, KnowledgeSource, User
+
+log = logging.getLogger(__name__)
 
 VISIBILITIES = ("shareable", "internal")
 
@@ -63,6 +66,11 @@ def add_document(db: Session, user: User, filename: str, data: bytes, visibility
     except ExtractError as e:
         source.status = "failed"
         source.error = str(e)
+    except Exception as e:  # noqa: BLE001 - 덩어리 나누기 등 예상하지 못한 오류도 실패한 자료로 남긴다(설계 3.3)
+        log.warning("knowledge upload: chunking failed: %s", type(e).__name__)
+        chunks = []
+        source.status = "failed"
+        source.error = READ_FAILED_MESSAGE
     db.add(source)
     db.flush()
 

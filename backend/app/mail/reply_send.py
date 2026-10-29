@@ -128,16 +128,24 @@ def _sources_still_shareable(db: Session, user_id: int, draft: ReplyDraft) -> bo
     return ids <= shareable
 
 
+def _same_version(draft: ReplyDraft, expected: datetime) -> bool:
+    """화면이 확인한 버전(updated_at)과 같은 순간인가. SQLite는 시간대 없는 UTC를 돌려주므로 UTC 순간으로 비교한다."""
+    return draft.updated_at is not None and _utc(draft.updated_at) == _utc(expected)
+
+
 def ensure_can_send(db: Session, user: User, task: Task, draft: ReplyDraft, *,
-                    internal_ack: bool = False) -> GoogleAccount:
+                    internal_ack: bool = False, expected_updated_at: datetime | None = None) -> GoogleAccount:
     """보내기 직전 확인(Google을 부르지 않는다). API는 호출 횟수 제한보다 먼저 부른다.
 
     internal_ack: 사용자가 '내부용 자료의 값이 들어 있습니다 — 알고 보냅니다'를 체크했다 (RAG 설계 5.3).
+    expected_updated_at: 화면이 확인한 초안 버전. 주었는데 지금 초안과 다르면 보내지 않는다(확인은 그 버전에만 걸린다).
     """
     if task.status in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
         raise ActionError(CLOSED, 409)
     if draft.status != "draft":
         raise ActionError(ALREADY, 409)
+    if expected_updated_at is not None and not _same_version(draft, expected_updated_at):
+        raise ActionError(DRAFT_CHANGED, 409)
     if replied_after_draft(db, task, draft):
         # 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다('안 보내졌어요' 뒤 동기화가 찾은 경우 등). 두 번 보내지 않는다.
         raise ActionError(ALREADY_REPLIED, 409)
@@ -241,11 +249,12 @@ def _finish_sent(db: Session, task: Task, draft: ReplyDraft, account: GoogleAcco
 # ---------------------------------------------------------------- 보내기
 
 def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: GoogleClient, now: datetime, *,
-               internal_ack: bool = False) -> None:
+               internal_ack: bool = False, expected_updated_at: datetime | None = None) -> None:
     """확인 → 선점(커밋) → Gmail 발송. 결과가 불분명하면 unknown으로 두고 정상 반환한다. 커밋한다."""
     now = _utc(now)
     checked_at = draft.updated_at  # 확인한 그 초안일 때만 선점한다(확인과 선점 사이에 토큰 갱신이 있다)
-    account = ensure_can_send(db, user, task, draft, internal_ack=internal_ack)
+    account = ensure_can_send(db, user, task, draft, internal_ack=internal_ack,
+                              expected_updated_at=expected_updated_at)
     thread_id, in_reply_to, references = _reply_target(db, task, account.google_email)
     subject = _reply_subject(draft.subject)
     rfc_id = new_message_id(account.google_email)

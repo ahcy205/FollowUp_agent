@@ -452,12 +452,13 @@ def send_reply_draft(task_id: int, body: ReplySendIn | None = None, user: User =
     본문은 없어도 된다(내부용 값 확인 없음). 내부용 자료의 값이 든 초안은 internal_ack가 있어야 보낸다.
     """
     ack = body.internal_ack if body is not None else False
+    expected = body.expected_updated_at if body is not None else None
     task = _mail_task(db, task_id, user)
     draft = _act(reply_draft.find_draft, db, task)
-    _act(reply_send.ensure_can_send, db, user, task, draft, internal_ack=ack)
+    _act(reply_send.ensure_can_send, db, user, task, draft, internal_ack=ack, expected_updated_at=expected)
     send_limiter.check(f"send:{user.id}")  # after the checks above so rejected calls cost nothing
     _act(reply_send.send_draft, db, user, task, draft, get_google_client(), datetime.now(timezone.utc),
-         internal_ack=ack)
+         internal_ack=ack, expected_updated_at=expected)
     return _done(db, task, user)
 
 
