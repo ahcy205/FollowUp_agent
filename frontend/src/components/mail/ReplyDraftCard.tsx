@@ -3,6 +3,8 @@ import { parseDate } from '../../format'
 import type { DraftSourceChunk, Email, MailAct, ReplyDraft, TaskDetail } from '../../types'
 
 const UNKNOWN_CONFIRM_MS = 5 * 60_000 // backend reply_send.UNKNOWN_CONFIRM_AFTER
+// backend reply_send.NEED_INTERNAL_ACK: 초안 뒤에 생긴 내부용 값을 서버가 보내기 직전에 찾았다
+const NEED_INTERNAL_ACK = "내부용 자료의 값이 들어 있습니다. 내용을 확인하고 '알고 보냅니다'를 체크해 주세요."
 const PLACEHOLDER_RE = /\[\[[^[\]]{1,80}\]\]/g // backend draft_checks.PLACEHOLDER_RE
 
 function placeholdersOf(body: string): string[] {
@@ -24,9 +26,10 @@ function threadSubject(emails: Email[]): string {
   return bareSubject(latest.subject)
 }
 
-/** "8000원" → "8,000원". 서버는 내부용 값을 천 단위 구분 없이 저장한다. 0으로 시작하는 수(품번 등)와 소수부는 그대로 둔다. */
+/** "8000원" → "8,000원". 서버는 내부용 값을 천 단위 구분 없이 저장한다.
+ * 0으로 시작하는 수(품번 등) · 소수부 · "-"로 이은 번호("010-1234", "1234-5678")는 그대로 둔다. */
 function displayValue(value: string) {
-  return value.replace(/(?<![\d.,])[1-9]\d{3,}/g, (n) => Number(n).toLocaleString('ko-KR'))
+  return value.replace(/(?<![\d.,-])[1-9]\d{3,}(?![\d-])/g, (n) => Number(n).toLocaleString('ko-KR'))
 }
 
 /** 자료 올린 날짜 "10/20" */
@@ -69,6 +72,8 @@ export default function ReplyDraftCard({
   // "알고 보냅니다" 체크는 체크한 때의 서버 초안에만 걸린다. 초안이 바뀌거나 확인 단계를 다시 열면 풀린다.
   const [ack, setAck] = useState<{ at: string; on: boolean }>({ at: '', on: false })
   const acked = ack.on && ack.at === draft.updated_at
+  // 서버가 보내기 직전에 내부용 값을 찾아 막은 초안(updated_at). 저장된 경고에 없어도 체크를 보인다.
+  const [serverNeedsAckAt, setServerNeedsAckAt] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => Date.now())
@@ -134,8 +139,19 @@ export default function ReplyDraftCard({
   }
 
   const send = async () => {
-    await run('send', () => act('/reply-draft/send', needsAck ? { internal_ack: acked } : undefined))
+    let missingAck = false
+    const at = draft.updated_at
+    await run('send', () =>
+      act('/reply-draft/send', needsAck ? { internal_ack: acked } : undefined).catch((e: Error) => {
+        missingAck = e.message === NEED_INTERNAL_ACK
+        throw e
+      }),
+    )
     setAck({ at: '', on: false })
+    if (missingAck) {
+      setServerNeedsAckAt(at) // 확인 단계를 연 채로 두고 체크를 보인다
+      return
+    }
     setStep('edit')
   }
 
@@ -153,7 +169,7 @@ export default function ReplyDraftCard({
   const facts = src.facts ?? []
   const internal = src.internal_values ?? []
   const sourcesChanged = src.sources_changed === true
-  const needsAck = internal.length > 0 || (w.internal_values ?? 0) > 0
+  const needsAck = internal.length > 0 || (w.internal_values ?? 0) > 0 || serverNeedsAckAt === draft.updated_at
   const chunkByRef = new Map<string, DraftSourceChunk>(chunks.map((c) => [c.ref, c]))
   const usedRefs = new Set(facts.map((f) => f.ref))
   // 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다. 서버도 보내기를 409로 막는다.

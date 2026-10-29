@@ -255,6 +255,23 @@ def refresh_internal_warnings(db: Session, user_id: int, source_id: int, drafts:
     return count
 
 
+def refresh_drafts_for_new_internal(db: Session, user_id: int) -> int:
+    """내부용 자료가 새로 생기면(내부용으로 올림 · 내부용으로 바꿈) 그 사용자의 보내기 전(draft) 초안 경고를 모두 다시 계산한다.
+
+    초안을 만든 뒤 생긴 내부용 값도 카드에 경고 · '알고 보냅니다'로 보이게 하기 위해서다(보내기 직전 확인과 같은 기준).
+    updated_at은 그대로 둔다(두 번 보내기 방지 기준). 스위치가 꺼져 있으면 하지 않는다. 커밋은 호출한 쪽이.
+    """
+    if not get_settings().knowledge_enabled:
+        return 0
+    db.flush()  # 방금 올리거나 바꾼 자료가 내부용 값 색인에 보이게 한다
+    drafts = db.scalars(select(ReplyDraft).where(ReplyDraft.user_id == user_id, ReplyDraft.status == "draft")).all()
+    for draft in drafts:
+        _refresh_keep_time(db, draft)
+    if drafts:
+        log.info("knowledge: internal warnings refreshed in %d drafts", len(drafts))
+    return len(drafts)
+
+
 def purge_source_from_drafts(db: Session, user_id: int, source_id: int) -> int:
     """자료를 지우거나 내부용으로 바꿀 때 그 사용자의 모든 초안(업무 · 초안 상태 무관)에서 그 자료의 사본 · 항목을 걷어낸다 (5.4).
 

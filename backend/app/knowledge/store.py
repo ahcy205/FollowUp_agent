@@ -8,7 +8,11 @@ from app.agent.audit import log_action
 from app.agent.guard import detect_injection
 from app.config import get_settings
 from app.knowledge.chunking import chunk_blocks
-from app.knowledge.draft_sources import purge_source_from_drafts, refresh_internal_warnings
+from app.knowledge.draft_sources import (
+    purge_source_from_drafts,
+    refresh_drafts_for_new_internal,
+    refresh_internal_warnings,
+)
 from app.knowledge.extract import SUPPORTED, ExtractError, extract_text
 from app.mail.errors import ActionError
 from app.models import KnowledgeChunk, KnowledgeSource, User
@@ -88,6 +92,8 @@ def add_document(db: Session, user: User, filename: str, data: bytes, visibility
         output_data={"source_id": source.id, "chunks": len(chunks), "flagged": flagged, "status": source.status},
         reason="자료를 올렸습니다",
     )
+    if source.visibility == "internal" and source.status != "failed":
+        refresh_drafts_for_new_internal(db, user.id)  # 초안을 만든 뒤 올린 내부용 값도 카드에 경고로 보인다
     return source
 
 
@@ -116,6 +122,7 @@ def set_visibility(db: Session, source: KnowledgeSource, visibility: str) -> Non
     source.visibility = visibility
     if was == "shareable" and visibility == "internal":
         purge_source_from_drafts(db, source.user_id, source.id)
+        refresh_drafts_for_new_internal(db, source.user_id)  # 인용하지 않은 초안에도 내부용 값 경고가 생길 수 있다
     elif was == "internal" and visibility == "shareable":
         refresh_internal_warnings(db, source.user_id, source.id)  # 그 값은 이제 내부용이 아니다
 

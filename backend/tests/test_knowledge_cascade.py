@@ -276,7 +276,14 @@ def test_send_rechecks_internal_values_from_body(fake):
         db.commit()
         assert d.warnings["internal_values"] == 0
         _doc(db, uid, "원가표.csv", COST_8800, vis="internal")
-        assert db.get(ReplyDraft, did).warnings["internal_values"] == 0  # 저장된 경고는 그대로
+        # 올릴 때 저장된 경고도 다시 계산하지만(아래 테스트), 보내기 직전 확인은 저장된 경고를 믿지 않는다:
+        # 저장된 경고를 일부러 낡게 만들어도 막아야 한다.
+        stale = {**d.warnings, "internal_values": 0}
+        db.execute(update(ReplyDraft).where(ReplyDraft.id == did)
+                   .values(warnings=stale, sources={**d.sources, "internal_values": []}))
+        db.commit()
+        db.expire_all()
+        assert db.get(ReplyDraft, did).warnings["internal_values"] == 0
         with pytest.raises(ActionError) as e:
             _send(db, tid, fake)
         assert (str(e.value), e.value.status) == (NEED_ACK, 409)
@@ -318,3 +325,71 @@ def test_draft_out_cannot_send_when_sources_changed(fake):
         store.delete_source(db, db.get(KnowledgeSource, price.id))
         db.commit()
         assert _draft_out(db, db.get(Task, tid), NOW).can_send is False
+
+
+def test_new_internal_upload_refreshes_draft_warnings(fake):
+    """초안을 만든 뒤 내부용 자료를 올리면 보내기 전 초안의 내부용 값 경고를 다시 계산한다(카드에 '알고 보냅니다'가 보이게).
+    updated_at은 그대로 둔다(두 번 보내기 방지 기준)."""
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid, body=MEMO_BODY)
+        d = db.get(ReplyDraft, did)
+        ds.refresh_draft_checks(db, d)
+        db.commit()
+        assert d.warnings["internal_values"] == 0
+        old = _old_updated_at(db, did)
+        fp = task_fingerprint(db, db.get(Task, tid))
+        cost = _doc(db, uid, "원가표.csv", COST_8800, vis="internal")
+        d = db.get(ReplyDraft, did)
+        db.refresh(d)
+        assert d.warnings["internal_values"] == 1
+        assert [v["source_ids"] for v in d.sources["internal_values"]] == [[cost.id]]
+        assert d.updated_at.replace(tzinfo=UTC) == old
+        assert task_fingerprint(db, db.get(Task, tid)) != fp  # 열린 화면이 새 경고를 받는다
+
+
+def test_shareable_upload_does_not_flag(fake):
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid, body=MEMO_BODY)
+        ds.refresh_draft_checks(db, db.get(ReplyDraft, did))
+        db.commit()
+        _doc(db, uid, "원가표.csv", COST_8800, vis="shareable")
+        d = db.get(ReplyDraft, did)
+        db.refresh(d)
+        assert d.warnings["internal_values"] == 0
+
+
+def test_downgrade_uncited_source_refreshes_draft_warnings(fake):
+    """인용하지 않은 공유 자료를 내부용으로 바꾸면, 그 값을 쓴 보내기 전 초안에 내부용 값 경고가 생긴다."""
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid, body=MEMO_BODY)
+        cost = _doc(db, uid, "원가표.csv", COST_8800, vis="shareable")
+        d = db.get(ReplyDraft, did)
+        ds.refresh_draft_checks(db, d)
+        db.commit()
+        assert d.warnings["internal_values"] == 0 and not d.sources.get("chunks")
+        old = _old_updated_at(db, did)
+        store.set_visibility(db, db.get(KnowledgeSource, cost.id), "internal")
+        db.commit()
+        d = db.get(ReplyDraft, did)
+        db.refresh(d)
+        assert d.warnings["internal_values"] == 1
+        assert [v["source_ids"] for v in d.sources["internal_values"]] == [[cost.id]]
+        assert not d.sources.get("sources_changed")
+        assert d.updated_at.replace(tzinfo=UTC) == old
+
+
+def test_internal_upload_with_switch_off_leaves_drafts(fake, monkeypatch):
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid, body=MEMO_BODY)
+        ds.refresh_draft_checks(db, db.get(ReplyDraft, did))
+        db.commit()
+        before = dict(db.get(ReplyDraft, did).warnings)
+        monkeypatch.setattr(get_settings(), "knowledge_enabled", False)
+        _doc(db, uid, "원가표.csv", COST_8800, vis="internal")
+        d = db.get(ReplyDraft, did)
+        db.refresh(d)
+        assert d.warnings == before
