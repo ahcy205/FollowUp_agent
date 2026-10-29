@@ -150,6 +150,7 @@ class ReplyDraftOut(BaseModel):
     body: str
     status: str
     warnings: dict
+    sources: dict = {}  # 넣어 준 자료 덩어리 사본 · 자료에서 가져온 항목 · 내부용 값 (RAG 설계 5.4)
     can_send: bool  # 빈칸이 없고 상태가 draft일 때만
     unknown_since: datetime | None  # 발송 결과가 불분명해진 시각 (status == "unknown"일 때만)
     updated_at: datetime  # 만들기 · 고치기 · 초안으로 되돌리기 시각. reply_sent_at이 더 늦으면 이미 답장을 보낸 것

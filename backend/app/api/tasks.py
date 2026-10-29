@@ -192,6 +192,7 @@ def _draft_out(db: Session, task: Task, now: datetime) -> ReplyDraftOut | None:
         purpose=d.purpose, to_addr=d.to_addr, cc_candidates=list(d.cc_candidates or []),
         cc_selected=list(d.cc_selected or []), subject=d.subject, body=d.body,
         status="unknown" if unknown else d.status, warnings=warnings,
+        sources=d.sources if isinstance(d.sources, dict) else {},
         can_send=d.status == "draft" and not reply_draft.placeholders(d.body),
         unknown_since=d.sending_at if unknown else None, updated_at=d.updated_at,
         replied_after=d.status == "draft" and reply_send.replied_after_draft(db, task, d),
