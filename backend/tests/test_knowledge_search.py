@@ -118,3 +118,14 @@ def test_is_internal_candidate_contract():
     assert not search.is_internal_candidate("12", "12")
     assert search.is_internal_candidate("12", "12원")
     assert not search.is_internal_candidate("12", "12개")
+
+
+def test_identifier_only_in_title_scores_below_identifier_in_chunk(client):
+    """사양서 표처럼 품번이 자료 이름에만 있는 덩어리도 찾되, 품번이 그대로 든 덩어리보다 낮게 둔다."""
+    uid = _uid(client)
+    with SessionLocal() as db:
+        _add(db, uid, "TS-200_사양서.txt", "동작 전원은 DC 5V입니다")
+        _add(db, uid, "단가.txt", "TS-200 단가는 12,000원입니다")
+        hits = search.search_shareable(db, uid, "TS-200 동작 전원")
+        assert [h.title for h in hits] == ["단가.txt", "TS-200_사양서.txt"]
+        assert search.TITLE_ID_WEIGHT <= hits[1].score < search.ID_WEIGHT

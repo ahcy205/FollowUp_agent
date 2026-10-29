@@ -12,8 +12,11 @@ from app.models import KnowledgeChunk, KnowledgeSource
 
 log = logging.getLogger(__name__)
 
-# 시작값. Task 9 측정으로 조정한다.
+# Task 9 측정(docs/evals/2026-10-29-rag-documents.md)으로 정한 값.
 ID_WEIGHT = 3.0
+# 자료 이름(파일 이름)에만 있는 식별자. 사양서 표처럼 품번이 제목에만 있고 덩어리에는 없는 경우를 찾기 위해서다.
+# 덩어리에 그대로 든 식별자보다 낮게 둬서, 그 품번 줄이 있는 덩어리를 밀어내지 않게 한다.
+TITLE_ID_WEIGHT = 1.5
 GRAM_WEIGHT = 1.0
 TIE = 0.05
 MIN_SCORE = 0.15
@@ -65,7 +68,9 @@ def search_shareable(db: Session, user_id: int, query: str, limit: int = 5, per_
     ).all()
     scored: list[Hit] = []
     for chunk, source in rows:
-        id_score = len(q_ids & identifiers(chunk.text)) * ID_WEIGHT
+        chunk_ids = q_ids & identifiers(chunk.text)
+        title_ids = (q_ids & identifiers(source.title)) - chunk_ids
+        id_score = len(chunk_ids) * ID_WEIGHT + len(title_ids) * TITLE_ID_WEIGHT
         # 덩어리가 질의보다 훨씬 길어 Jaccard는 너무 작아지므로 질의 기준 겹침 비율을 쓴다.
         gram_score = (len(q_grams & _grams(chunk.text)) / len(q_grams)) * GRAM_WEIGHT if q_grams else 0.0
         score = id_score + gram_score
