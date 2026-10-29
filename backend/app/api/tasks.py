@@ -50,6 +50,7 @@ from app.schemas import (
     ReplyDraftIn,
     ReplyDraftOut,
     ReplyDraftUpdateIn,
+    ReplySendIn,
     RunOut,
     SnoozeIn,
     TaskBrief,
@@ -208,8 +209,11 @@ def task_fingerprint(db: Session, task: Task) -> tuple:
     mail_count = db.scalar(select(func.count()).select_from(Email).where(Email.task_id == task.id))
     snoozed = task.snoozed_until.isoformat() if task.snoozed_until else ""
     undo = len(task.merge_undo) if isinstance(task.merge_undo, dict) else 0
+    # 자료를 지우거나 내부용으로 바꾸면 업무는 그대로이고 초안만 바뀐다: 열린 화면에 바로 보이도록 초안 시각도 넣는다
+    draft_at = db.scalar(select(ReplyDraft.updated_at).where(ReplyDraft.user_id == task.user_id,
+                                                             ReplyDraft.task_id == task.id))
     return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None,
-            snoozed, undo, mail_count or 0)
+            snoozed, undo, mail_count or 0, draft_at.isoformat() if draft_at else None)
 
 
 SSE_POLL_SECONDS = 0.4
@@ -434,13 +438,19 @@ def delete_reply_draft(task_id: int, user: User = Depends(get_current_user), db:
 
 
 @router.post("/tasks/{task_id}/reply-draft/send", response_model=TaskDetail)
-def send_reply_draft(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """승인한 초안을 원래 Gmail 스레드로 보낸다. 받는 사람은 서버가 다시 확인한다. 결과가 불분명하면 unknown."""
+def send_reply_draft(task_id: int, body: ReplySendIn | None = None, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    """승인한 초안을 원래 Gmail 스레드로 보낸다. 받는 사람은 서버가 다시 확인한다. 결과가 불분명하면 unknown.
+
+    본문은 없어도 된다(내부용 값 확인 없음). 내부용 자료의 값이 든 초안은 internal_ack가 있어야 보낸다.
+    """
+    ack = body.internal_ack if body is not None else False
     task = _mail_task(db, task_id, user)
     draft = _act(reply_draft.find_draft, db, task)
-    _act(reply_send.ensure_can_send, db, user, task, draft)
+    _act(reply_send.ensure_can_send, db, user, task, draft, internal_ack=ack)
     send_limiter.check(f"send:{user.id}")  # after the checks above so rejected calls cost nothing
-    _act(reply_send.send_draft, db, user, task, draft, get_google_client(), datetime.now(timezone.utc))
+    _act(reply_send.send_draft, db, user, task, draft, get_google_client(), datetime.now(timezone.utc),
+         internal_ack=ack)
     return _done(db, task, user)
 
 

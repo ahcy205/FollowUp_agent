@@ -12,6 +12,7 @@ import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.agent.guard import wrap_untrusted
@@ -209,6 +210,40 @@ def refresh_draft_checks(db: Session, draft: ReplyDraft) -> None:
     draft.warnings, draft.sources = warnings, sources
 
 
+def _cites(sources, source_id: int) -> bool:
+    return isinstance(sources, dict) and any(
+        isinstance(c, dict) and c.get("source_id") == source_id for c in (sources.get("chunks") or []))
+
+
 def purge_source_from_drafts(db: Session, user_id: int, source_id: int) -> int:
-    """자료를 지우거나 내부용으로 바꿀 때 초안에서 그 출처를 걷어낸다. Task 6에서 채운다."""
-    return 0
+    """자료를 지우거나 내부용으로 바꿀 때 그 사용자의 모든 초안(업무 · 초안 상태 무관)에서 그 자료의 사본 · 항목을 걷어낸다 (5.4).
+
+    아직 보내지 않은(draft) 초안은 남은 사본으로 경고를 다시 계산하고 '참고한 자료가 바뀌었다'고 표시한다.
+    보내는 중 · 보낸 · 결과 불분명 초안은 사본만 지운다(이미 나간 본문은 그대로다). 바뀐 초안 수를 돌려준다. 커밋은 호출한 쪽이.
+    sources는 JSON이라 그 사용자의 초안을 한 번에 읽어 파이썬에서 거른다(개인 규모).
+    """
+    db.flush()  # 세션은 autoflush가 꺼져 있다: 방금 바꾼 공유 등급이 내부용 값 색인(경고 재계산)에 보이게 한다
+    drafts = db.scalars(select(ReplyDraft).where(ReplyDraft.user_id == user_id)).all()
+    changed = 0
+    for draft in drafts:
+        if not _cites(draft.sources, source_id):
+            continue
+        chunks = list(draft.sources.get("chunks") or [])
+        gone = {c.get("ref") for c in chunks if isinstance(c, dict) and c.get("source_id") == source_id}
+        kept = [c for c in chunks if not (isinstance(c, dict) and c.get("source_id") == source_id)]
+        facts = [f for f in (draft.sources.get("facts") or []) if not (isinstance(f, dict) and f.get("ref") in gone)]
+        new_sources = {**draft.sources, "chunks": kept, "facts": facts}  # 새 객체: JSON 변경 감지
+        if draft.status == "draft":
+            draft.sources = {**new_sources, "sources_changed": True}
+            refresh_draft_checks(db, draft)  # 저장된 sources_changed를 그대로 옮긴다
+            draft.updated_at = datetime.now(timezone.utc)
+        else:
+            # 보낸 · 보내는 중 초안은 사본만 지운다. ORM으로 바꾸면 updated_at이 자동 갱신되므로 Core로 그 값을 유지한다.
+            db.execute(update(ReplyDraft).where(ReplyDraft.id == draft.id)
+                       .values(sources=new_sources, updated_at=ReplyDraft.updated_at)
+                       .execution_options(synchronize_session=False))
+            db.expire(draft, ["sources"])
+        changed += 1
+    if changed:
+        log.info("knowledge source %s: purged from %d drafts", source_id, changed)
+    return changed

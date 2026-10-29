@@ -257,6 +257,11 @@ class NoReplyIn(_Strict):
     choice: Literal["followup", "wait", "close"]
 
 
+class ReplySendIn(_Strict):
+    """답장 보내기. 내부용 자료의 값이 든 초안은 '알고 보냅니다'를 체크해야 보낸다 (RAG 설계 5.3)."""
+    internal_ack: StrictBool = False
+
+
 class ReplyConfirmIn(_Strict):
     """발송 결과가 불분명한 초안: 보낸편지함에서 확인한 결과."""
     sent: StrictBool
