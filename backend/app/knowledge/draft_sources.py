@@ -215,18 +215,63 @@ def _cites(sources, source_id: int) -> bool:
         isinstance(c, dict) and c.get("source_id") == source_id for c in (sources.get("chunks") or []))
 
 
+def _warns_internal(sources, source_id: int) -> bool:
+    return isinstance(sources, dict) and any(
+        isinstance(v, dict) and source_id in (v.get("source_ids") or []) for v in (sources.get("internal_values") or []))
+
+
+def _update_keep_time(db: Session, draft: ReplyDraft, **values) -> None:
+    """updated_at을 그대로 둔 채 바꾼다. ORM으로 바꾸면 onupdate가 updated_at을 새로 쓴다.
+
+    updated_at은 '초안을 만들거나 고친 뒤 보낸 답장이 있는가'(replied_after_draft)의 기준이라,
+    자료 변경 같은 사용자 아닌 변경으로 앞당기면 이미 보낸 답장을 놓쳐 두 번 보낼 수 있다.
+    """
+    db.execute(update(ReplyDraft).where(ReplyDraft.id == draft.id)
+               .values(**values, updated_at=ReplyDraft.updated_at).execution_options(synchronize_session=False))
+    db.expire(draft, list(values))
+
+
+def _refresh_keep_time(db: Session, draft: ReplyDraft) -> None:
+    task = db.get(Task, draft.task_id)
+    suspicious = (draft.warnings or {}).get("suspicious") if isinstance(draft.warnings, dict) else []
+    warnings, sources = compute_checks(db, task, draft.body, draft.user_input, draft.sources, suspicious or [])
+    _update_keep_time(db, draft, warnings=warnings, sources=sources)
+
+
+def refresh_internal_warnings(db: Session, user_id: int, source_id: int, drafts: list[ReplyDraft] | None = None) -> int:
+    """내부용 자료를 지우거나 공유 가능으로 바꿀 때, 그 자료의 값을 경고하던 보내기 전(draft) 초안의 경고를 다시 계산한다.
+
+    화면에 낡은 경고가 남지 않게 하기 위해서다. 보내기 직전 확인은 어차피 본문으로 다시 계산한다(reply_send).
+    sources_changed는 켜지 않는다(인용한 자료가 아니다). 커밋은 호출한 쪽이.
+    """
+    db.flush()
+    if drafts is None:
+        drafts = db.scalars(select(ReplyDraft).where(ReplyDraft.user_id == user_id)).all()
+    count = 0
+    for draft in drafts:
+        if draft.status == "draft" and _warns_internal(draft.sources, source_id):
+            _refresh_keep_time(db, draft)
+            count += 1
+    return count
+
+
 def purge_source_from_drafts(db: Session, user_id: int, source_id: int) -> int:
     """자료를 지우거나 내부용으로 바꿀 때 그 사용자의 모든 초안(업무 · 초안 상태 무관)에서 그 자료의 사본 · 항목을 걷어낸다 (5.4).
 
-    아직 보내지 않은(draft) 초안은 남은 사본으로 경고를 다시 계산하고 '참고한 자료가 바뀌었다'고 표시한다.
-    보내는 중 · 보낸 · 결과 불분명 초안은 사본만 지운다(이미 나간 본문은 그대로다). 바뀐 초안 수를 돌려준다. 커밋은 호출한 쪽이.
+    - 보내기 전(draft) 초안: 남은 사본으로 경고를 다시 계산하고 '참고한 자료가 바뀌었다'(sources_changed)를 켠다.
+    - 보내는 중 · 결과 불분명 초안: 사본을 지우고 sources_changed를 켠다. '안 보내졌어요'나 거절로 초안에 돌아오면
+      보내기 직전 확인이 막아야 하기 때문이다. updated_at은 그대로 둔다(발송 상태 판단의 기준).
+    - 보낸 초안: 사본만 지운다(이미 나간 본문은 그대로다).
+    그 자료의 값을 내부용 값 경고로 보이던 보내기 전 초안도 경고를 다시 계산한다(지운 내부용 자료).
+    바뀐(사본을 지운) 초안 수를 돌려준다. 커밋은 호출한 쪽이.
     sources는 JSON이라 그 사용자의 초안을 한 번에 읽어 파이썬에서 거른다(개인 규모).
     """
-    db.flush()  # 세션은 autoflush가 꺼져 있다: 방금 바꾼 공유 등급이 내부용 값 색인(경고 재계산)에 보이게 한다
+    db.flush()  # 세션은 autoflush가 꺼져 있다: 방금 바꾼 공유 등급 · 지운 자료가 내부용 값 색인에 보이게 한다
     drafts = db.scalars(select(ReplyDraft).where(ReplyDraft.user_id == user_id)).all()
-    changed = 0
+    changed, rest = 0, []
     for draft in drafts:
         if not _cites(draft.sources, source_id):
+            rest.append(draft)
             continue
         chunks = list(draft.sources.get("chunks") or [])
         gone = {c.get("ref") for c in chunks if isinstance(c, dict) and c.get("source_id") == source_id}
@@ -237,13 +282,26 @@ def purge_source_from_drafts(db: Session, user_id: int, source_id: int) -> int:
             draft.sources = {**new_sources, "sources_changed": True}
             refresh_draft_checks(db, draft)  # 저장된 sources_changed를 그대로 옮긴다
             draft.updated_at = datetime.now(timezone.utc)
-        else:
-            # 보낸 · 보내는 중 초안은 사본만 지운다. ORM으로 바꾸면 updated_at이 자동 갱신되므로 Core로 그 값을 유지한다.
-            db.execute(update(ReplyDraft).where(ReplyDraft.id == draft.id)
-                       .values(sources=new_sources, updated_at=ReplyDraft.updated_at)
-                       .execution_options(synchronize_session=False))
-            db.expire(draft, ["sources"])
+        elif draft.status == "sent":
+            _update_keep_time(db, draft, sources=new_sources)
+        else:  # sending · unknown
+            _update_keep_time(db, draft, sources={**new_sources, "sources_changed": True})
         changed += 1
-    if changed:
-        log.info("knowledge source %s: purged from %d drafts", source_id, changed)
+    refreshed = refresh_internal_warnings(db, user_id, source_id, rest)
+    if changed or refreshed:
+        log.info("knowledge source %s: purged from %d drafts, internal warnings refreshed in %d",
+                 source_id, changed, refreshed)
     return changed
+
+
+def internal_values_now(db: Session, task: Task, draft: ReplyDraft) -> list[dict]:
+    """보내기 직전: 지금 본문으로 내부용 값을 다시 찾는다(저장된 경고를 믿지 않는다, 5.3). 외부 호출 없음.
+
+    허용 글은 만들 때와 같다: 확인을 통과한 인용 줄 + 스레드 메일. 메모 · 입력은 넣지 않는다.
+    """
+    from app.mail.reply_draft import _emails  # 순환 import 피하기
+
+    sources = draft.sources if isinstance(draft.sources, dict) else {}
+    facts = [f for f in (sources.get("facts") or []) if isinstance(f, dict)]
+    allowed = "\n".join([evidence_lines(facts), *[e.content or "" for e in _emails(db, task)]])
+    return internal_values(db, task.user_id, draft.body, allowed)

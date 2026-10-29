@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 from datetime import datetime, timezone
 
@@ -194,7 +195,8 @@ def _draft_out(db: Session, task: Task, now: datetime) -> ReplyDraftOut | None:
         cc_selected=list(d.cc_selected or []), subject=d.subject, body=d.body,
         status="unknown" if unknown else d.status, warnings=warnings,
         sources=d.sources if isinstance(d.sources, dict) else {},
-        can_send=d.status == "draft" and not reply_draft.placeholders(d.body),
+        can_send=(d.status == "draft" and not reply_draft.placeholders(d.body)
+                  and not (isinstance(d.sources, dict) and d.sources.get("sources_changed"))),
         unknown_since=d.sending_at if unknown else None, updated_at=d.updated_at,
         replied_after=d.status == "draft" and reply_send.replied_after_draft(db, task, d),
     )
@@ -209,11 +211,16 @@ def task_fingerprint(db: Session, task: Task) -> tuple:
     mail_count = db.scalar(select(func.count()).select_from(Email).where(Email.task_id == task.id))
     snoozed = task.snoozed_until.isoformat() if task.snoozed_until else ""
     undo = len(task.merge_undo) if isinstance(task.merge_undo, dict) else 0
-    # 자료를 지우거나 내부용으로 바꾸면 업무는 그대로이고 초안만 바뀐다: 열린 화면에 바로 보이도록 초안 시각도 넣는다
-    draft_at = db.scalar(select(ReplyDraft.updated_at).where(ReplyDraft.user_id == task.user_id,
-                                                             ReplyDraft.task_id == task.id))
+    # 자료를 지우거나 등급을 바꾸면 업무는 그대로이고 초안만 바뀐다: 열린 화면에 바로 보이도록 초안도 넣는다.
+    # 자료 변경은 updated_at을 그대로 두기도 하므로(발송 판단 기준) 경고 · 사본의 요약도 넣는다.
+    row = db.execute(select(ReplyDraft.updated_at, ReplyDraft.warnings, ReplyDraft.sources)
+                     .where(ReplyDraft.user_id == task.user_id, ReplyDraft.task_id == task.id)).first()
+    draft_fp = None
+    if row is not None:
+        draft_fp = (row[0].isoformat() if row[0] else None,
+                    hash(json.dumps([row[1], row[2]], sort_keys=True, ensure_ascii=False, default=str)))
     return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None,
-            snoozed, undo, mail_count or 0, draft_at.isoformat() if draft_at else None)
+            snoozed, undo, mail_count or 0, draft_fp)
 
 
 SSE_POLL_SECONDS = 0.4

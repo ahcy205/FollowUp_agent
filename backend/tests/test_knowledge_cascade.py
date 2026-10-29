@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select, update
 
-from app.api.tasks import task_fingerprint
+from app.api.tasks import _draft_out, task_fingerprint
 from app.config import get_settings
 from app.db import SessionLocal
 from app.knowledge import draft_sources as ds
@@ -19,6 +19,9 @@ UTC = timezone.utc
 NOW = datetime(2026, 10, 26, 1, 0, tzinfo=UTC)
 PRICE_CSV = "품번,단가\nTS-200,1200\n"
 SHIP_CSV = "품번,배송\nTS-200,무료 배송\n"
+COST_1200 = "품번,원가\nTS-100,1200\n"
+COST_8800 = "품번,원가\nTS-200,8800\n"
+MEMO_BODY = "안녕하세요.\n원가는 8,800원입니다.\n감사합니다."  # 메모에서 온 값(인용 줄 · 상대 메일에 없음)
 CHANGED = "참고한 자료가 지워졌거나 내부용으로 바뀌었습니다. 초안을 다시 만들어 주세요."
 NEED_ACK = "내부용 자료의 값이 들어 있습니다. 내용을 확인하고 '알고 보냅니다'를 체크해 주세요."
 
@@ -150,9 +153,7 @@ def test_send_requires_internal_ack(fake):
     with SessionLocal() as db:
         uid = _user(db)
         tid, did = _setup(db, uid)
-        d = db.get(ReplyDraft, did)
-        d.warnings = {"internal_values": 1}
-        db.commit()
+        _doc(db, uid, "원가표.csv", COST_1200, vis="internal")  # 본문의 1200원이 내부용 자료에 있다
         with pytest.raises(ActionError) as e:
             _send(db, tid, fake)
         assert (str(e.value), e.value.status) == (NEED_ACK, 409)
@@ -168,9 +169,7 @@ def test_api_send_internal_ack(fake, client):
     me = register(client)
     with SessionLocal() as db:
         tid, did = _setup(db, me["id"])
-        d = db.get(ReplyDraft, did)
-        d.warnings = {"internal_values": 2}
-        db.commit()
+        _doc(db, me["id"], "원가표.csv", COST_1200, vis="internal")
     r = client.post(f"/api/tasks/{tid}/reply-draft/send", json={})
     assert r.status_code == 409 and r.json()["detail"] == NEED_ACK
     r = client.post(f"/api/tasks/{tid}/reply-draft/send", json={"internal_ack": True})
@@ -216,3 +215,106 @@ def test_fingerprint_changes_when_draft_updated(fake):
         store.delete_source(db, db.get(KnowledgeSource, price.id))
         db.commit()
         assert task_fingerprint(db, db.get(Task, tid)) != before
+
+
+# ---------------------------------------------------------------- 고침 1차
+
+def test_unknown_draft_purged_then_not_sent_blocks(fake):
+    """결과 불분명 초안도 '자료가 바뀌었다'를 켠다: '안 보내졌어요'로 초안에 돌아와도 내부용이 된 값을 보내지 않는다."""
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid, status="unknown")
+        price = _doc(db, uid, "단가표.csv", PRICE_CSV)
+        _cite(db, did, price)
+        d = db.get(ReplyDraft, did)
+        d.sending_at = NOW - timedelta(minutes=6)
+        db.commit()
+        before = db.get(ReplyDraft, did).updated_at
+        store.set_visibility(db, db.get(KnowledgeSource, price.id), "internal")
+        db.commit()
+        d = db.get(ReplyDraft, did)
+        db.refresh(d)
+        assert d.sources["chunks"] == [] and d.sources["sources_changed"] is True
+        assert d.updated_at.replace(tzinfo=UTC) == before.replace(tzinfo=UTC)
+        rs.confirm_unknown(db, db.get(User, uid), db.get(Task, tid), d, sent=False, now=NOW)
+        db.commit()
+        assert d.status == "draft"
+        with pytest.raises(ActionError) as e:
+            _send(db, tid, fake, internal_ack=True)
+        assert (str(e.value), e.value.status) == (CHANGED, 409)
+        assert fake.sent == []
+
+
+def test_claim_requires_draft_unchanged_since_check(fake, monkeypatch):
+    """확인과 선점 사이(토큰 갱신)에 초안이 바뀌면 선점하지 않는다."""
+    original = rs.access_token_for
+
+    def edit_meanwhile(db, account, client):
+        with SessionLocal() as db2:
+            db2.execute(update(ReplyDraft).where(ReplyDraft.id == did)
+                        .values(body="바뀐 본문 1200원", updated_at=datetime.now(UTC)))
+            db2.commit()
+        return original(db, account, client)
+
+    monkeypatch.setattr(rs, "access_token_for", edit_meanwhile)
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid)
+        with pytest.raises(ActionError) as e:
+            _send(db, tid, fake)
+        assert (str(e.value), e.value.status) == ("초안이 방금 바뀌었습니다. 내용을 다시 확인한 뒤 보내 주세요.", 409)
+        assert fake.sent == [] and db.get(ReplyDraft, did).status == "draft"
+
+
+def test_send_rechecks_internal_values_from_body(fake):
+    """초안을 만든 뒤 올린 내부용 자료의 값도 보내기 직전에 잡는다(저장된 경고를 믿지 않는다)."""
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid, body=MEMO_BODY)
+        d = db.get(ReplyDraft, did)
+        ds.refresh_draft_checks(db, d)
+        db.commit()
+        assert d.warnings["internal_values"] == 0
+        _doc(db, uid, "원가표.csv", COST_8800, vis="internal")
+        assert db.get(ReplyDraft, did).warnings["internal_values"] == 0  # 저장된 경고는 그대로
+        with pytest.raises(ActionError) as e:
+            _send(db, tid, fake)
+        assert (str(e.value), e.value.status) == (NEED_ACK, 409)
+        assert fake.sent == []
+        assert _send(db, tid, fake, internal_ack=True).status == "sent" and len(fake.sent) == 1
+
+
+@pytest.mark.parametrize("change", ["shareable", "delete"])
+def test_internal_source_change_refreshes_warnings(fake, change):
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid, body=MEMO_BODY)
+        cost = _doc(db, uid, "원가표.csv", COST_8800, vis="internal")
+        d = db.get(ReplyDraft, did)
+        ds.refresh_draft_checks(db, d)
+        db.commit()
+        assert d.warnings["internal_values"] == 1 and d.sources["internal_values"][0]["source_ids"] == [cost.id]
+        old = _old_updated_at(db, did)
+        source = db.get(KnowledgeSource, cost.id)
+        if change == "shareable":
+            store.set_visibility(db, source, "shareable")
+        else:
+            store.delete_source(db, source)
+        db.commit()
+        d = db.get(ReplyDraft, did)
+        db.refresh(d)
+        assert d.warnings["internal_values"] == 0 and d.sources["internal_values"] == []
+        assert not d.sources.get("sources_changed")
+        assert d.updated_at.replace(tzinfo=UTC) == old  # 발송 판단 기준 시각은 그대로
+
+
+def test_draft_out_cannot_send_when_sources_changed(fake):
+    with SessionLocal() as db:
+        uid = _user(db)
+        tid, did = _setup(db, uid)
+        price = _doc(db, uid, "단가표.csv", PRICE_CSV)
+        _cite(db, did, price)
+        assert _draft_out(db, db.get(Task, tid), NOW).can_send is True
+        store.delete_source(db, db.get(KnowledgeSource, price.id))
+        db.commit()
+        assert _draft_out(db, db.get(Task, tid), NOW).can_send is False
