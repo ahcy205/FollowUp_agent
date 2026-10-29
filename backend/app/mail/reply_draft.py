@@ -255,7 +255,7 @@ def generate_draft(db: Session, task: Task, user: User, llm: LLMClient, *, purpo
     flags = [label for e in emails if e.direction == EmailDirection.INBOUND for label in detect_injection(e.content or "")]
     suspicious = list(dict.fromkeys([*data["suspicious"], *flags]))[:MAX_ITEMS]
     candidates_facts = [{"text": f.get("text"), "ref": f.get("chunk"), "line": f.get("line")}
-                        for f in data["used_facts"] if f.get("source") == "doc"]
+                        for f in data["used_facts"] if chunks and f.get("source") == "doc"]
     # 다시 만들기는 sources를 새 dict로 덮어쓴다
     warnings, sources = draft_sources.compute_checks(
         db, task, data["body"], user_input,

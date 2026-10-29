@@ -309,3 +309,51 @@ def test_draft_out_includes_sources():
         out = _draft_out(db, t, NOW)
         assert out.sources["facts"][0]["ref"] == "D1-0"
         assert out.warnings["internal_values"] == 0 and out.warnings["other_item"] == 0
+
+
+def test_switch_off_no_internal_check(monkeypatch):
+    monkeypatch.setattr(get_settings(), "knowledge_enabled", False)
+    calls = []
+    monkeypatch.setattr(search, "internal_value_index", lambda *a, **k: calls.append(1) or {})
+    with SessionLocal() as db:
+        u, t = _setup(db, memo="원가 8,000원")
+        _doc(db, u, "원가표.txt", "TS-200 원가 8,000원", vis="internal")
+        draft, _ = _generate(db, t, u, _answer(body="안녕하세요.\n단가는 8,000원입니다.", facts=[]))
+        assert calls == []
+        assert draft.sources["internal_values"] == [] and draft.warnings["internal_values"] == 0
+        assert draft.warnings["other_item"] == 0
+
+
+def test_switch_off_edit_stored_line_not_evidence(monkeypatch):
+    with SessionLocal() as db:
+        u, t = _setup(db)
+        _doc(db, u, "단가표.csv", PRICE_CSV)
+        draft, _ = _generate(db, t, u, _answer())
+        assert len(draft.sources["facts"]) == 1
+        monkeypatch.setattr(get_settings(), "knowledge_enabled", False)
+        monkeypatch.setattr(search, "internal_value_index", lambda *a, **k: pytest.fail("no index when off"))
+        rd.update_draft(draft, subject="Re: 견적 문의", body="안녕하세요.\nTS-200 단가는 개당 12,000원입니다.",
+                        cc_selected=[])
+        db.commit()
+        assert "12000" in draft.warnings["unsupported"]
+        assert [c["ref"] for c in draft.sources["chunks"]] == ["D1-0"]  # 표시용 사본은 그대로
+        assert draft.warnings["internal_values"] == 0
+
+
+def test_manual_fact_line_not_evidence():
+    with SessionLocal() as db:
+        u, t = _setup(db)
+        _doc(db, u, "조건.txt", "TS-200 주문 조건\nTS-200 무료 배송, 반품비 5,000원\n")
+        facts = [{"text": "무료 배송", "source": "doc", "chunk": "D1-0", "line": 2}]
+        draft, _ = _generate(db, t, u, _answer(body="안녕하세요.\nTS-200은 무료 배송이고 반품비는 5,000원입니다.",
+                                              facts=facts))
+        assert draft.sources["facts"][0]["checked"] == "manual"
+        assert "5000" in draft.warnings["unsupported"]
+
+
+def test_check_facts_day_only_matches_full_date_in_body():
+    from app.knowledge.draft_sources import check_facts
+    chunks = [{"ref": "D1-0", "lines": ["TS-200 납기 11월 15일"]}]
+    facts = [{"text": "15일 납품", "source": "doc", "chunk": "D1-0", "line": 1}]
+    out = check_facts("TS-200 납품은 11/15입니다.", facts, chunks, {"TS-200"})
+    assert len(out) == 1 and out[0]["checked"] == "numbers" and out[0]["other_item"] is False

@@ -100,7 +100,7 @@ def _keys(text: str) -> set[tuple[str, str]]:
 def check_facts(body: str, used_facts: list[dict], chunks: list[dict], task_ids: set[str]) -> list[dict]:
     """자료에서 가져온 항목을 넣어 준 덩어리 · 줄로 다시 확인한다 (설계 5.2 1~4). 통과한 항목만 돌려준다."""
     by_ref = {c.get("ref"): c for c in chunks if isinstance(c, dict)}
-    body_keys = _keys(body)
+    body_keys = supported_keys(body)  # 근거 글과 같은 펼침: 항목 "15일"은 본문 "11/15"로도 맞는다
     out: list[dict] = []
     seen: set[tuple] = set()
     for f in used_facts:
@@ -130,8 +130,9 @@ def check_facts(body: str, used_facts: list[dict], chunks: list[dict], task_ids:
 
 
 def evidence_lines(facts: list[dict]) -> str:
-    """통과한 항목이 가리키는 줄만 이은 글 (숫자 · 날짜 근거 확인에 더한다)."""
-    return "\n".join(str(f.get("line_text") or "") for f in facts)
+    """숫자로 확인을 통과한 항목이 가리키는 줄만 이은 글 (숫자 · 날짜 근거 확인에 더한다).
+    직접 확인(manual) 항목의 줄은 더하지 않는다: 숫자가 없는 사실이 그 줄의 숫자에 근거를 빌려주면 안 된다."""
+    return "\n".join(str(f.get("line_text") or "") for f in facts if f.get("checked") == "numbers")
 
 
 def internal_values(db: Session, user_id: int, body: str, allowed_text: str) -> list[dict]:
@@ -171,6 +172,17 @@ def compute_checks(db: Session, task: Task, body: str, user_input: str, sources:
     from app.mail.reply_draft import _context_texts, _emails  # 순환 import 피하기
 
     sources = sources if isinstance(sources, dict) else {}
+    if not get_settings().knowledge_enabled:
+        # 스위치가 꺼지면 6단계와 같다(설계 3.4): 자료 줄을 근거로 쓰지 않고 내부용 색인도 보지 않는다.
+        # 저장된 사본은 화면 표시를 위해 그대로 둔다.
+        context, header_text = _context_texts(db, task, user_input)
+        warnings = draft_warnings(body, context, header_text)
+        warnings["suspicious"] = list(suspicious or [])
+        warnings["internal_values"], warnings["other_item"] = 0, 0
+        kept = {"chunks": [], "facts": [], "search_failed": False, "sources_changed": False}
+        kept.update({k: v for k, v in sources.items() if k in kept})
+        kept["internal_values"] = []
+        return warnings, kept
     chunks = [c for c in (sources.get("chunks") or []) if isinstance(c, dict)]
     candidates = [{"text": f.get("text"), "source": "doc", "chunk": f.get("ref"), "line": f.get("line")}
                   for f in (sources.get("facts") or []) if isinstance(f, dict)]
