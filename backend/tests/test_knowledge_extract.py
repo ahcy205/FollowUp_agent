@@ -123,5 +123,46 @@ def test_text_chunks_split_at_paragraph_with_overlap():
     assert len(chunks[0].text) >= 1200
     assert chunks[0].lines[-1] in lines  # 줄 경계에서 닫힘
     for a, b in zip(chunks, chunks[1:]):
-        assert b.text.startswith(a.text[-100:])
+        assert b.lines[0] == a.lines[-1]  # 직전 덩어리의 마지막 온전한 줄로 시작
+    for c in chunks:
+        assert all(ln and ln in lines for ln in c.lines)  # 빈 줄 · 잘린 줄 없음
     assert chunks[-1].text.endswith(lines[-1])
+
+
+def test_text_overlap_skipped_when_last_line_too_long():
+    lines = [f"{i}번 " + "가" * 600 for i in range(6)]
+    chunks = chunk_blocks([Block("text", "", lines)])
+    assert len(chunks) >= 2
+    for c in chunks:
+        assert all(ln in lines for ln in c.lines) and len(c.text) <= 1500
+    assert chunks[1].lines[0] != chunks[0].lines[-1]
+
+
+def test_long_line_is_cut_at_whitespace_keeping_numbers_whole():
+    words = ["단가는"] * 248 + ["12,000원입니다"] + ["끝"] * 50
+    line = " ".join(words)
+    pos = line.index("12,000원입니다")
+    assert 990 < pos < 1010
+    chunks = chunk_blocks([Block("text", "", [line])])
+    got = [ln for c in chunks for ln in c.lines]
+    assert all(len(ln) <= 1000 for ln in got)
+    assert sum("12,000원입니다" in ln for ln in got) == 1
+    assert " ".join(got) == line
+
+
+def test_long_line_number_at_exact_cut_point():
+    line = "가" * 995 + " 12,000원 " + "나" * 50
+    got = [ln for c in chunk_blocks([Block("text", "", [line])]) for ln in c.lines]
+    assert sum("12,000원" in ln for ln in got) == 1
+
+
+def test_csv_error_becomes_extract_error():
+    with pytest.raises(ExtractError):
+        extract_text("csv", ("a,b\n" + "x" * 200000 + ",1\n").encode())
+
+
+def test_oversized_table_row_truncated_and_counted():
+    ex = extract_text("csv", ("a,b\n" + "x" * 3000 + ",1\ny,2\n").encode())
+    assert ex.notes["truncated_rows"] == 1
+    assert all(len(c.text) <= 1500 for c in chunk_blocks(ex.blocks))
+    assert extract_text("csv", b"a,b\ny,2\n").notes["truncated_rows"] == 0

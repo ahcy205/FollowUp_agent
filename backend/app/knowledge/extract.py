@@ -12,6 +12,8 @@ from typing import Literal
 
 SUPPORTED = {"xlsx", "csv", "txt", "md", "pdf", "docx"}
 NO_TEXT_MESSAGE = "글자를 읽을 수 없는 파일입니다. 텍스트가 들어 있는 PDF나 문서로 올려 주세요."
+MAX_CHARS = 1500
+MAX_HEADING = MAX_CHARS // 2
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.?!。])\s+")
 
 
@@ -29,7 +31,7 @@ class Block:
 @dataclass
 class Extracted:
     blocks: list[Block]
-    notes: dict = field(default_factory=lambda: {"formula_without_value": 0})
+    notes: dict = field(default_factory=lambda: {"formula_without_value": 0, "truncated_rows": 0})
 
 
 def _decode(data: bytes) -> str:
@@ -67,7 +69,7 @@ def _split_sentences(text: str) -> list[str]:
     return out
 
 
-def _table_block(title: str, rows: list[list[str]]) -> Block | None:
+def _table_block(title: str, rows: list[list[str]], notes: dict | None = None) -> Block | None:
     rows = [r for r in rows if any(c for c in r)]
     if not rows:
         return None
@@ -78,8 +80,12 @@ def _table_block(title: str, rows: list[list[str]]) -> Block | None:
         cells = [f"{names[i] if i < len(names) else f'열{i + 1}'}: {c}" for i, c in enumerate(r) if c]
         if cells:
             lines.append(" · ".join(cells))
-    heading = " · ".join(p for p in (title, " | ".join(h for h in header if h)) if p)
-    return Block("table", heading, lines) if lines else None
+    heading = " · ".join(p for p in (title, " | ".join(h for h in header if h)) if p)[:MAX_HEADING]
+    budget = MAX_CHARS - len(heading) - 1  # 덩어리 한 개(머리글 + 행 1개)가 1,500자 안에 들어가야 한다
+    cut = [ln[: budget - 1] if len(ln) + 1 > budget else ln for ln in lines]
+    if notes is not None:
+        notes["truncated_rows"] = notes.get("truncated_rows", 0) + sum(a != b for a, b in zip(lines, cut))
+    return Block("table", heading, cut) if cut else None
 
 
 def _text_blocks(text: str) -> list[Block]:
@@ -122,16 +128,22 @@ def _xlsx(data: bytes) -> Extracted:
                     out.notes["formula_without_value"] += 1
                 vals.append(_cell_text(cv.value))
             rows.append(vals)
-        block = _table_block(ws_f.title, rows)
+        block = _table_block(ws_f.title, rows, out.notes)
         if block:
             out.blocks.append(block)
     return out
 
 
 def _csv(data: bytes) -> Extracted:
-    rows = [[_cell_text(c) for c in r] for r in csv.reader(io.StringIO(_decode(data)))]
-    block = _table_block("", rows)
-    return Extracted([block] if block else [])
+    try:
+        rows = [[_cell_text(c) for c in r] for r in csv.reader(io.StringIO(_decode(data)))]
+    except csv.Error as e:
+        raise ExtractError("CSV 파일의 형식이 올바르지 않습니다. 쉼표로 구분된 표인지 확인해 주세요.") from e
+    out = Extracted([])
+    block = _table_block("", rows, out.notes)
+    if block:
+        out.blocks.append(block)
+    return out
 
 
 def _docx(data: bytes) -> Extracted:
@@ -143,7 +155,8 @@ def _docx(data: bytes) -> Extracted:
         doc = Document(io.BytesIO(data))
     except Exception as e:
         raise ExtractError("워드 파일을 열 수 없습니다. 올바른 .docx 파일인지 확인해 주세요.") from e
-    blocks: list[Block] = []
+    out = Extracted([])
+    blocks = out.blocks
     heading, buf = "", []
 
     def flush() -> None:
@@ -165,11 +178,11 @@ def _docx(data: bytes) -> Extracted:
             flush()
             buf = []
             t = Table(child, doc)
-            block = _table_block(heading, [[_cell_text(c.text) for c in r.cells] for r in t.rows])
+            block = _table_block(heading, [[_cell_text(c.text) for c in r.cells] for r in t.rows], out.notes)
             if block:
                 blocks.append(block)
     flush()
-    return Extracted(blocks)
+    return out
 
 
 def _pdf(data: bytes) -> Extracted:
