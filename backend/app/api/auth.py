@@ -26,7 +26,8 @@ _DUMMY_HASH = hash_password("timing-equalizer-password")
 
 def _out(user: User) -> UserOut:
     """로그인 사용자 정보와 화면이 데모 메뉴를 보일지 정하는 스위치."""
-    return UserOut(id=user.id, email=user.email, demo_mode=get_settings().demo_mode)
+    s = get_settings()
+    return UserOut(id=user.id, email=user.email, demo_mode=s.demo_mode, knowledge_enabled=s.knowledge_enabled)
 
 
 @router.post("/register", response_model=UserOut, status_code=201)

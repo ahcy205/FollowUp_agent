@@ -25,6 +25,9 @@ os.environ["LLM_RPM_LIMIT"] = "0"  # no client-side pacing sleeps
 os.environ["MAIL_BACKFILL_DAYS"] = "3"
 os.environ["USER_TIMEZONE"] = "Asia/Seoul"
 os.environ["MAIL_TRIAGE_ENABLED"] = "false"  # mail text must never reach an LLM unless a test turns it on
+os.environ["KNOWLEDGE_ENABLED"] = "false"  # uploaded documents must never reach an LLM unless a test turns it on
+os.environ["KNOWLEDGE_MAX_FILE_MB"] = "10"
+os.environ["KNOWLEDGE_MAX_SOURCES"] = "200"
 os.environ["DEMO_MODE"] = "true"  # existing demo tests rely on seeded accounts; off-mode tests flip it per test
 
 import pytest  # noqa: E402

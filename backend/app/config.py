@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     user_timezone: str = "Asia/Seoul"
     # Sends mail text to the LLM provider, so it stays off until the user opts in.
     mail_triage_enabled: bool = False
+    # Uploaded documents are stored and (later) sent to the LLM, so this stays off until the user opts in.
+    knowledge_enabled: bool = False
+    knowledge_max_file_mb: int = 10
+    knowledge_max_sources: int = 200
     mail_triage_batches_per_cycle: int = Field(default=3, ge=1, le=10)
     mail_intake_per_cycle: int = Field(default=5, ge=1, le=20)
     calendar_sync_per_cycle: int = Field(default=10, ge=1, le=50)

@@ -17,6 +17,7 @@ class UserOut(ORM):
     id: int
     email: str
     demo_mode: bool = False
+    knowledge_enabled: bool = False
 
 
 class CustomerOut(ORM):
