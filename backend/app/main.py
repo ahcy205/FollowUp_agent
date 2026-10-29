@@ -9,7 +9,7 @@ from sqlalchemy import func, select, text
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.agent.orchestrator import recover_stale_runs
-from app.api import auth, demo, google, inbox, tasks
+from app.api import auth, demo, google, inbox, knowledge, tasks
 from app.config import get_settings
 from app.db import Base, SessionLocal, engine
 from app.mail import sync as mail_sync
@@ -81,6 +81,7 @@ app.include_router(tasks.router)
 app.include_router(inbox.router)
 app.include_router(demo.router)
 app.include_router(google.router)
+app.include_router(knowledge.router)
 
 
 @app.get("/api/health", include_in_schema=False)

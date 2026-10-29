@@ -142,3 +142,4 @@ send_limiter = RateLimiter(max_calls=5, window_seconds=60)  # 답장 보내기 (
 
 def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
+upload_limiter = RateLimiter(max_calls=5, window_seconds=60)  # 자료 올리기 (파일 읽기 · 색인)

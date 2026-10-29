@@ -411,3 +411,23 @@ class InboxAlert(BaseModel):
 class InboxAlertsOut(BaseModel):
     now_count: int
     alerts: list[InboxAlert]
+
+
+# ------------------------------------------------------------------ 자료실
+
+class KnowledgeSourceOut(ORM):
+    id: int
+    title: str
+    file_type: str
+    size: int
+    visibility: str
+    status: str
+    error: str
+    notes: dict
+    chunk_count: int = 0
+    flagged_count: int = 0
+    created_at: datetime
+
+
+class VisibilityIn(_Strict):
+    visibility: Literal["shareable", "internal"]
