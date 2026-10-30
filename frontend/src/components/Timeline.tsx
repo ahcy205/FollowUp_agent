@@ -15,13 +15,13 @@ const MAIL_LABELS: Record<string, [string, string]> = {
   TASK_CHANGED: ['상대 답장으로 내용 바뀜', 'blue'],
   CHANGES_FAILED: ['바뀐 내용 분석 실패', 'red'],
   REANALYZE_REQUESTED: ['다시 분석 요청', 'gray'],
-  DEADLINE_CHANGED: ['기한 바꿈', 'violet'],
-  PRIORITY_CHANGED: ['중요도 바꿈', 'violet'],
+  DEADLINE_CHANGED: ['기한 바꿈', 'blue'],
+  PRIORITY_CHANGED: ['중요도 바꿈', 'blue'],
   TODO_CHANGED: ['할 일 고침', 'gray'],
   TODOS_COMPLETED: ['남은 할 일 모두 완료', 'green'],
   TASK_SNOOZED: ['나중에 보기로 미룸', 'gray'],
   TASK_UNSNOOZED: ['다시 보기', 'gray'],
-  TASK_MERGED: ['다른 업무와 합침', 'violet'],
+  TASK_MERGED: ['다른 업무와 합침', 'blue'],
   TASK_UNMERGED: ['합치기 되돌림', 'gray'],
   MERGE_ANALYSIS_FALLBACK: ['합친 내용 기본 규칙으로 정리', 'amber'],
   TASK_CLOSED: ['답장 없이 닫음', 'green'],
@@ -59,12 +59,12 @@ function view(log: ActionLog): ItemView {
     case 'STATUS_CHANGED': {
       const to = STATUS_META[log.input_data.to as TaskStatus]?.label ?? String(log.input_data.to)
       const from = STATUS_META[log.input_data.from as TaskStatus]?.label ?? String(log.input_data.from)
-      return { title: `업무 상태 ${from} → ${to}`, tone: 'violet', detail: log.reason }
+      return { title: `업무 상태 ${from} → ${to}`, tone: 'blue', detail: log.reason }
     }
     case 'TASK_CANCELLED':
       return { title: '사용자가 업무를 취소함', tone: 'gray', detail: log.reason }
     case 'GOAL_UPDATED':
-      return { title: '사용자가 목표를 수정함', tone: 'violet', detail: `변경 전: ${String(log.input_data.from ?? '')}\n변경 후: ${String(log.input_data.to ?? '')}` }
+      return { title: '사용자가 목표를 수정함', tone: 'blue', detail: `변경 전: ${String(log.input_data.from ?? '')}\n변경 후: ${String(log.input_data.to ?? '')}` }
     case 'USER_COMPLETED':
       return { title: '사용자가 완료 처리', tone: 'green', detail: log.reason }
     case 'FOLLOWUP_COMPLETED':

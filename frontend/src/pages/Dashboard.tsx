@@ -94,7 +94,7 @@ export default function Dashboard() {
               ))}
             </div>
             <button className="btn btn-primary" disabled={submitting || goal.trim().length < 5}>
-              {submitting ? 'Agent 시작 중…' : 'Agent에게 맡기기 →'}
+              {submitting ? 'Agent 시작 중…' : 'Agent에게 맡기기'}
             </button>
           </div>
         </form>

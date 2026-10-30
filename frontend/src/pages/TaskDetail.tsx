@@ -244,7 +244,7 @@ export default function TaskDetailPage() {
       {error && <div className="alert alert-red">{error}</div>}
 
       <div className="detail-grid">
-        <div className="stack">
+        <div className={isMail ? 'stack sheet-stack' : 'stack'}>
           {isMail && <MailBanners key={task.id} data={data} act={act} onMerged={onMerged} onCompose={onCompose} />}
 
           <section className="card sheet-main">
@@ -361,7 +361,9 @@ export default function TaskDetailPage() {
                   const current = !p.done && task.plan.slice(0, i).every((q) => q.done)
                   return (
                     <li key={p.id} className={p.done ? 'done' : current ? 'current' : ''}>
-                      <span className="check">{p.done ? '✓' : current ? '→' : ''}</span>
+                      <span className="check">
+                        {p.done ? <Icon name="check" size={14} /> : current ? <Icon name="chevron" size={14} /> : null}
+                      </span>
                       <div>
                         <div>{p.title}</div>
                         {p.evidence && <div className="muted small">{p.evidence}</div>}
