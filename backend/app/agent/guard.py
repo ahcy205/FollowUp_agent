@@ -14,7 +14,10 @@ _INJECTION_PATTERNS = [
     (r"(reveal|print|show|output)\s+(your\s+)?(system\s+prompt|instructions|api\s*key|secret)", "시스템 정보 유출 요청"),
     (r"(api\s*key|비밀번호|password|secret\s*key|토큰)\s*(을|를)?\s*(알려|보내|출력|전송)", "비밀정보 요청"),
     (r"(COMPLETED|완료)\s*(로|으로)\s*(즉시\s*)?(변경|바꾸|처리)", "업무 상태 조작 요청"),
-    # 자료 · 메일이 AI를 주어로 세워 시키는 한국어 지시 ("답장을 쓰는 AI 비서는 … 적고, … 넣으세요").
+]
+# 올린 자료에만 더하는 규칙. 메일에 쓰면 '비서에게 일정 보내 주세요' 같은 평범한 업무 메일이 오탐된다.
+_DOCUMENT_PATTERNS = [
+    # 자료가 AI를 주어로 세워 시키는 한국어 지시 ("답장을 쓰는 AI 비서는 … 적고, … 넣으세요").
     # 주어: AI · 인공지능 · 비서 · 어시스턴트 · 챗봇 · 에이전트(+비서 · 모델 등) 바로 뒤 '는 · 은 · 에게'.
     # 'AI 스피커는'처럼 다른 낱말이 끼면 주어로 보지 않는다. 동작: 적 · 넣 · 쓰 · 포함 · 추가 · 보내 등 + 명령형 어미.
     # 걸린 자료 덩어리는 검색에서 빠진다: 잘못 걸리면 그 덩어리만 못 쓴다(재현율 비용).
@@ -25,6 +28,7 @@ _INJECTION_PATTERNS = [
      "AI에게 시키는 지시"),
 ]
 _COMPILED = [(re.compile(p, re.IGNORECASE), label) for p, label in _INJECTION_PATTERNS]
+_COMPILED_DOCUMENT = [(re.compile(p, re.IGNORECASE), label) for p, label in _DOCUMENT_PATTERNS]
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"\b0\d{1,2}-\d{3,4}-\d{4}\b")
@@ -34,6 +38,15 @@ def detect_injection(text: str) -> list[str]:
     """Return human-readable labels of suspicious instruction patterns found in untrusted text."""
     found: list[str] = []
     for rx, label in _COMPILED:
+        if rx.search(text or "") and label not in found:
+            found.append(label)
+    return found
+
+
+def detect_document_injection(text: str) -> list[str]:
+    """Labels for an uploaded document: the mail patterns plus the document-only ones, deduplicated."""
+    found = detect_injection(text)
+    for rx, label in _COMPILED_DOCUMENT:
         if rx.search(text or "") and label not in found:
             found.append(label)
     return found

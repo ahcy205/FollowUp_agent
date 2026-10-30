@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agent.audit import log_action
-from app.agent.guard import detect_injection
+from app.agent.guard import detect_document_injection
 from app.config import get_settings
 from app.knowledge.chunking import chunk_blocks
 from app.knowledge.draft_sources import (
@@ -76,7 +76,7 @@ def add_document(db: Session, user: User, filename: str, data: bytes, visibility
 
     flagged = 0
     for i, c in enumerate(chunks):
-        bad = bool(detect_injection(c.text))
+        bad = bool(detect_document_injection(c.text))
         flagged += bad
         db.add(
             KnowledgeChunk(

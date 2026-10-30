@@ -1,5 +1,6 @@
 """Data isolation, CSRF, tool permission, prompt-injection and agent safety-limit tests."""
 
+import pytest
 from sqlalchemy import select
 
 from app.agent.guard import detect_injection
@@ -158,3 +159,15 @@ def test_tool_input_validation_errors_go_back_to_llm(client):
     assert first["is_error"] and "입력값 검증 실패" in first["content"]
     second = llm.seen_messages[2][-1]["content"][0]
     assert second["is_error"] and "waiting_for" in second["content"]
+
+
+@pytest.mark.parametrize("text", [
+    "담당 비서에게 회의 자료를 보내주세요.",
+    "에이전트에게 계약서 사본을 보내 주세요.",
+    "비서에게 일정 보내 주세요.",
+    "김 비서는 회의록을 작성해야 합니다.",
+    "AI는 아직 도입 전이라 견적서에 포함해 주세요.",
+])
+def test_mail_path_ignores_ordinary_ai_assistant_sentences(text):
+    """메일 경로(detect_injection)는 'AI에게 시키는 지시' 규칙을 쓰지 않는다 — 업무 메일 오탐 방지."""
+    assert detect_injection(text) == []
