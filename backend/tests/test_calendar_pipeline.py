@@ -1,5 +1,6 @@
 """4단계 Task 5: 워커 연결과 다시 시도 API (FakeGoogle)."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -35,9 +36,11 @@ def _task(uid, *, state="none", deadline=DEADLINE, origin="mail", error="") -> i
 
 
 def _analysis_with_deadline():
+    # 메일은 지금 받은 것으로 들어가고, 받은 날보다 이른 기한은 버려진다: 기한도 지금 기준으로 잡는다
+    due = (datetime.now(ZoneInfo("Asia/Seoul")) + timedelta(days=7)).date()
     return {"summary": "견적 요청", "counterpart": {"name": "김", "organization": "P"},
             "requests": ["견적"], "todos": [{"title": "견적 보내기", "due_text": "", "due_date": "", "due_time": ""}],
-            "deadline": {"text": "10월 30일까지", "date": "2026-10-30", "time": "", "kind": "explicit"},
+            "deadline": {"text": f"{due.month}월 {due.day}일까지", "date": due.isoformat(), "time": "", "kind": "explicit"},
             "priority": "HIGH", "needs_reply": True, "suspicious": []}
 
 
