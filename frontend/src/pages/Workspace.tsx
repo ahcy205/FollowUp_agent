@@ -80,7 +80,7 @@ export default function Workspace() {
               </div>
               <div className="muted small">{company(d.customer_id)}</div>
               <pre className="doc-body">{d.content}</pre>
-              {/지시|무시/.test(d.content) && <div className="alert alert-amber small">⚠️ Prompt Injection 시연용 악성 문구가 포함된 문서입니다.</div>}
+              {/지시|무시/.test(d.content) && <div className="alert alert-amber small">Prompt Injection 시연용 악성 문구가 포함된 문서입니다.</div>}
             </section>
           ))}
         </div>

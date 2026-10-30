@@ -40,7 +40,7 @@ export default function ApprovalCard({ approval, customer, onDecided }: { approv
   return (
     <section className="card approval-card">
       <div className="approval-head">
-        <span className="approval-icon">✋</span>
+        <span className="approval-icon" aria-hidden="true" />
         <div>
           <h2>AI가 다음 메일을 보내려고 합니다</h2>
           <p className="muted">외부로 나가는 행동은 사용자 승인 없이 실행되지 않습니다. · 사유: {approval.reason}</p>

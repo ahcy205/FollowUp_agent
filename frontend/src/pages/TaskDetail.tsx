@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../App'
 import ApprovalCard from '../components/ApprovalCard'
+import Icon from '../components/Icon'
 import CompleteFollowupCard from '../components/CompleteFollowupCard'
 import GoalEditor from '../components/GoalEditor'
 import CancelTaskPanel from '../components/CancelTaskPanel'
@@ -142,7 +143,10 @@ export default function TaskDetailPage() {
         {error} <Link to="/tasks">← 전체 업무로</Link>
       </div>
     ) : (
-      <p className="muted">불러오는 중…</p>
+      <div className="skeleton skeleton-detail" role="status" aria-label="불러오는 중">
+        <div className="skeleton-row"><span /><span /><span /></div>
+        <div className="skeleton-row"><span /><span /><span /></div>
+      </div>
     )
   }
 
@@ -183,7 +187,7 @@ export default function TaskDetailPage() {
       {task.calendar_state === 'error' && (
         <>
           <span className="text-red">{task.calendar_error}</span>
-          <button className="btn btn-sm" onClick={retryCalendar} disabled={calRetrying}>
+          <button className="btn btn-ghost btn-sm" onClick={retryCalendar} disabled={calRetrying}>
             {calRetrying ? '요청 중…' : '다시 시도'}
           </button>
         </>
@@ -220,7 +224,15 @@ export default function TaskDetailPage() {
   return (
     <div className="stack-lg">
       <div className="crumbs">
-        {task.origin === 'mail' ? <Link to="/">← 받은 업무</Link> : <Link to="/tasks">← 전체 업무</Link>}
+        {task.origin === 'mail' ? (
+          <Link to="/">
+            <Icon name="back" size={16} /> 받은 업무
+          </Link>
+        ) : (
+          <Link to="/tasks">
+            <Icon name="back" size={16} /> 전체 업무
+          </Link>
+        )}
         {data.parent && (
           <>
             <span>/</span>
@@ -235,12 +247,12 @@ export default function TaskDetailPage() {
         <div className="stack">
           {isMail && <MailBanners key={task.id} data={data} act={act} onMerged={onMerged} onCompose={onCompose} />}
 
-          <section className="card">
+          <section className="card sheet-main">
             <div className="detail-title">
               <div>
                 <h1>{task.title}</h1>
                 <div className="muted small">
-                  생성 {dateTime(task.created_at)}
+                  {isMail ? '업무 등록' : '생성'} {dateTime(task.created_at)}
                   {data.customer && ` · 고객 ${data.customer.company_name} ${data.customer.contact_name}`}
                   {task.origin === 'agent' && ' · Agent가 생성한 후속 업무'}
                 </div>
@@ -253,8 +265,13 @@ export default function TaskDetailPage() {
 
             {task.status === 'COMPLETED' && (
               <div className="complete-banner">
-                <div className="complete-title">🟢 {task.title} 완료</div>
-                {task.result_summary && <p>{task.result_summary}</p>}
+                <span className="stamp stamp-press" aria-hidden="true">
+                  완료
+                </span>
+                <div>
+                  <div className="complete-title">끝난 업무입니다</div>
+                  {task.result_summary && <p>{task.result_summary}</p>}
+                </div>
               </div>
             )}
 
@@ -291,14 +308,10 @@ export default function TaskDetailPage() {
             )}
           </section>
 
-          {isMail && draft && task.merged_into_id == null && (!closed || draft.status === 'unknown') && (
-            <ReplyDraftCard key={`draft-${task.id}`} data={data} draft={draft} act={act} onRecompose={onCompose} />
-          )}
-
           {failed && (
             <div className={`alert ${lastRun.status === 'STOPPED' ? 'alert-amber' : 'alert-red'} alert-action`}>
               <div>
-                <b>{lastRun.status === 'STOPPED' ? '⚠️ Agent 실행 중단' : '⚠️ Agent 오류'}</b>
+                <b>{lastRun.status === 'STOPPED' ? 'Agent 실행이 멈췄습니다' : 'Agent 오류가 났습니다'}</b>
                 <div>{lastRun.error}</div>
               </div>
               <button className="btn btn-primary btn-sm" onClick={retry} disabled={retrying}>
@@ -316,6 +329,9 @@ export default function TaskDetailPage() {
           {isMail && (
             <>
               <TodoChecklist key={`todos-${task.id}`} task={task} act={act} />
+              {draft && task.merged_into_id == null && (!closed || draft.status === 'unknown') && (
+                <ReplyDraftCard key={`draft-${task.id}`} data={data} draft={draft} act={act} onRecompose={onCompose} />
+              )}
               <MailActions
                 key={`actions-${task.id}`}
                 task={task}
@@ -398,8 +414,9 @@ export default function TaskDetailPage() {
         </div>
 
         <aside className="stack sidebar">
+          {!isMail && (
           <section className="card activity">
-            <h2>Agent Activity</h2>
+            <h2>Agent 실행</h2>
             {run?.status === 'RUNNING' && (
               <div className="activity-state running">
                 <span className="spinner" />
@@ -413,7 +430,6 @@ export default function TaskDetailPage() {
             )}
             {run?.status === 'AWAITING_APPROVAL' && (
               <div className="activity-state waiting">
-                <span className="big">✋</span>
                 <div>
                   <b>사용자 승인을 기다리는 중</b>
                   <div className="muted small">승인하면 Agent가 중단된 지점부터 이어서 실행합니다.</div>
@@ -422,7 +438,6 @@ export default function TaskDetailPage() {
             )}
             {!run && (
               <div className="activity-state idle">
-                <span className="big">{task.status === 'COMPLETED' ? '🏁' : task.status === 'CANCELLED' ? '🚫' : task.status === 'WAITING' ? '⏳' : '💤'}</span>
                 <div>
                   <b>
                     {task.status === 'COMPLETED'
@@ -446,6 +461,7 @@ export default function TaskDetailPage() {
               </div>
             )}
           </section>
+          )}
 
           {shownRun && (shownRun.usage?.turns ?? 0) > 0 && (
             <section className="card usage">
@@ -469,12 +485,16 @@ export default function TaskDetailPage() {
             </section>
           )}
 
-          <section className="card">
+          <section className="card timeline-card">
             <div className="section-head">
-              <h2>Agent Timeline</h2>
-              <span className="muted small">{data.logs.length}개 기록</span>
+              <h2>{isMail ? '처리 기록' : 'Agent 기록'}</h2>
+              <span className="muted small num">{data.logs.length}건</span>
             </div>
-            {data.logs.length === 0 && !live ? <p className="muted small">아직 Agent 기록이 없습니다.</p> : <Timeline logs={data.logs} live={live} />}
+            {data.logs.length === 0 && !live ? (
+              <p className="muted small">{isMail ? '이 업무에서 한 일이 여기에 시간 순으로 남습니다.' : '아직 Agent 기록이 없습니다.'}</p>
+            ) : (
+              <Timeline logs={data.logs} live={live} />
+            )}
           </section>
         </aside>
       </div>

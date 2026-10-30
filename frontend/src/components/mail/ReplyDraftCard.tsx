@@ -182,14 +182,22 @@ export default function ReplyDraftCard({
   if (draft.status === 'sent') {
     // 보낸 직후(답장 보냄 상태)에만 알린다. 상대가 다시 답장해 처리할 일로 오면 감춘다.
     return data.task.status === 'WAITING' ? (
-      <div className="alert alert-green">답장을 보냈습니다. 보낸 메일은 아래 원본 메일에서 볼 수 있습니다.</div>
+      <div className="sent-note">
+        <span className="stamp stamp-press" aria-hidden="true">
+          보냄
+        </span>
+        <div>
+          <b>답장을 보냈어요</b>
+          <div className="muted small">상대 답을 기다립니다. 보낸 메일은 아래 원본 메일에서 볼 수 있어요.</div>
+        </div>
+      </div>
     ) : null
   }
 
   return (
     <section className="card reply-card">
       <div className="section-head">
-        <h2>답장 초안</h2>
+        <h2>답장</h2>
         {draft.purpose === 'followup' && <span className="tag tag-amber">다시 연락</span>}
       </div>
 
@@ -363,7 +371,7 @@ export default function ReplyDraftCard({
           <div className="draft-actions">
             <button
               type="button"
-              className="btn btn-primary btn-sm"
+              className="btn btn-seal btn-sm"
               disabled={!!busy || dirty || blanks.length > 0 || sentLater || sourcesChanged || (needsAck && !acked)}
               onClick={send}
             >
@@ -380,7 +388,7 @@ export default function ReplyDraftCard({
         <div className="inline-panel draft-confirm">
           <span>이 초안을 지울까요?</span>
           <div className="draft-actions">
-            <button type="button" className="btn btn-primary btn-sm" disabled={!!busy} onClick={remove}>
+            <button type="button" className="btn btn-danger btn-sm" disabled={!!busy} onClick={remove}>
               {busy === 'delete' ? '지우는 중…' : '지우기'}
             </button>
             <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => setStep('edit')}>
@@ -392,7 +400,7 @@ export default function ReplyDraftCard({
 
       {editable && step === 'edit' && (
         <div className="draft-actions">
-          <button type="button" className="btn btn-primary btn-sm" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
+          <button type="button" className="btn btn-seal btn-sm" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
             {busy === 'save' ? '저장 중…' : '보내기'}
           </button>
           {blanks.length > 0 && <span className="muted small">빈칸 {blanks.length}개를 채워야 보낼 수 있습니다</span>}

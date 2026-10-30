@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, NavLink, Route, Routes, useNavigate } from 're
 import { startAlerts } from './alerts'
 import { api, setUnauthorizedHandler } from './api'
 import GoogleBanner from './components/GoogleBanner'
+import Icon, { BrandMark, type IconName } from './components/Icon'
 import ResetDialog from './components/ResetDialog'
 import Dashboard from './pages/Dashboard'
 import Inbox from './pages/Inbox'
@@ -35,38 +36,44 @@ function Shell({ children }: { children: React.ReactNode }) {
     navigate('/login')
   }
 
+  const links: { to: string; label: string; icon: IconName; end?: boolean }[] = [
+    { to: '/', label: '받은 업무', icon: 'inbox', end: true },
+    { to: '/tasks', label: '전체 업무', icon: 'list', end: true },
+    ...(demo ? [{ to: '/workspace', label: '워크스페이스', icon: 'grid' as IconName }] : []),
+    { to: '/knowledge', label: '자료실', icon: 'folder' },
+    { to: '/settings', label: '설정', icon: 'gear' },
+  ]
+
   return (
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
-          <NavLink to="/" className="brand">
-            <span className="brand-mark">✓</span>
-            <span>
-              FollowUp <b>Agent</b>
+          <NavLink to="/" className="brand" aria-label="FollowUp Agent 받은 업무로">
+            <BrandMark />
+            <span className="brand-name">
+              FollowUp <span>Agent</span>
             </span>
           </NavLink>
-          <nav className="nav">
-            <NavLink to="/" end>
-              받은 업무
-            </NavLink>
-            <NavLink to="/tasks" end>
-              전체 업무
-            </NavLink>
-            {demo && <NavLink to="/workspace">워크스페이스 데이터</NavLink>}
-            <NavLink to="/knowledge">자료실</NavLink>
-            <NavLink to="/settings">설정</NavLink>
+          <nav className="nav" aria-label="주 메뉴">
+            {links.map((l) => (
+              <NavLink key={l.to} to={l.to} end={l.end}>
+                <Icon name={l.icon} className="nav-icon" />
+                <span>{l.label}</span>
+              </NavLink>
+            ))}
           </nav>
           <div className="topbar-right">
             {demo && (
               <button className="btn btn-ghost btn-sm" onClick={() => setResetOpen(true)} title="데모 데이터를 초기 상태로 되돌립니다">
-                ↺ Demo Reset
+                <Icon name="refresh" size={15} /> 데모 초기화
               </button>
             )}
             <span className="user-chip" title={user?.email}>
               {user?.email}
             </span>
-            <button className="btn btn-link btn-sm" onClick={logout}>
-              로그아웃
+            <button className="btn btn-link btn-sm topbar-logout" onClick={logout} title="로그아웃">
+              <Icon name="logout" size={16} />
+              <span>로그아웃</span>
             </button>
           </div>
         </div>
@@ -119,7 +126,13 @@ export default function App() {
       .finally(() => setLoading(false))
   }, [])
 
-  if (loading) return <div className="boot">불러오는 중…</div>
+  if (loading)
+    return (
+      <div className="boot" role="status">
+        <BrandMark size={36} />
+        <span>불러오는 중…</span>
+      </div>
+    )
 
   return (
     <AuthContext.Provider value={{ user, setUser, refreshKey, bumpRefresh }}>

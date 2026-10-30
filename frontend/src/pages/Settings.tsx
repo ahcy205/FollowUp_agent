@@ -82,7 +82,7 @@ function BrowserAlerts() {
           )}
           {permission === 'default' && (
             <div className="approval-actions settings-actions">
-              <button type="button" className="btn btn-sm" onClick={ask} disabled={asking}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={ask} disabled={asking}>
                 {asking ? '요청 중…' : '알림 허용'}
               </button>
             </div>
@@ -185,11 +185,13 @@ export default function Settings() {
   )
 
   return (
-    <div className="stack-lg">
-      <div>
-        <h1>설정</h1>
-        <p className="muted">Google 계정을 연결하면 받은 편지함의 메일을 주기적으로 가져옵니다.</p>
-      </div>
+    <div className="page page-narrow">
+      <header className="page-head">
+        <div>
+          <h1>설정</h1>
+          <p className="page-sub">Google 계정을 연결하면 받은편지함의 메일을 90초마다 확인해 업무 메일을 정리합니다.</p>
+        </div>
+      </header>
       {g === 'connected' && (
         <div className="alert alert-green">
           {firstMailFetched ? '연결되었습니다.' : '연결되었습니다. 첫 메일을 가져오는 중입니다.'}
@@ -215,9 +217,12 @@ export default function Settings() {
         ) : !status.enabled ? (
           <div className="muted">서버에 Google 설정이 없습니다. README의 Google 연결 준비를 따라 주세요.</div>
         ) : status.status === 'disconnected' ? (
-          <button type="button" className="btn" onClick={connect}>
-            Google 계정 연결
-          </button>
+          <div className="connect-box">
+            <p className="muted">메일 읽기 · 답장 보내기 · 캘린더 일정 권한을 요청합니다. 답장은 내가 확인해야만 나갑니다.</p>
+            <button type="button" className="btn btn-primary" onClick={connect}>
+              Google 계정 연결
+            </button>
+          </div>
         ) : status.status === 'reauth_required' ? (
           <>
             <div className="alert alert-red alert-action">
@@ -270,7 +275,7 @@ export default function Settings() {
               </ul>
             )}
             <div className="approval-actions settings-actions">
-              <button type="button" className="btn btn-sm" onClick={sync} disabled={syncing}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={sync} disabled={syncing}>
                 {syncing ? '확인 중…' : '지금 확인'}
               </button>
               {disconnectButton}

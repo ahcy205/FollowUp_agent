@@ -55,7 +55,13 @@ export default function Dashboard() {
   const followups = tasks.filter((t) => t.origin === 'agent')
 
   return (
-    <div className="stack-lg">
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <h1>전체 업무</h1>
+          <p className="page-sub">메일 업무와 목표 입력 Agent 업무를 한곳에서 봅니다.</p>
+        </div>
+      </header>
       <section className="card goal-card">
         <div className="goal-head">
           <div>
@@ -97,7 +103,7 @@ export default function Dashboard() {
 
       {data && data.pending_approvals > 0 && (
         <div className="alert alert-amber">
-          ✋ 승인을 기다리는 Agent 행동이 <b>{data.pending_approvals}건</b> 있습니다. 업무를 열어 확인하세요.
+          승인을 기다리는 Agent 행동이 <b>{data.pending_approvals}건</b> 있습니다. 업무를 열어 확인하세요.
         </div>
       )}
 
@@ -156,7 +162,7 @@ function TaskRow({ task }: { task: Task }) {
             {task.title}
           </div>
           <div className="task-sub muted">
-            {task.status === 'WAITING' && task.waiting_for ? `⏳ ${task.waiting_for} 대기 · ` : ''}
+            {task.status === 'WAITING' && task.waiting_for ? `${task.waiting_for} 대기 · ` : ''}
             {task.status === 'COMPLETED' ? task.current_step || task.result_summary : task.next_action || task.current_step}
           </div>
         </div>
