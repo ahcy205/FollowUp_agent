@@ -222,69 +222,69 @@ export default function Inbox() {
             tab !== 'todo' &&
             (data.tabs[tab].length === 0 ? <Empty title={EMPTY[tab].title} body={EMPTY[tab].body} /> : <CardList cards={data.tabs[tab]} />)}
         </div>
-      </section>
+        {data && data.snoozed.length > 0 && (
+          <details className="fold">
+            <summary>
+              <span>나중에 보기</span>
+              <span className="num muted">{data.snoozed.length}건</span>
+            </summary>
+            <div className="ledger">
+              {data.snoozed.map((c) => {
+                const key = `snooze-${c.task_id}`
+                return (
+                  <InboxCard
+                    key={c.task_id}
+                    card={c}
+                    extra={
+                      <div className="ledger-extra">
+                        <span className="muted small">{dateTime(c.wake_at)}에 다시 표시</span>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => unsnooze(c.task_id)} disabled={busy === key}>
+                          {busy === key ? '처리 중…' : '지금 보기'}
+                        </button>
+                        {errorFor(key)}
+                      </div>
+                    }
+                  />
+                )
+              })}
+            </div>
+          </details>
+        )}
 
-      {data && data.snoozed.length > 0 && (
-        <details className="sheet fold">
-          <summary>
-            <span>나중에 보기</span>
-            <span className="num muted">{data.snoozed.length}건</span>
-          </summary>
-          <div className="ledger">
-            {data.snoozed.map((c) => {
-              const key = `snooze-${c.task_id}`
-              return (
-                <InboxCard
-                  key={c.task_id}
-                  card={c}
-                  extra={
-                    <div className="ledger-extra">
-                      <span className="muted small">{dateTime(c.wake_at)}에 다시 표시</span>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => unsnooze(c.task_id)} disabled={busy === key}>
-                        {busy === key ? '처리 중…' : '지금 보기'}
-                      </button>
+        {data && data.not_work.length > 0 && (
+          <details className="fold">
+            <summary>
+              <span>업무 아님으로 분류된 메일</span>
+              <span className="num muted">{data.not_work.length}건</span>
+            </summary>
+            {!data.triage_enabled && <div className="alert alert-amber fold-note">자동 판별이 꺼져 있어 업무로 분석할 수 없습니다.</div>}
+            <ul className="not-work-list">
+              {data.not_work.map((m) => {
+                const key = `mail-${m.email_id}`
+                return (
+                  <li key={m.email_id}>
+                    <div className="not-work-main">
+                      <div className="small">
+                        <b>{m.sender}</b>
+                        {m.received_at && <span className="muted"> · {dateTime(m.received_at)}</span>}
+                      </div>
+                      <div>{m.subject || '(제목 없음)'}</div>
+                      {m.triage_reason && <div className="muted small">분류 이유: {m.triage_reason}</div>}
                       {errorFor(key)}
                     </div>
-                  }
-                />
-              )
-            })}
-          </div>
-        </details>
-      )}
+                    {data.triage_enabled && (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => promote(m.email_id)} disabled={busy === key}>
+                        {busy === key ? '분석 중…' : '업무로 처리'}
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </details>
+        )}
+      </section>
 
-      {data && data.not_work.length > 0 && (
-        <details className="sheet fold">
-          <summary>
-            <span>업무 아님으로 분류된 메일</span>
-            <span className="num muted">{data.not_work.length}건</span>
-          </summary>
-          {!data.triage_enabled && <div className="alert alert-amber fold-note">자동 판별이 꺼져 있어 업무로 분석할 수 없습니다.</div>}
-          <ul className="not-work-list">
-            {data.not_work.map((m) => {
-              const key = `mail-${m.email_id}`
-              return (
-                <li key={m.email_id}>
-                  <div className="not-work-main">
-                    <div className="small">
-                      <b>{m.sender}</b>
-                      {m.received_at && <span className="muted"> · {dateTime(m.received_at)}</span>}
-                    </div>
-                    <div>{m.subject || '(제목 없음)'}</div>
-                    {m.triage_reason && <div className="muted small">분류 이유: {m.triage_reason}</div>}
-                    {errorFor(key)}
-                  </div>
-                  {data.triage_enabled && (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => promote(m.email_id)} disabled={busy === key}>
-                      {busy === key ? '분석 중…' : '업무로 처리'}
-                    </button>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        </details>
-      )}
     </div>
   )
 }

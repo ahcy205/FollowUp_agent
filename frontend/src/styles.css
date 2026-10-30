@@ -271,6 +271,10 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .fold[open] summary { border-bottom: 1px solid var(--rule); }
 .fold[open] summary::before { transform: rotate(45deg); }
 .fold-note { margin: 14px 20px 0; }
+.sheet > .fold { border-top: 1px solid var(--rule); }
+.sheet > .fold:last-child summary { border-bottom-left-radius: var(--radius); border-bottom-right-radius: var(--radius); }
+.sheet > .fold summary:hover { background: var(--hover); }
+.complete-banner { margin: 4px 0 0; }
 .not-work-list { list-style: none; margin: 0; padding: 0 20px 6px; display: flex; flex-direction: column; }
 .not-work-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 13px 0; }
 .not-work-list li + li { border-top: 1px solid var(--rule); }
@@ -632,17 +636,16 @@ tr:last-child td { border-bottom: none; }
 .sheet-stack > .mail-banners { padding: 14px 24px; background: var(--label); }
 .sheet-stack > .alert { margin: 14px 24px; }
 .sheet-stack > .mail-fold > summary { padding: 15px 24px; }
-.sheet-stack > .card > .section-head h2, .sheet-stack > .reply-card > .section-head h2 { font-size: 0.82rem; color: var(--ink-3); font-weight: 700; letter-spacing: 0; }
 .sheet-stack > .mail-actions { background: var(--label); }
 
 /* 목록 표시: 기본 원 대신 작은 줄표 */
 .draft-blanks ul, .draft-facts ul, .draft-sources ul, .draft-internal { list-style: none; padding-left: 0; }
 .draft-blanks li, .draft-facts li, .draft-sources li, .draft-internal li { position: relative; padding-left: 14px; }
 .draft-blanks li::before, .draft-facts li::before, .draft-sources li::before, .draft-internal li::before { content: ''; position: absolute; left: 2px; top: 0.72em; width: 6px; height: 1.5px; background: currentColor; opacity: 0.55; }
-.draft-sources summary, .changes-older summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; }
-.draft-sources summary::-webkit-details-marker, .changes-older summary::-webkit-details-marker { display: none; }
-.draft-sources summary::before, .changes-older summary::before { content: ''; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s; }
-.draft-sources[open] summary::before, .changes-older[open] summary::before { transform: rotate(45deg); }
+.draft-sources summary, .changes-older summary, .tl-meta summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; }
+.draft-sources summary::-webkit-details-marker, .changes-older summary::-webkit-details-marker, .tl-meta summary::-webkit-details-marker { display: none; }
+.draft-sources summary::before, .changes-older summary::before, .tl-meta summary::before { content: ''; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 0.15s; }
+.draft-sources[open] summary::before, .changes-older[open] summary::before, .tl-meta details[open] summary::before { transform: rotate(45deg); }
 
 /* ---------- 반응형 */
 @media (max-width: 1080px) {

@@ -263,17 +263,6 @@ export default function TaskDetailPage() {
               </div>
             </div>
 
-            {task.status === 'COMPLETED' && (
-              <div className="complete-banner">
-                <span className="stamp stamp-press" aria-hidden="true">
-                  완료
-                </span>
-                <div>
-                  <div className="complete-title">끝난 업무입니다</div>
-                  {task.result_summary && <p>{task.result_summary}</p>}
-                </div>
-              </div>
-            )}
 
             {isMail ? (
               <SummaryCard key={task.id} data={data} act={act} calendarLine={calendarLine} />
@@ -305,6 +294,17 @@ export default function TaskDetailPage() {
                   </div>
                 )}
               </dl>
+            )}
+            {task.status === 'COMPLETED' && (
+              <div className="complete-banner">
+                <span className="stamp stamp-press" aria-hidden="true">
+                  완료
+                </span>
+                <div>
+                  <div className="complete-title">끝난 업무입니다</div>
+                  {task.result_summary && <p>{task.result_summary}</p>}
+                </div>
+              </div>
             )}
           </section>
 
