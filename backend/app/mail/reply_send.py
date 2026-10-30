@@ -24,11 +24,14 @@ from app.agent.audit import log_action
 from app.agent.orchestrator import CLOSED_TASK_STATUSES
 from app.google.client import GoogleAuthError, GoogleClient, GoogleError, GoogleTransientError
 from app.google.oauth import access_token_for, forget_access_token
+from app.config import get_settings
+from app.knowledge import draft_sources
 from app.mail import lifecycle
 from app.mail.errors import ActionError
 from app.mail.inbox import _utc
 from app.mail.reply_draft import _emails, _split, placeholders, reply_recipients
-from app.models import Email, EmailDirection, GoogleAccount, GoogleAccountStatus, ReplyDraft, Task, User
+from app.models import (Email, EmailDirection, GoogleAccount, GoogleAccountStatus, KnowledgeSource, ReplyDraft, Task,
+                        User)
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +50,9 @@ NOT_UNKNOWN = "발송 여부를 확인할 초안이 아닙니다."
 CLOSED = "닫혔거나 다른 업무에 합쳐진 업무에서는 답장을 보낼 수 없습니다."
 ALREADY_REPLIED = "이미 답장을 보낸 것으로 확인됐습니다. 초안을 지우거나 다시 만들어 주세요."
 FOUND_IN_GMAIL = "Gmail에서 이 답장이 이미 보내진 것으로 확인됩니다. 보낸편지함을 확인해 주세요."
+SOURCES_CHANGED = "참고한 자료가 지워졌거나 내부용으로 바뀌었습니다. 초안을 다시 만들어 주세요."
+NEED_INTERNAL_ACK = "내부용 자료의 값이 들어 있습니다. 내용을 확인하고 '알고 보냅니다'를 체크해 주세요."
+DRAFT_CHANGED = "초안이 방금 바뀌었습니다. 내용을 다시 확인한 뒤 보내 주세요."
 
 
 # ---------------------------------------------------------------- MIME
@@ -108,12 +114,38 @@ def replied_after_draft(db: Session, task: Task, draft: ReplyDraft) -> bool:
     return found is not None and _utc(found) > since
 
 
-def ensure_can_send(db: Session, user: User, task: Task, draft: ReplyDraft) -> GoogleAccount:
-    """보내기 직전 확인(Google을 부르지 않는다). API는 호출 횟수 제한보다 먼저 부른다."""
+def _sources_still_shareable(db: Session, user_id: int, draft: ReplyDraft) -> bool:
+    """초안이 인용한 자료가 모두 아직 있고 답장에 써도 되는(shareable) 자료인가 (RAG 설계 5.4)."""
+    sources = draft.sources if isinstance(draft.sources, dict) else {}
+    if sources.get("sources_changed"):  # 사본은 지워졌어도 바뀐 자료로 만든 본문이다. 다시 만들기만 이 표시를 지운다
+        return False
+    ids = {c.get("source_id") for c in (sources.get("chunks") or []) if isinstance(c, dict)}
+    if not ids:
+        return True
+    shareable = set(db.scalars(select(KnowledgeSource.id).where(
+        KnowledgeSource.user_id == user_id, KnowledgeSource.id.in_([i for i in ids if isinstance(i, int)]),
+        KnowledgeSource.visibility == "shareable")))
+    return ids <= shareable
+
+
+def _same_version(draft: ReplyDraft, expected: datetime) -> bool:
+    """화면이 확인한 버전(updated_at)과 같은 순간인가. SQLite는 시간대 없는 UTC를 돌려주므로 UTC 순간으로 비교한다."""
+    return draft.updated_at is not None and _utc(draft.updated_at) == _utc(expected)
+
+
+def ensure_can_send(db: Session, user: User, task: Task, draft: ReplyDraft, *,
+                    internal_ack: bool = False, expected_updated_at: datetime | None = None) -> GoogleAccount:
+    """보내기 직전 확인(Google을 부르지 않는다). API는 호출 횟수 제한보다 먼저 부른다.
+
+    internal_ack: 사용자가 '내부용 자료의 값이 들어 있습니다 — 알고 보냅니다'를 체크했다 (RAG 설계 5.3).
+    expected_updated_at: 화면이 확인한 초안 버전. 주었는데 지금 초안과 다르면 보내지 않는다(확인은 그 버전에만 걸린다).
+    """
     if task.status in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
         raise ActionError(CLOSED, 409)
     if draft.status != "draft":
         raise ActionError(ALREADY, 409)
+    if expected_updated_at is not None and not _same_version(draft, expected_updated_at):
+        raise ActionError(DRAFT_CHANGED, 409)
     if replied_after_draft(db, task, draft):
         # 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다('안 보내졌어요' 뒤 동기화가 찾은 경우 등). 두 번 보내지 않는다.
         raise ActionError(ALREADY_REPLIED, 409)
@@ -128,6 +160,17 @@ def ensure_can_send(db: Session, user: User, task: Task, draft: ReplyDraft) -> G
         raise ActionError(RECIPIENT_CHANGED, 409)
     if not {str(c).strip().lower() for c in (draft.cc_selected or [])} <= set(candidates):
         raise ActionError(CC_CHANGED, 409)
+    if not _sources_still_shareable(db, user.id, draft):
+        raise ActionError(SOURCES_CHANGED, 409)
+    if not internal_ack:
+        if get_settings().knowledge_enabled:
+            # 저장된 경고를 믿지 않고 지금 본문으로 다시 찾는다: 초안 뒤에 올린 내부용 자료도 잡는다 (5.3)
+            found = bool(draft_sources.internal_values_now(db, task, draft))
+        else:
+            warnings = draft.warnings if isinstance(draft.warnings, dict) else {}
+            found = bool(warnings.get("internal_values"))
+        if found:
+            raise ActionError(NEED_INTERNAL_ACK, 409)
     return account
 
 
@@ -175,7 +218,8 @@ def _to_unknown(db: Session, draft: ReplyDraft, error: Exception) -> None:
 
 
 def _finish_sent(db: Session, task: Task, draft: ReplyDraft, account: GoogleAccount, message_id: str,
-                 thread_id: str | None, subject: str, now: datetime, rfc_message_id: str | None = None) -> None:
+                 thread_id: str | None, subject: str, now: datetime, rfc_message_id: str | None = None,
+                 internal_ack: bool = False) -> None:
     """보낸 메일 저장 · 초안 sent · 답장 보냄. 동기화가 먼저 저장했으면(같은 gmail_message_id) 다시 넣지 않는다."""
     inserted = False
     exists = db.scalar(select(Email.id).where(Email.user_id == task.user_id, Email.gmail_message_id == message_id))
@@ -198,16 +242,19 @@ def _finish_sent(db: Session, task: Task, draft: ReplyDraft, account: GoogleAcco
     # 동기화가 먼저 저장했다면 record_sent_mail이 이미 답장 보냄으로 옮기고 기록했다.
     if resolved and inserted:
         lifecycle.mark_reply_sent(db, task, None, now, source="app", reason=_sent_reason(draft),
-                                  recipients=1 + len(draft.cc_selected or []))
+                                  recipients=1 + len(draft.cc_selected or []), extra={"internal_ack": internal_ack})
     db.commit()
 
 
 # ---------------------------------------------------------------- 보내기
 
-def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: GoogleClient, now: datetime) -> None:
+def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: GoogleClient, now: datetime, *,
+               internal_ack: bool = False, expected_updated_at: datetime | None = None) -> None:
     """확인 → 선점(커밋) → Gmail 발송. 결과가 불분명하면 unknown으로 두고 정상 반환한다. 커밋한다."""
     now = _utc(now)
-    account = ensure_can_send(db, user, task, draft)
+    checked_at = draft.updated_at  # 확인한 그 초안일 때만 선점한다(확인과 선점 사이에 토큰 갱신이 있다)
+    account = ensure_can_send(db, user, task, draft, internal_ack=internal_ack,
+                              expected_updated_at=expected_updated_at)
     thread_id, in_reply_to, references = _reply_target(db, task, account.google_email)
     subject = _reply_subject(draft.subject)
     rfc_id = new_message_id(account.google_email)
@@ -222,9 +269,16 @@ def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: G
         log.info("reply send %s: token refresh failed: %s", draft.id, type(e).__name__)
         raise ActionError(TOKEN_FAILED, 503)
 
-    if not _set(db, draft, ("draft",), status="sending", sending_at=now):
+    same = ReplyDraft.updated_at.is_(None) if checked_at is None else ReplyDraft.updated_at == checked_at
+    claimed = db.execute(update(ReplyDraft)
+                         .where(ReplyDraft.id == draft.id, ReplyDraft.status == "draft", same)
+                         .values(status="sending", sending_at=now)
+                         .execution_options(synchronize_session=False)).rowcount == 1
+    if not claimed:
         db.rollback()
-        raise ActionError(ALREADY, 409)
+        db.refresh(draft)
+        # 아직 초안이면 확인한 뒤에 누가 고쳤다(자료 변경 · 다른 창의 수정). 확인한 내용과 다른 것을 보내지 않는다.
+        raise ActionError(DRAFT_CHANGED if draft.status == "draft" else ALREADY, 409)
     db.commit()
     db.refresh(draft)
 
@@ -244,7 +298,8 @@ def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: G
         db.rollback()
         _to_unknown(db, draft, e)
         return
-    _finish_sent(db, task, draft, account, sent.id, sent.thread_id or thread_id, subject, now, rfc_id)
+    _finish_sent(db, task, draft, account, sent.id, sent.thread_id or thread_id, subject, now, rfc_id,
+                 internal_ack=internal_ack)
 
 
 def is_unknown(draft: ReplyDraft, now: datetime) -> bool:

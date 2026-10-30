@@ -164,10 +164,42 @@ class ReplyDraft(Base):
     status: Mapped[str] = mapped_column(String(10), default="draft")  # draft | sending | sent | unknown
     warnings: Mapped[dict] = mapped_column(JSON, default=dict)
     user_input: Mapped[str] = mapped_column(Text, default="")
+    sources: Mapped[dict] = mapped_column(JSON, default=dict)
     gmail_message_id: Mapped[str | None] = mapped_column(String(64))
     sending_at: Mapped[datetime | None] = mapped_column(Timestamp)
     created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow, onupdate=utcnow)
+
+
+class KnowledgeSource(Base):
+    __tablename__ = "knowledge_sources"
+    __table_args__ = (UniqueConstraint("user_id", "content_hash", name="uq_knowledge_sources_user_hash"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), default="document")
+    title: Mapped[str] = mapped_column(String(300))
+    file_type: Mapped[str] = mapped_column(String(10))
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    visibility: Mapped[str] = mapped_column(String(10), default="internal")
+    status: Mapped[str] = mapped_column(String(10))  # indexed | flagged | failed
+    error: Mapped[str] = mapped_column(Text, default="")
+    notes: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(Timestamp, default=utcnow)
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    lines: Mapped[list] = mapped_column(JSON, default=list)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    flagged: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class GoogleAccount(Base):

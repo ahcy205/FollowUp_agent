@@ -4,6 +4,7 @@ export interface User {
   id: number
   email: string
   demo_mode?: boolean // 서버 DEMO_MODE. 없으면 꺼짐으로 본다
+  knowledge_enabled?: boolean // 서버 KNOWLEDGE_ENABLED. 없으면 꺼짐으로 본다
 }
 
 export interface PlanStep {
@@ -196,6 +197,44 @@ export interface ReplyDraftWarnings {
   unsupported: string[]
   outside_contacts: string[]
   suspicious: string[]
+  internal_values?: number // 내부용 자료에 있는 값 개수 (RAG 설계 5.3)
+  other_item?: number // 다른 품목의 값일 수 있는 자료 항목 개수
+}
+
+// 초안에 넣어 준 자료 덩어리 사본 (RAG 설계 5.4)
+export interface DraftSourceChunk {
+  ref: string
+  source_id: number
+  chunk_id: number
+  title: string
+  uploaded_at: string
+  visibility: 'shareable' | 'internal'
+  lines: string[]
+}
+
+// 자료에서 가져와 코드가 다시 확인한 항목
+export interface DraftSourceFact {
+  text: string
+  ref: string
+  line: number
+  line_text: string
+  checked: 'numbers' | 'manual'
+  other_item: boolean
+}
+
+export interface DraftInternalValue {
+  value: string // 천 단위 구분 없이 저장된다 (예: "8000원")
+  source_ids: number[]
+  titles: string[]
+}
+
+// 옛 초안은 {}일 수 있다: 키마다 없을 수 있다고 본다
+export interface ReplyDraftSources {
+  chunks?: DraftSourceChunk[]
+  facts?: DraftSourceFact[]
+  internal_values?: DraftInternalValue[]
+  search_failed?: boolean
+  sources_changed?: boolean
 }
 
 // 답장 초안. 받는 사람(to_addr)과 참조 후보는 서버가 정한다.
@@ -208,6 +247,7 @@ export interface ReplyDraft {
   body: string
   status: 'draft' | 'sending' | 'sent' | 'unknown'
   warnings: ReplyDraftWarnings
+  sources?: ReplyDraftSources
   can_send: boolean
   unknown_since: string | null
   replied_after?: boolean
@@ -318,4 +358,31 @@ export interface InboxAlert {
 export interface InboxAlerts {
   now_count: number
   alerts: InboxAlert[]
+}
+
+// 자료실 (RAG 설계 2.1)
+export interface KnowledgeSource {
+  id: number
+  title: string
+  file_type: string
+  size: number
+  visibility: 'shareable' | 'internal'
+  status: 'indexed' | 'flagged' | 'failed'
+  error: string
+  notes: { formula_without_value?: number; truncated_rows?: number }
+  chunk_count: number
+  flagged_count: number
+  created_at: string
+}
+
+export interface KnowledgeList {
+  enabled: boolean
+  sources: KnowledgeSource[]
+}
+
+export interface KnowledgeUploadResult {
+  filename: string
+  ok: boolean
+  error: string
+  source: KnowledgeSource | null
 }

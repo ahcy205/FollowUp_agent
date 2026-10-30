@@ -6,6 +6,7 @@ import GoogleBanner from './components/GoogleBanner'
 import ResetDialog from './components/ResetDialog'
 import Dashboard from './pages/Dashboard'
 import Inbox from './pages/Inbox'
+import Knowledge from './pages/Knowledge'
 import Login from './pages/Login'
 import Settings from './pages/Settings'
 import TaskDetailPage from './pages/TaskDetail'
@@ -52,6 +53,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               전체 업무
             </NavLink>
             {demo && <NavLink to="/workspace">워크스페이스 데이터</NavLink>}
+            <NavLink to="/knowledge">자료실</NavLink>
             <NavLink to="/settings">설정</NavLink>
           </nav>
           <div className="topbar-right">
@@ -132,6 +134,7 @@ export default function App() {
             path="/workspace"
             element={user?.demo_mode ? <Protected><Workspace key={refreshKey} /></Protected> : <Navigate to="/" replace />}
           />
+          <Route path="/knowledge" element={<Protected><Knowledge /></Protected>} />
           <Route path="/settings" element={<Protected><Settings /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

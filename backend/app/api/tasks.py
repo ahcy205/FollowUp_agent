@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 from datetime import datetime, timezone
 
@@ -50,6 +51,7 @@ from app.schemas import (
     ReplyDraftIn,
     ReplyDraftOut,
     ReplyDraftUpdateIn,
+    ReplySendIn,
     RunOut,
     SnoozeIn,
     TaskBrief,
@@ -192,7 +194,9 @@ def _draft_out(db: Session, task: Task, now: datetime) -> ReplyDraftOut | None:
         purpose=d.purpose, to_addr=d.to_addr, cc_candidates=list(d.cc_candidates or []),
         cc_selected=list(d.cc_selected or []), subject=d.subject, body=d.body,
         status="unknown" if unknown else d.status, warnings=warnings,
-        can_send=d.status == "draft" and not reply_draft.placeholders(d.body),
+        sources=d.sources if isinstance(d.sources, dict) else {},
+        can_send=(d.status == "draft" and not reply_draft.placeholders(d.body)
+                  and not (isinstance(d.sources, dict) and d.sources.get("sources_changed"))),
         unknown_since=d.sending_at if unknown else None, updated_at=d.updated_at,
         replied_after=d.status == "draft" and reply_send.replied_after_draft(db, task, d),
     )
@@ -207,8 +211,16 @@ def task_fingerprint(db: Session, task: Task) -> tuple:
     mail_count = db.scalar(select(func.count()).select_from(Email).where(Email.task_id == task.id))
     snoozed = task.snoozed_until.isoformat() if task.snoozed_until else ""
     undo = len(task.merge_undo) if isinstance(task.merge_undo, dict) else 0
+    # 자료를 지우거나 등급을 바꾸면 업무는 그대로이고 초안만 바뀐다: 열린 화면에 바로 보이도록 초안도 넣는다.
+    # 자료 변경은 updated_at을 그대로 두기도 하므로(발송 판단 기준) 경고 · 사본의 요약도 넣는다.
+    row = db.execute(select(ReplyDraft.updated_at, ReplyDraft.warnings, ReplyDraft.sources)
+                     .where(ReplyDraft.user_id == task.user_id, ReplyDraft.task_id == task.id)).first()
+    draft_fp = None
+    if row is not None:
+        draft_fp = (row[0].isoformat() if row[0] else None,
+                    hash(json.dumps([row[1], row[2]], sort_keys=True, ensure_ascii=False, default=str)))
     return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None,
-            snoozed, undo, mail_count or 0)
+            snoozed, undo, mail_count or 0, draft_fp)
 
 
 SSE_POLL_SECONDS = 0.4
@@ -433,13 +445,20 @@ def delete_reply_draft(task_id: int, user: User = Depends(get_current_user), db:
 
 
 @router.post("/tasks/{task_id}/reply-draft/send", response_model=TaskDetail)
-def send_reply_draft(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """승인한 초안을 원래 Gmail 스레드로 보낸다. 받는 사람은 서버가 다시 확인한다. 결과가 불분명하면 unknown."""
+def send_reply_draft(task_id: int, body: ReplySendIn | None = None, user: User = Depends(get_current_user),
+                     db: Session = Depends(get_db)):
+    """승인한 초안을 원래 Gmail 스레드로 보낸다. 받는 사람은 서버가 다시 확인한다. 결과가 불분명하면 unknown.
+
+    본문은 없어도 된다(내부용 값 확인 없음). 내부용 자료의 값이 든 초안은 internal_ack가 있어야 보낸다.
+    """
+    ack = body.internal_ack if body is not None else False
+    expected = body.expected_updated_at if body is not None else None
     task = _mail_task(db, task_id, user)
     draft = _act(reply_draft.find_draft, db, task)
-    _act(reply_send.ensure_can_send, db, user, task, draft)
+    _act(reply_send.ensure_can_send, db, user, task, draft, internal_ack=ack, expected_updated_at=expected)
     send_limiter.check(f"send:{user.id}")  # after the checks above so rejected calls cost nothing
-    _act(reply_send.send_draft, db, user, task, draft, get_google_client(), datetime.now(timezone.utc))
+    _act(reply_send.send_draft, db, user, task, draft, get_google_client(), datetime.now(timezone.utc),
+         internal_ack=ack, expected_updated_at=expected)
     return _done(db, task, user)
 
 

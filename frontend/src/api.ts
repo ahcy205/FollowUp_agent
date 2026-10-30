@@ -13,15 +13,17 @@ export function setUnauthorizedHandler(fn: () => void) {
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response
+  const isForm = body instanceof FormData
   try {
     res = await fetch(`/api${path}`, {
       method,
       credentials: 'same-origin',
       headers: {
         'X-Requested-With': 'XMLHttpRequest',
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        // FormData: 브라우저가 multipart 경계를 넣은 Content-Type을 직접 정한다.
+        ...(body !== undefined && !isForm ? { 'Content-Type': 'application/json' } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
     throw new ApiError(0, '서버에 연결할 수 없습니다. 네트워크 상태를 확인하세요.')
@@ -44,4 +46,5 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, body ?? {}),
+  upload: <T>(path: string, form: FormData) => request<T>('POST', path, form),
 }

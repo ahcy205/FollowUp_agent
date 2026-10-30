@@ -56,7 +56,7 @@ def _recipient_count(email: Email | None) -> int:
 
 
 def mark_reply_sent(db: Session, task: Task, email: Email | None, now: datetime, *, source: str,
-                    reason: str | None = None, recipients: int | None = None) -> None:
+                    reason: str | None = None, recipients: int | None = None, extra: dict | None = None) -> None:
     """답장을 보낸 업무를 보낸 업무로 옮기고 기다림 시계를 시작한다. 닫힌 · 합쳐진 업무는 건드리지 않는다.
 
     reason · recipients를 주면 타임라인 문구와 수신자 수로 쓴다(앱 발송은 '받는 사람 1명, 참조 N명').
@@ -74,7 +74,8 @@ def mark_reply_sent(db: Session, task: Task, email: Email | None, now: datetime,
     task.snooze_returned_at = None
     log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="REPLY_SENT",
                output_data={"source": source,
-                            "recipients": _recipient_count(email) if recipients is None else recipients},
+                            "recipients": _recipient_count(email) if recipients is None else recipients,
+                            **(extra or {})},
                reason=reason or ("앱에서 답장을 보냈습니다" if source == "app" else "Gmail에서 보낸 답장을 확인했습니다"))
 
 

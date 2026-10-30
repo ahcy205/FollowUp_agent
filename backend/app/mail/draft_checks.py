@@ -42,9 +42,9 @@ def _numbers(raw: str) -> list[str]:
     return [p for p in raw.split(",") if p]
 
 
-def tokens(text: str) -> list[tuple[str, str, str]]:
-    """(종류, 비교 키, 보일 글). 종류: md(날짜) · d(일만) · m(월만) · n(숫자)."""
-    out: list[tuple[str, str, str]] = []
+def token_spans(text: str) -> list[tuple[str, str, str, int]]:
+    """(종류, 비교 키, 보일 글, 끝 위치). 끝 위치는 text 안에서 그 토큰이 끝나는 곳(뒤에 붙은 '원' 확인용)."""
+    out: list[tuple[str, str, str, int]] = []
     for mt in _TOKEN_RE.finditer(text or ""):
         g, shown = mt.groupdict(), mt.group(0).strip()
         if g["ymd"] or g["kmd"] or g["smd"]:
@@ -52,16 +52,35 @@ def tokens(text: str) -> list[tuple[str, str, str]]:
                           else (g["smd"], g["smd_d"]))
             key = _md(month, day)
             if key:
-                out.append(("md", key, shown))
+                out.append(("md", key, shown, mt.end()))
             else:  # 날짜가 될 수 없는 값(13.5 등)은 숫자로 본다
-                out.extend(("n", n, n) for n in _numbers(shown.replace(" ", "")))
+                out.extend(("n", n, n, mt.end()) for n in _numbers(shown.replace(" ", "")))
         elif g["day"]:
-            out.append(("d", str(int(g["day"])), shown))
+            out.append(("d", str(int(g["day"])), shown, mt.end()))
         elif g["month"]:
-            out.append(("m", str(int(g["month"])), shown))
+            out.append(("m", str(int(g["month"])), shown, mt.end()))
         else:
-            out.extend(("n", n, n) for n in _numbers(g["num"]))
+            raw, start = g["num"], mt.start("num")
+            if _THOUSANDS_RE.fullmatch(raw):
+                out.append(("n", raw.replace(",", ""), raw.replace(",", ""), mt.end()))
+            else:  # 쉼표로 나뉜 숫자는 조각마다 끝 위치를 따로 잡는다
+                offset = 0
+                for part in raw.split(","):
+                    offset += len(part)
+                    if part:
+                        out.append(("n", part, part, start + offset))
+                    offset += 1
     return out
+
+
+def tokens(text: str) -> list[tuple[str, str, str]]:
+    """(종류, 비교 키, 보일 글). 종류: md(날짜) · d(일만) · m(월만) · n(숫자)."""
+    return [(kind, key, shown) for kind, key, shown, _ in token_spans(text)]
+
+
+def supported_keys(sources: str) -> set[tuple[str, str]]:
+    """근거 글의 토큰 키. 날짜는 월만 · 일만 키도 함께 넣는다."""
+    return _supported_keys(sources)
 
 
 def _supported_keys(sources: str) -> set[tuple[str, str]]:

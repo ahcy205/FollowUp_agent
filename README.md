@@ -28,7 +28,8 @@
 | 데모 모드 분리 (설계 7단계 일부) | 완료 — [설계](docs/superpowers/specs/2026-10-27-demo-mode-split-design.md) · [구현 계획](docs/superpowers/plans/2026-10-27-demo-mode-split.md) |
 | 답장과 수명주기 (설계 6단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-27-reply-and-lifecycle-design.md) · [구현 계획](docs/superpowers/plans/2026-10-27-reply-and-lifecycle.md) · [정확도 측정](docs/evals/2026-10-27-reply-lifecycle.md) |
 | 정리 (설계 7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
-| RAG (검색 증강 생성) | 설계 중, 구현 전 — [설계 문서](docs/superpowers/specs/2026-10-26-rag-design.md) |
+| RAG 1단계: 내 자료로 답장 초안 채우기 | 완료 (로컬 점검, 가상 자료) — [설계](docs/superpowers/specs/2026-10-29-rag-documents-design.md) · [구현 계획](docs/superpowers/plans/2026-10-29-rag-documents.md) · [정확도 측정](docs/evals/2026-10-29-rag-documents.md) |
+| RAG 다음 단계 (업무 요약 · 메일 색인 · 문체, 의미 검색) | 예정 — [상위 설계](docs/superpowers/specs/2026-10-26-rag-design.md) |
 
 **문서** · [변경 이력](CHANGELOG.md) · [결정 기록](docs/decisions.md) · [데이터 · 개인정보 흐름](docs/privacy.md) · [문제 해결](docs/troubleshooting.md) · [설계 문서 · 구현 계획](docs/superpowers/)
 
@@ -165,6 +166,13 @@ Gmail을 연결하려면 본인 Google Cloud 프로젝트에 OAuth 클라이언�
 `backend/.env`에 `MAIL_TRIAGE_ENABLED=true`를 넣고 서버를 재시작하면, 가져온 메일에서 업무 메일을 골라 요약 · 할 일 · 기한이 담긴 업무를 자동으로 만듭니다. 기본값은 꺼짐입니다.
 같은 스위치로 재답장 분석(상대가 바꾼 내용 반영), 다른 스레드 수정 요청 판단, 답장 초안 만들기도 켜집니다.
 켜면 메일의 보낸 사람 · 제목 · 본문 일부가 LLM 공급자로 전송됩니다. 전송 범위와 무료 등급 주의 사항은 [데이터 · 개인정보 흐름](docs/privacy.md)을 보세요.
+
+### 내 자료로 답장 초안 채우기 (RAG 1단계)
+
+`backend/.env`에 `KNOWLEDGE_ENABLED=true`를 넣고 서버를 재시작하면 왼쪽 메뉴 **자료실**에서 단가표 · 정책 문서 등을 올릴 수 있습니다(xlsx · csv · txt · md · pdf · docx). 기본값은 꺼짐이고, 답장 초안을 만들려면 위 판별 스위치도 켜져 있어야 합니다.
+- 올린 자료는 기본이 **내부용**입니다. 답장에 쓰려면 **답장에 써도 됨**으로 바꿉니다. 그 자료 중 검색된 부분(최대 5덩어리)만 초안을 만들 때 LLM으로 갑니다. 내부용 자료는 밖으로 나가지 않습니다.
+- 초안 카드에 "자료에서 가져온 내용"과 그 자료 줄이 보입니다. 내부용 자료의 값(예: 원가)이 초안에 들어 있으면 빨간 경고가 뜨고, "알고 보냅니다"를 체크해야 보낼 수 있습니다.
+- 검색은 내 PC 안에서 키워드로 합니다. 품번 같은 낱말이 메일 · 메모에 있어야 잘 찾습니다. 문제가 생기면 [문제 해결](docs/troubleshooting.md#자료실--자료로-채운-답장-rag-1단계)을 보세요.
 
 ## Railway 배포
 

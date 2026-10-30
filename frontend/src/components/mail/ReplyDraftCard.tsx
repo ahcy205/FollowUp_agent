@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { parseDate } from '../../format'
-import type { Email, MailAct, ReplyDraft, TaskDetail } from '../../types'
+import type { DraftSourceChunk, Email, MailAct, ReplyDraft, TaskDetail } from '../../types'
 
 const UNKNOWN_CONFIRM_MS = 5 * 60_000 // backend reply_send.UNKNOWN_CONFIRM_AFTER
+// backend reply_send.NEED_INTERNAL_ACK: 초안 뒤에 생긴 내부용 값을 서버가 보내기 직전에 찾았다
+const NEED_INTERNAL_ACK = "내부용 자료의 값이 들어 있습니다. 내용을 확인하고 '알고 보냅니다'를 체크해 주세요."
 const PLACEHOLDER_RE = /\[\[[^[\]]{1,80}\]\]/g // backend draft_checks.PLACEHOLDER_RE
 
 function placeholdersOf(body: string): string[] {
@@ -22,6 +24,19 @@ function threadSubject(emails: Email[]): string {
   if (inbound.length === 0) return ''
   const latest = inbound.reduce((a, b) => (parseDate(b.created_at) > parseDate(a.created_at) ? b : a))
   return bareSubject(latest.subject)
+}
+
+/** "8000원" → "8,000원". 서버는 내부용 값을 천 단위 구분 없이 저장한다.
+ * 0으로 시작하는 수(품번 등) · 소수부 · "-"로 이은 번호("010-1234", "1234-5678")는 그대로 둔다. */
+function displayValue(value: string) {
+  return value.replace(/(?<![\d.,-])[1-9]\d{3,}(?![\d-])/g, (n) => Number(n).toLocaleString('ko-KR'))
+}
+
+/** 자료 올린 날짜 "10/20" */
+function uploadedMd(iso: string | undefined) {
+  if (!iso) return '날짜 모름'
+  const d = parseDate(iso)
+  return Number.isNaN(d.getTime()) ? '날짜 모름' : `${d.getMonth() + 1}/${d.getDate()}`
 }
 
 function snapshot(d: ReplyDraft) {
@@ -54,6 +69,11 @@ export default function ReplyDraftCard({
   const [stepState, setStepState] = useState<{ step: Step; at: string }>({ step: 'edit', at: draft.updated_at })
   const step: Step = stepState.at === draft.updated_at ? stepState.step : 'edit'
   const setStep = (s: Step, at: string = draft.updated_at) => setStepState({ step: s, at })
+  // "알고 보냅니다" 체크는 체크한 때의 서버 초안에만 걸린다. 초안이 바뀌거나 확인 단계를 다시 열면 풀린다.
+  const [ack, setAck] = useState<{ at: string; on: boolean }>({ at: '', on: false })
+  const acked = ack.on && ack.at === draft.updated_at
+  // 서버가 보내기 직전에 내부용 값을 찾아 막은 초안(updated_at). 저장된 경고에 없어도 체크를 보인다.
+  const [serverNeedsAckAt, setServerNeedsAckAt] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => Date.now())
@@ -114,11 +134,25 @@ export default function ReplyDraftCard({
       if (!(await run('save', async () => (saved = await save())))) return
       if (saved) at = saved.updated_at
     }
+    setAck({ at: '', on: false })
     setStep('confirm-send', at)
   }
 
   const send = async () => {
-    await run('send', () => act('/reply-draft/send'))
+    let missingAck = false
+    const at = draft.updated_at
+    await run('send', () =>
+      // 확인(체크 포함)은 화면이 본 그 버전에만 걸린다: 그사이 초안이 바뀌면 서버가 409로 막는다
+      act('/reply-draft/send', { expected_updated_at: at, ...(needsAck ? { internal_ack: acked } : {}) }).catch((e: Error) => {
+        missingAck = e.message === NEED_INTERNAL_ACK
+        throw e
+      }),
+    )
+    setAck({ at: '', on: false })
+    if (missingAck) {
+      setServerNeedsAckAt(at) // 확인 단계를 연 채로 두고 체크를 보인다
+      return
+    }
     setStep('edit')
   }
 
@@ -131,6 +165,14 @@ export default function ReplyDraftCard({
   const base_ = threadSubject(data.emails)
   const subjectDrift = editable && base_ !== '' && !bareSubject(subject).startsWith(base_)
   const w = draft.warnings
+  const src = draft.sources ?? {}
+  const chunks = src.chunks ?? []
+  const facts = src.facts ?? []
+  const internal = src.internal_values ?? []
+  const sourcesChanged = src.sources_changed === true
+  const needsAck = internal.length > 0 || (w.internal_values ?? 0) > 0 || serverNeedsAckAt === draft.updated_at
+  const chunkByRef = new Map<string, DraftSourceChunk>(chunks.map((c) => [c.ref, c]))
+  const usedRefs = new Set(facts.map((f) => f.ref))
   // 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다. 서버도 보내기를 409로 막는다.
   const replyAt = data.mail?.reply_sent_at
   const sentLater = draft.replied_after === true
@@ -200,11 +242,65 @@ export default function ReplyDraftCard({
         </div>
       )}
 
-      {(w.unsupported.length > 0 || w.outside_contacts.length > 0 || w.suspicious.length > 0) && (
+      {facts.length > 0 && (
+        <div className="draft-facts">
+          <b className="small">자료에서 가져온 내용 {facts.length}개</b>
+          <ul>
+            {facts.map((f, i) => {
+              const c = chunkByRef.get(f.ref)
+              return (
+                <li key={i} className="small">
+                  <b>{f.text}</b> — {c ? `${c.title} (${uploadedMd(c.uploaded_at)} 올림)` : '자료'} · <q className="muted">{f.line_text}</q>
+                  {f.other_item && <span className="tag tag-amber">다른 품목의 값일 수 있습니다</span>}
+                  {f.checked === 'manual' && <span className="tag tag-amber">직접 확인 필요</span>}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+
+      {chunks.length > 0 && (
+        <details className="draft-sources">
+          <summary className="small">참고한 자료 {chunks.length}개</summary>
+          <ul>
+            {chunks.map((c) => (
+              <li key={c.ref} className={`small${usedRefs.has(c.ref) ? '' : ' draft-source-unused'}`}>
+                {c.title} ({uploadedMd(c.uploaded_at)} 올림){usedRefs.has(c.ref) ? '' : ' · 쓰이지 않음'}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {src.search_failed && <div className="muted small">자료를 찾지 못해 메모와 입력만으로 만들었습니다</div>}
+
+      {(w.unsupported.length > 0 || w.outside_contacts.length > 0 || w.suspicious.length > 0 || needsAck || sourcesChanged) && (
         <div className="draft-warnings">
+          {sourcesChanged && (
+            <div className="alert alert-amber">
+              <b>참고한 자료가 바뀌었습니다</b> — 초안을 다시 만들어 주세요
+            </div>
+          )}
+          {needsAck && (
+            <div className="alert alert-red">
+              <b>내부용 자료에 있는 값</b>
+              {internal.length > 0 ? (
+                <ul className="draft-internal">
+                  {internal.map((v, i) => (
+                    <li key={i}>
+                      {displayValue(v.value)} — {v.titles.join(', ')}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <> — 보내기 전에 내용을 확인해 주세요.</>
+              )}
+            </div>
+          )}
           {w.suspicious.length > 0 && (
             <div className="alert alert-red">
-              <b>보안 경고</b> — 메일 속 지시를 따르지 않았습니다: {w.suspicious.join(', ')}
+              <b>보안 경고</b> — 메일 · 자료 속 지시를 따르지 않았습니다: {w.suspicious.join(', ')}
             </div>
           )}
           {w.unsupported.length > 0 && (
@@ -253,8 +349,24 @@ export default function ReplyDraftCard({
           <span>
             <b>{draft.to_addr}</b>에게 보냅니다 · 참조 {draft.cc_selected.length}명
           </span>
+          {needsAck && (
+            <label className="check-row small text-red">
+              <input
+                type="checkbox"
+                checked={acked}
+                disabled={!!busy}
+                onChange={(e) => setAck({ at: draft.updated_at, on: e.target.checked })}
+              />
+              내부용 자료의 값이 들어 있습니다 — 알고 보냅니다
+            </label>
+          )}
           <div className="draft-actions">
-            <button type="button" className="btn btn-primary btn-sm" disabled={!!busy || dirty || blanks.length > 0 || sentLater} onClick={send}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={!!busy || dirty || blanks.length > 0 || sentLater || sourcesChanged || (needsAck && !acked)}
+              onClick={send}
+            >
               {busy === 'send' ? '보내는 중…' : '정말 보내기'}
             </button>
             <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => setStep('edit')}>
@@ -280,10 +392,11 @@ export default function ReplyDraftCard({
 
       {editable && step === 'edit' && (
         <div className="draft-actions">
-          <button type="button" className="btn btn-primary btn-sm" disabled={!!busy || blanks.length > 0 || sentLater} onClick={startSend}>
+          <button type="button" className="btn btn-primary btn-sm" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
             {busy === 'save' ? '저장 중…' : '보내기'}
           </button>
           {blanks.length > 0 && <span className="muted small">빈칸 {blanks.length}개를 채워야 보낼 수 있습니다</span>}
+          {sourcesChanged && <span className="muted small">초안을 다시 만들어야 보낼 수 있습니다</span>}
           {dirty && (
             <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => run('save', save)}>
               저장
