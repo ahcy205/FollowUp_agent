@@ -64,11 +64,11 @@ def fake(google_fake):
     return google_fake
 
 
-def _send(db, task_id, now=NOW, client=None):
+def _send(db, task_id, now=NOW, client=None, **kw):
     task = db.get(Task, task_id)
     draft = db.scalar(select(ReplyDraft).where(ReplyDraft.task_id == task_id))
     user = db.get(User, task.user_id)
-    rs.send_draft(db, user, task, draft, client, now)
+    rs.send_draft(db, user, task, draft, client, now, **kw)
     return task, draft
 
 
@@ -464,7 +464,7 @@ def test_draft_edit_after_reply_can_send(fake):
         from app.mail import reply_draft
         reply_draft.update_draft(db.get(ReplyDraft, did), subject="Re: 견적 문의", body=BODY, cc_selected=[])
         db.commit()
-        _send(db, tid, now=datetime.now(UTC), client=fake)
+        _send(db, tid, now=datetime.now(UTC), client=fake, unsupported_ack=True)
         assert db.get(ReplyDraft, did).status == "sent"
 
 

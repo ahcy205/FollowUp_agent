@@ -192,6 +192,7 @@ class ReplySendIn(_Strict):
     expected_updated_at: 화면이 확인한 초안의 updated_at. 주면 지금 초안과 같을 때만 보낸다(확인을 그 버전에 묶는다).
     """
     internal_ack: StrictBool = False
+    unsupported_ack: StrictBool = False  # 근거 없는 값을 확인했다(2026-10-31 사용자 결정)
     expected_updated_at: datetime | None = None
 
 
