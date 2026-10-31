@@ -552,6 +552,7 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .confirm-grid dt { background: var(--label); border-right: 1px solid var(--rule); padding: 8px 12px; font-size: 0.82rem; font-weight: 650; color: var(--ink-3); }
 .confirm-grid dd { margin: 0; padding: 8px 12px; min-width: 0; overflow-wrap: anywhere; }
 .confirm-warn dt { color: var(--amber); background: var(--amber-50); }
+.confirm-check { margin-top: 6px; color: var(--amber); font-weight: 650; }
 .value-chip { display: inline-block; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 7px; margin: 1px 4px 1px 0; border-radius: 4px; background: var(--paper); border: 1px solid var(--amber-100); color: var(--amber); }
 .wait-note b { font-variant-numeric: tabular-nums; }
 

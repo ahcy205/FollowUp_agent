@@ -52,6 +52,7 @@ ALREADY_REPLIED = "이미 답장을 보낸 것으로 확인됐습니다. 초안�
 FOUND_IN_GMAIL = "Gmail에서 이 답장이 이미 보내진 것으로 확인됩니다. 보낸편지함을 확인해 주세요."
 SOURCES_CHANGED = "참고한 자료가 지워졌거나 내부용으로 바뀌었습니다. 초안을 다시 만들어 주세요."
 NEED_INTERNAL_ACK = "내부용 자료의 값이 들어 있습니다. 내용을 확인하고 '알고 보냅니다'를 체크해 주세요."
+NEED_UNSUPPORTED_ACK = "근거를 찾지 못한 값이 있습니다. 값이 맞는지 확인하고 '확인했어요'를 체크해 주세요."
 DRAFT_CHANGED = "초안이 방금 바뀌었습니다. 내용을 다시 확인한 뒤 보내 주세요."
 
 
@@ -134,10 +135,12 @@ def _same_version(draft: ReplyDraft, expected: datetime) -> bool:
 
 
 def ensure_can_send(db: Session, user: User, task: Task, draft: ReplyDraft, *,
-                    internal_ack: bool = False, expected_updated_at: datetime | None = None) -> GoogleAccount:
+                    internal_ack: bool = False, unsupported_ack: bool = False,
+                    expected_updated_at: datetime | None = None) -> GoogleAccount:
     """보내기 직전 확인(Google을 부르지 않는다). API는 호출 횟수 제한보다 먼저 부른다.
 
     internal_ack: 사용자가 '내부용 자료의 값이 들어 있습니다 — 알고 보냅니다'를 체크했다 (RAG 설계 5.3).
+    unsupported_ack: 사용자가 '근거를 찾지 못한 값'을 확인했다. 초안 저장 때 계산한 경고를 쓴다(고치면 다시 계산된다).
     expected_updated_at: 화면이 확인한 초안 버전. 주었는데 지금 초안과 다르면 보내지 않는다(확인은 그 버전에만 걸린다).
     """
     if task.status in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
@@ -171,6 +174,10 @@ def ensure_can_send(db: Session, user: User, task: Task, draft: ReplyDraft, *,
             found = bool(warnings.get("internal_values"))
         if found:
             raise ActionError(NEED_INTERNAL_ACK, 409)
+    if not unsupported_ack:
+        warnings = draft.warnings if isinstance(draft.warnings, dict) else {}
+        if warnings.get("unsupported"):
+            raise ActionError(NEED_UNSUPPORTED_ACK, 409)
     return account
 
 
@@ -219,7 +226,7 @@ def _to_unknown(db: Session, draft: ReplyDraft, error: Exception) -> None:
 
 def _finish_sent(db: Session, task: Task, draft: ReplyDraft, account: GoogleAccount, message_id: str,
                  thread_id: str | None, subject: str, now: datetime, rfc_message_id: str | None = None,
-                 internal_ack: bool = False) -> None:
+                 internal_ack: bool = False, unsupported_ack: bool = False) -> None:
     """보낸 메일 저장 · 초안 sent · 답장 보냄. 동기화가 먼저 저장했으면(같은 gmail_message_id) 다시 넣지 않는다."""
     inserted = False
     exists = db.scalar(select(Email.id).where(Email.user_id == task.user_id, Email.gmail_message_id == message_id))
@@ -242,18 +249,19 @@ def _finish_sent(db: Session, task: Task, draft: ReplyDraft, account: GoogleAcco
     # 동기화가 먼저 저장했다면 record_sent_mail이 이미 답장 보냄으로 옮기고 기록했다.
     if resolved and inserted:
         lifecycle.mark_reply_sent(db, task, None, now, source="app", reason=_sent_reason(draft),
-                                  recipients=1 + len(draft.cc_selected or []), extra={"internal_ack": internal_ack})
+                                  recipients=1 + len(draft.cc_selected or []), extra={"internal_ack": internal_ack, "unsupported_ack": unsupported_ack})
     db.commit()
 
 
 # ---------------------------------------------------------------- 보내기
 
 def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: GoogleClient, now: datetime, *,
-               internal_ack: bool = False, expected_updated_at: datetime | None = None) -> None:
+               internal_ack: bool = False, unsupported_ack: bool = False,
+               expected_updated_at: datetime | None = None) -> None:
     """확인 → 선점(커밋) → Gmail 발송. 결과가 불분명하면 unknown으로 두고 정상 반환한다. 커밋한다."""
     now = _utc(now)
     checked_at = draft.updated_at  # 확인한 그 초안일 때만 선점한다(확인과 선점 사이에 토큰 갱신이 있다)
-    account = ensure_can_send(db, user, task, draft, internal_ack=internal_ack,
+    account = ensure_can_send(db, user, task, draft, internal_ack=internal_ack, unsupported_ack=unsupported_ack,
                               expected_updated_at=expected_updated_at)
     thread_id, in_reply_to, references = _reply_target(db, task, account.google_email)
     subject = _reply_subject(draft.subject)
@@ -299,7 +307,7 @@ def send_draft(db: Session, user: User, task: Task, draft: ReplyDraft, client: G
         _to_unknown(db, draft, e)
         return
     _finish_sent(db, task, draft, account, sent.id, sent.thread_id or thread_id, subject, now, rfc_id,
-                 internal_ack=internal_ack)
+                 internal_ack=internal_ack, unsupported_ack=unsupported_ack)
 
 
 def is_unknown(draft: ReplyDraft, now: datetime) -> bool:

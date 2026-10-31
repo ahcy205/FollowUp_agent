@@ -74,7 +74,7 @@ def test_api_send_with_matching_version_sends(fake, client):
         tid, _ = _setup(db, me["id"])
         _doc(db, me["id"], "원가표.csv", COST_1200)
     at = _draft_json(client, tid)["updated_at"]  # 화면이 받은 그대로(SQLite: 시간대 없는 UTC)
-    r = client.post(f"/api/tasks/{tid}/reply-draft/send", json={"internal_ack": True, "expected_updated_at": at})
+    r = client.post(f"/api/tasks/{tid}/reply-draft/send", json={"internal_ack": True, "unsupported_ack": True, "expected_updated_at": at})
     assert r.status_code == 200, r.text
     assert r.json()["mail"]["draft"]["status"] == "sent" and len(fake.sent) == 1
 
@@ -171,7 +171,7 @@ def test_switch_off_send_ignores_internal_index(fake, monkeypatch):
         db.commit()
         assert d.warnings["internal_values"] == 0 and d.sources["internal_values"] == []
         monkeypatch.setattr(ds, "internal_values_now", lambda *a, **k: pytest.fail("no index when off"))
-        assert _send(db, tid, fake).status == "sent" and len(fake.sent) == 1
+        assert _send(db, tid, fake, unsupported_ack=True).status == "sent" and len(fake.sent) == 1
 
 
 def test_switch_off_stale_stored_warning_still_needs_ack(fake, monkeypatch):
@@ -190,4 +190,4 @@ def test_switch_off_stale_stored_warning_still_needs_ack(fake, monkeypatch):
             _send(db, tid, fake)
         assert (str(e.value), e.value.status) == (NEED_ACK, 409)
         assert fake.sent == []
-        assert _send(db, tid, fake, internal_ack=True).status == "sent" and len(fake.sent) == 1
+        assert _send(db, tid, fake, internal_ack=True, unsupported_ack=True).status == "sent" and len(fake.sent) == 1

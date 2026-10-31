@@ -158,7 +158,7 @@ def test_send_requires_internal_ack(fake):
             _send(db, tid, fake)
         assert (str(e.value), e.value.status) == (NEED_ACK, 409)
         assert fake.sent == []
-        d = _send(db, tid, fake, internal_ack=True)
+        d = _send(db, tid, fake, internal_ack=True, unsupported_ack=True)
         assert d.status == "sent" and len(fake.sent) == 1
         log = db.scalar(select(AgentActionLog).where(AgentActionLog.task_id == tid,
                                                      AgentActionLog.action_type == "REPLY_SENT"))
@@ -172,7 +172,7 @@ def test_api_send_internal_ack(fake, client):
         _doc(db, me["id"], "원가표.csv", COST_1200, vis="internal")
     r = client.post(f"/api/tasks/{tid}/reply-draft/send", json={})
     assert r.status_code == 409 and r.json()["detail"] == NEED_ACK
-    r = client.post(f"/api/tasks/{tid}/reply-draft/send", json={"internal_ack": True})
+    r = client.post(f"/api/tasks/{tid}/reply-draft/send", json={"internal_ack": True, "unsupported_ack": True})
     assert r.status_code == 200, r.text
     assert r.json()["mail"]["draft"]["status"] == "sent"
 
@@ -288,7 +288,7 @@ def test_send_rechecks_internal_values_from_body(fake):
             _send(db, tid, fake)
         assert (str(e.value), e.value.status) == (NEED_ACK, 409)
         assert fake.sent == []
-        assert _send(db, tid, fake, internal_ack=True).status == "sent" and len(fake.sent) == 1
+        assert _send(db, tid, fake, internal_ack=True, unsupported_ack=True).status == "sent" and len(fake.sent) == 1
 
 
 @pytest.mark.parametrize("change", ["shareable", "delete"])

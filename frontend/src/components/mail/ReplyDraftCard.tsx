@@ -72,6 +72,9 @@ export default function ReplyDraftCard({
   // "알고 보냅니다" 체크는 체크한 때의 서버 초안에만 걸린다. 초안이 바뀌거나 확인 단계를 다시 열면 풀린다.
   const [ack, setAck] = useState<{ at: string; on: boolean }>({ at: '', on: false })
   const acked = ack.on && ack.at === draft.updated_at
+  // "근거 없는 값을 확인했어요"도 체크한 때의 초안에만 걸린다 (2026-10-31 사용자 결정)
+  const [uack, setUack] = useState<{ at: string; on: boolean }>({ at: '', on: false })
+  const uacked = uack.on && uack.at === draft.updated_at
   // 서버가 보내기 직전에 내부용 값을 찾아 막은 초안(updated_at). 저장된 경고에 없어도 체크를 보인다.
   const [serverNeedsAckAt, setServerNeedsAckAt] = useState('')
   const [busy, setBusy] = useState('')
@@ -135,6 +138,7 @@ export default function ReplyDraftCard({
       if (saved) at = saved.updated_at
     }
     setAck({ at: '', on: false })
+    setUack({ at: '', on: false })
     setStep('confirm-send', at)
   }
 
@@ -143,12 +147,17 @@ export default function ReplyDraftCard({
     const at = draft.updated_at
     await run('send', () =>
       // 확인(체크 포함)은 화면이 본 그 버전에만 걸린다: 그사이 초안이 바뀌면 서버가 409로 막는다
-      act('/reply-draft/send', { expected_updated_at: at, ...(needsAck ? { internal_ack: acked } : {}) }).catch((e: Error) => {
+      act('/reply-draft/send', {
+        expected_updated_at: at,
+        ...(needsAck ? { internal_ack: acked } : {}),
+        ...(needsUnsupportedAck ? { unsupported_ack: uacked } : {}),
+      }).catch((e: Error) => {
         missingAck = e.message === NEED_INTERNAL_ACK
         throw e
       }),
     )
     setAck({ at: '', on: false })
+    setUack({ at: '', on: false })
     if (missingAck) {
       setServerNeedsAckAt(at) // 확인 단계를 연 채로 두고 체크를 보인다
       return
@@ -171,6 +180,7 @@ export default function ReplyDraftCard({
   const internal = src.internal_values ?? []
   const sourcesChanged = src.sources_changed === true
   const needsAck = internal.length > 0 || (w.internal_values ?? 0) > 0 || serverNeedsAckAt === draft.updated_at
+  const needsUnsupportedAck = w.unsupported.length > 0
   const chunkByRef = new Map<string, DraftSourceChunk>(chunks.map((c) => [c.ref, c]))
   const usedRefs = new Set(facts.map((f) => f.ref))
   // 초안을 만들거나 되돌린 뒤 보낸 답장이 확인됐다. 서버도 보내기를 409로 막는다.
@@ -383,7 +393,16 @@ export default function ReplyDraftCard({
                       {v}
                     </span>
                   ))}
-                  <span className="small"> 메모 · 자료에 근거가 없는 값이에요. 맞는지 확인했나요?</span>
+                  <span className="small"> 메모 · 자료에 근거가 없는 값이에요.</span>
+                  <label className="check-row small confirm-check">
+                    <input
+                      type="checkbox"
+                      checked={uacked}
+                      disabled={!!busy}
+                      onChange={(e) => setUack({ at: draft.updated_at, on: e.target.checked })}
+                    />
+                    값이 맞는지 확인했어요
+                  </label>
                 </dd>
               </div>
             )}
@@ -403,7 +422,9 @@ export default function ReplyDraftCard({
             <button
               type="button"
               className="btn btn-seal"
-              disabled={!!busy || dirty || blanks.length > 0 || sentLater || sourcesChanged || (needsAck && !acked)}
+              disabled={
+                !!busy || dirty || blanks.length > 0 || sentLater || sourcesChanged || (needsAck && !acked) || (needsUnsupportedAck && !uacked)
+              }
               onClick={send}
             >
               {busy === 'send' ? '보내는 중…' : '이대로 보내기'}
