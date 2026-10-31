@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import Icon from '../components/Icon'
 import InboxCard from '../components/InboxCard'
-import { dateTime, relative } from '../format'
+import { dateTime, relative, shortDate } from '../format'
 import type { GoogleStatus, Inbox as InboxData, InboxCard as Card } from '../types'
 
 type Tab = 'todo' | 'sent' | 'reference' | 'done'
@@ -47,6 +47,22 @@ export default function Inbox() {
       .get<GoogleStatus>('/google/status')
       .then(setGoogle)
       .catch(() => {})
+  }, [])
+
+  // j / k: 대장 줄 사이 이동, Enter: 열기 (입력칸에서는 무시)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return
+      if (e.key !== 'j' && e.key !== 'k') return
+      const rows = [...document.querySelectorAll<HTMLAnchorElement>('.ledger-link')]
+      if (rows.length === 0) return
+      const at = rows.indexOf(document.activeElement as HTMLAnchorElement)
+      const next = e.key === 'j' ? Math.min(at + 1, rows.length - 1) : Math.max(at - 1, 0)
+      rows[at < 0 ? 0 : next].focus()
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   useEffect(() => {
@@ -107,8 +123,7 @@ export default function Inbox() {
 
   const counts = data?.counts
   const errorFor = (key: string) => (rowError?.key === key ? <div className="alert alert-red small">{rowError.message}</div> : null)
-  const today = new Date()
-  const todayText = `${today.getFullYear()}. ${today.getMonth() + 1}. ${today.getDate()}. (${WEEKDAYS[today.getDay()]})`
+  const todayText = shortDate(new Date().toISOString(), false)
 
   const tally: { key: string; label: string; value: number | undefined; tab: Tab; lead?: boolean; hint: string }[] = [
     { key: 'now', label: '지금 처리', value: counts?.now, tab: 'todo', lead: true, hint: '기한이 가깝거나 지났거나 중요도가 높은 업무' },
@@ -123,7 +138,11 @@ export default function Inbox() {
         <div>
           <h1>받은 업무</h1>
           <p className="page-sub">
-            <span className="num">{todayText}</span> 기준 · 급한 순서로 정리했어요
+            오늘 <span className="num">{todayText}</span> 기준 · 급한 순서로 정리했어요
+            <span className="key-hint">
+              {' '}
+              · <kbd>j</kbd> <kbd>k</kbd>로 줄 이동
+            </span>
           </p>
         </div>
         {connected && (
@@ -199,6 +218,7 @@ export default function Inbox() {
           <div className="ledger-head" aria-hidden="true">
             <span>중요</span>
             <span>상대 · 업무</span>
+            <span>받은 날</span>
             <span>할 일</span>
             <span>기한</span>
             <span />
@@ -290,8 +310,6 @@ export default function Inbox() {
   )
 }
 
-const WEEKDAYS = '일월화수목금토'
-
 /** 업무 상세의 "이전 · 다음 업무"에 쓰는 순서. 화면 상태라 이 탭(세션)에만 둔다. */
 function rememberOrder(d: InboxData) {
   const ids = [...d.tabs.todo.now, ...d.tabs.todo.week, ...d.tabs.todo.later, ...d.tabs.sent, ...d.tabs.reference, ...d.tabs.done].map(
@@ -308,6 +326,11 @@ const EMPTY: Record<Exclude<Tab, 'todo'>, { title: string; body: string }> = {
   sent: { title: '답을 기다리는 업무가 없어요', body: '답장을 보내면 여기로 옮겨지고, 영업일 3일 동안 답이 없으면 다시 알려 드립니다.' },
   reference: { title: '참고용 업무가 없어요', body: '답장이 필요 없는 공지 · 안내 메일이 여기에 모입니다.' },
   done: { title: '완료한 업무가 없어요', body: '완료하거나 답장 없이 닫은 업무가 여기에 남습니다.' },
+}
+
+function isTyping(target: EventTarget | null) {
+  const el = target as HTMLElement | null
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
 }
 
 function Empty({ title, body }: { title: string; body: string }) {

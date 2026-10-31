@@ -15,12 +15,17 @@ export function parseDate(iso: string) {
   return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`)
 }
 
+/** 처리 기록 시각: 오늘이면 "14:00", 아니면 "10/30(금) 14:00" */
 export function time(iso: string) {
-  return parseDate(iso).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  const d = parseDate(iso)
+  const now = new Date()
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  return sameDay ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : shortDate(iso, true, true)
 }
 
+/** 날짜와 시각: "10/31(토) 14:00". 앱 전체가 이 형식 하나를 쓴다. */
 export function dateTime(iso: string) {
-  return parseDate(iso).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+  return shortDate(iso, true, true)
 }
 
 export function relative(iso: string) {

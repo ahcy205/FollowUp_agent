@@ -195,7 +195,7 @@ export default function ReplyDraftCard({
   }
 
   return (
-    <section className="card reply-card">
+    <section className="card reply-card" id="reply">
       <div className="section-head">
         <h2>답장</h2>
         {draft.purpose === 'followup' && <span className="tag tag-amber">다시 연락</span>}

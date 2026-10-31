@@ -81,7 +81,7 @@ export default function TodoChecklist({ task, act }: { task: Task; act: MailAct 
   const allDone = plan.length > 0 && doneCount === plan.length
 
   return (
-    <section className="card">
+    <section className="card" id="todos">
       <div className="section-head">
         <h2>할 일</h2>
         {plan.length > 0 && (

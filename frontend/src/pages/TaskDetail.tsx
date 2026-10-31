@@ -9,7 +9,7 @@ import MailBanners from '../components/mail/MailBanners'
 import ReplyDraftCard from '../components/mail/ReplyDraftCard'
 import SummaryCard from '../components/mail/SummaryCard'
 import TodoChecklist from '../components/mail/TodoChecklist'
-import { dateTime, shortDate } from '../format'
+import { dateTime } from '../format'
 import type { TaskDetail } from '../types'
 
 export default function TaskDetailPage() {
@@ -105,6 +105,23 @@ export default function TaskDetailPage() {
       })
   }, [data, id])
 
+  // j / k: 다음 · 이전 업무, u: 받은 업무 (입력칸에서는 무시)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (e.ctrlKey || e.metaKey || e.altKey || (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))) return
+      const order = readOrder()
+      const at = order.indexOf(Number(id))
+      if (e.key === 'j' && at >= 0 && at < order.length - 1) navigate(`/tasks/${order[at + 1]}`)
+      else if (e.key === 'k' && at > 0) navigate(`/tasks/${order[at - 1]}`)
+      else if (e.key === 'u') navigate('/')
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [id, navigate])
+
   const retryCalendar = async () => {
     setCalRetrying(true)
     try {
@@ -175,11 +192,23 @@ export default function TaskDetailPage() {
         </Link>
         {at >= 0 && (
           <span className="pager">
-            {prevId != null ? <Link to={`/tasks/${prevId}`}>이전 업무</Link> : <span className="muted">이전 업무</span>}
+            {prevId != null ? (
+              <Link to={`/tasks/${prevId}`} title="이전 업무 (k)">
+                이전 업무
+              </Link>
+            ) : (
+              <span className="muted">이전 업무</span>
+            )}
             <span className="muted num">
               {at + 1} / {order.length}
             </span>
-            {nextId != null ? <Link to={`/tasks/${nextId}`}>다음 업무</Link> : <span className="muted">다음 업무</span>}
+            {nextId != null ? (
+              <Link to={`/tasks/${nextId}`} title="다음 업무 (j)">
+                다음 업무
+              </Link>
+            ) : (
+              <span className="muted">다음 업무</span>
+            )}
           </span>
         )}
       </div>
@@ -190,11 +219,19 @@ export default function TaskDetailPage() {
         <div className="stack sheet-stack">
           <MailBanners key={task.id} data={data} act={act} onMerged={onMerged} onCompose={onCompose} />
 
+          <nav className="jump" aria-label="이 업무 안에서 바로 가기">
+            <a href="#todos">
+              할 일 <span className="num">{doneCount}/{task.plan.length}</span>
+            </a>
+            <a href="#reply">{draft && draft.status !== 'sent' ? '답장 초안' : '답장'}</a>
+            <a href="#mails">원본 메일 {data.emails.length}</a>
+          </nav>
+
           <section className="card sheet-main">
             <div className="detail-title">
               <div>
                 <h1>{task.title}</h1>
-                <div className="muted small">업무 등록 {shortDate(task.created_at)}</div>
+                <div className="muted small">업무 등록 {dateTime(task.created_at)}</div>
               </div>
               <div className="detail-title-right">{task.status !== 'COMPLETED' && <StatusBadge status={task.status} large />}</div>
             </div>
@@ -226,7 +263,7 @@ export default function TaskDetailPage() {
           />
 
           {data.emails.length > 0 && (
-            <details className="card mail-fold">
+            <details className="card mail-fold" id="mails">
               <summary>원본 메일 {data.emails.length}통</summary>
               <ul className="mail-thread">
                 {data.emails.map((e) => (

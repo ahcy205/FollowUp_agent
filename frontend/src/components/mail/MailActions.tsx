@@ -92,7 +92,7 @@ export default function MailActions({
   ]
 
   return (
-    <section className="card mail-actions">
+    <section className="card mail-actions" id={draft && draft.status === 'draft' ? undefined : 'reply'}>
       <div className="mail-action-row">
         <span className="reply-draft">
           {showDraftButton && (
