@@ -59,7 +59,7 @@ export default function ChangesSection({ log, act, closed }: { log: ChangeEntry[
     <li key={c.id} className={`change-item change-${c.status}`}>
       <div className="change-line">
         <span className="change-text">{line(c)}</span>
-        {c.status === 'undone' && <span className="tag">되돌림</span>}
+        {c.status === 'undone' && <span className="flag flag-gray">되돌림</span>}
         {!closed && c.status === 'applied' && (
           <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => run(`undo-${c.id}`, () => act(`/changes/${c.id}/undo`))}>
             {busy === `undo-${c.id}` ? '되돌리는 중…' : '되돌리기'}
@@ -71,7 +71,7 @@ export default function ChangesSection({ log, act, closed }: { log: ChangeEntry[
           </button>
         )}
       </div>
-      {c.evidence && <div className="change-evidence small">"{c.evidence}"</div>}
+      {c.evidence && <div className="evidence small">근거 “{c.evidence}”</div>}
       <div className="muted small">
         {c.sender || '보낸 사람 모름'}
         {receivedMs(c) > 0 && ` · ${shortDate(c.received_at)} 받음`}
@@ -80,16 +80,18 @@ export default function ChangesSection({ log, act, closed }: { log: ChangeEntry[
   )
 
   return (
-    <div className="summary-block changes">
-      <b className="small">상대 답장으로 바뀐 내용</b>
-      <ul className="change-list">{latest.map(item)}</ul>
-      {olderCount > 0 && (
-        <details className="changes-older">
-          <summary className="small">이전 변경 {olderCount}건</summary>
-          <ul className="change-list">{older.flat().map(item)}</ul>
-        </details>
-      )}
-      {error && <div className="alert alert-red">{error}</div>}
+    <div className="form-row changes">
+      <dt>바뀐 내용</dt>
+      <dd>
+        <ul className="change-list">{latest.map(item)}</ul>
+        {olderCount > 0 && (
+          <details className="changes-older">
+            <summary className="small">이전 변경 {olderCount}건</summary>
+            <ul className="change-list">{older.flat().map(item)}</ul>
+          </details>
+        )}
+        {error && <div className="alert alert-red">{error}</div>}
+      </dd>
     </div>
   )
 }

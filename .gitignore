@@ -28,3 +28,7 @@ Thumbs.db
 
 # Local database backups
 *.db.bak*
+
+# 디자인 점검 캡처 (impeccable)
+.impeccable/review/
+.impeccable/build/

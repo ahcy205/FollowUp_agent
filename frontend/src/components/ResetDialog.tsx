@@ -1,9 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 
 export default function ResetDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const cancelRef = useRef<HTMLButtonElement>(null)
+
+  // 열면 취소에 포커스, Esc로 닫기
+  useEffect(() => {
+    cancelRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onClose])
 
   const reset = async () => {
     setBusy(true)
@@ -19,15 +30,15 @@ export default function ResetDialog({ onClose, onDone }: { onClose: () => void; 
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h3>데모 데이터 초기화</h3>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="reset-title" onClick={(e) => e.stopPropagation()}>
+        <h2 id="reset-title">데모 데이터 초기화</h2>
         <p className="muted">
           가상 데이터와 목표 입력 업무를 지우고 초기 가상 데이터(고객 5 · 문서 6 · 메일 8 · 업무 5)를 다시 생성합니다. Gmail에서
           가져온 메일 · 메일 업무 · Google 연결은 그대로 둡니다. 다른 사용자의 데이터에는 영향이 없습니다.
         </p>
         {error && <div className="alert alert-red">{error}</div>}
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onClose} disabled={busy}>
+          <button ref={cancelRef} className="btn btn-ghost" onClick={onClose} disabled={busy}>
             취소
           </button>
           <button className="btn btn-danger" onClick={reset} disabled={busy}>

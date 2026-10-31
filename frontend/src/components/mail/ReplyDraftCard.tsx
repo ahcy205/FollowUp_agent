@@ -182,14 +182,22 @@ export default function ReplyDraftCard({
   if (draft.status === 'sent') {
     // 보낸 직후(답장 보냄 상태)에만 알린다. 상대가 다시 답장해 처리할 일로 오면 감춘다.
     return data.task.status === 'WAITING' ? (
-      <div className="alert alert-green">답장을 보냈습니다. 보낸 메일은 아래 원본 메일에서 볼 수 있습니다.</div>
+      <div className="sent-note">
+        <span className="stamp stamp-press" aria-hidden="true">
+          보냄
+        </span>
+        <div>
+          <b>답장을 보냈어요</b>
+          <div className="muted small">상대 답을 기다립니다. 보낸 메일은 아래 원본 메일에서 볼 수 있어요.</div>
+        </div>
+      </div>
     ) : null
   }
 
   return (
     <section className="card reply-card">
       <div className="section-head">
-        <h2>답장 초안</h2>
+        <h2>답장</h2>
         {draft.purpose === 'followup' && <span className="tag tag-amber">다시 연락</span>}
       </div>
 
@@ -305,7 +313,13 @@ export default function ReplyDraftCard({
           )}
           {w.unsupported.length > 0 && (
             <div className="alert alert-amber">
-              <b>근거를 찾지 못한 내용</b> — {w.unsupported.join(', ')}. 맞는지 확인해 주세요.
+              <b>근거를 찾지 못한 값</b>{' '}
+              {w.unsupported.map((v) => (
+                <span key={v} className="value-chip">
+                  {v}
+                </span>
+              ))}{' '}
+              메모나 자료에 없는 값이에요. 맞는지 확인해 주세요.
             </div>
           )}
           {w.outside_contacts.length > 0 && (
@@ -346,9 +360,34 @@ export default function ReplyDraftCard({
 
       {editable && step === 'confirm-send' && !sentLater && (
         <div className="inline-panel draft-confirm">
-          <span>
-            <b>{draft.to_addr}</b>에게 보냅니다 · 참조 {draft.cc_selected.length}명
-          </span>
+          <b className="confirm-title">보내기 전에 한 번 더 확인해 주세요</b>
+          <dl className="confirm-grid">
+            <div>
+              <dt>받는 사람</dt>
+              <dd>{draft.to_addr}</dd>
+            </div>
+            <div>
+              <dt>참조</dt>
+              <dd>{draft.cc_selected.length > 0 ? draft.cc_selected.join(', ') : '없음'}</dd>
+            </div>
+            <div>
+              <dt>제목</dt>
+              <dd>{draft.subject}</dd>
+            </div>
+            {w.unsupported.length > 0 && (
+              <div className="confirm-warn">
+                <dt>확인 안 된 값</dt>
+                <dd>
+                  {w.unsupported.map((v) => (
+                    <span key={v} className="value-chip">
+                      {v}
+                    </span>
+                  ))}
+                  <span className="small"> 메모 · 자료에 근거가 없는 값이에요. 맞는지 확인했나요?</span>
+                </dd>
+              </div>
+            )}
+          </dl>
           {needsAck && (
             <label className="check-row small text-red">
               <input
@@ -363,14 +402,14 @@ export default function ReplyDraftCard({
           <div className="draft-actions">
             <button
               type="button"
-              className="btn btn-primary btn-sm"
+              className="btn btn-seal"
               disabled={!!busy || dirty || blanks.length > 0 || sentLater || sourcesChanged || (needsAck && !acked)}
               onClick={send}
             >
-              {busy === 'send' ? '보내는 중…' : '정말 보내기'}
+              {busy === 'send' ? '보내는 중…' : '이대로 보내기'}
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => setStep('edit')}>
-              취소
+            <button type="button" className="btn btn-ghost" disabled={!!busy} onClick={() => setStep('edit')}>
+              고치러 돌아가기
             </button>
           </div>
         </div>
@@ -380,7 +419,7 @@ export default function ReplyDraftCard({
         <div className="inline-panel draft-confirm">
           <span>이 초안을 지울까요?</span>
           <div className="draft-actions">
-            <button type="button" className="btn btn-primary btn-sm" disabled={!!busy} onClick={remove}>
+            <button type="button" className="btn btn-danger btn-sm" disabled={!!busy} onClick={remove}>
               {busy === 'delete' ? '지우는 중…' : '지우기'}
             </button>
             <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => setStep('edit')}>
@@ -392,7 +431,7 @@ export default function ReplyDraftCard({
 
       {editable && step === 'edit' && (
         <div className="draft-actions">
-          <button type="button" className="btn btn-primary btn-sm" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
+          <button type="button" className="btn btn-seal btn-sm" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
             {busy === 'save' ? '저장 중…' : '보내기'}
           </button>
           {blanks.length > 0 && <span className="muted small">빈칸 {blanks.length}개를 채워야 보낼 수 있습니다</span>}

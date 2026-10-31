@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
+import Icon from '../components/Icon'
 import { shortDate } from '../format'
 import type { KnowledgeList, KnowledgeSource, KnowledgeUploadResult } from '../types'
 
@@ -189,6 +190,7 @@ function Uploader({ onUploaded }: { onUploaded: (sources: KnowledgeSource[]) => 
           disabled={uploading}
           onChange={(e) => upload(Array.from(e.target.files ?? []))}
         />
+        <Icon name="upload" size={22} className="drop-icon" />
         <b>{uploading ? '올리는 중…' : '파일을 끌어다 놓거나 눌러서 고르세요'}</b>
         <span className="muted small">XLSX · CSV · TXT · MD · PDF(글자가 든 것) · DOCX, 파일 하나 10MB까지. 여러 개를 한 번에 올릴 수 있습니다.</span>
       </label>
@@ -237,15 +239,26 @@ export default function Knowledge() {
     })
 
   return (
-    <div className="stack-lg">
-      <div>
-        <h1>자료실</h1>
-        <p className="muted">단가표 · 안내문 같은 내 자료를 올리면 답장 초안을 만들 때 찾아서 씁니다. 원본 파일은 저장하지 않고 뽑아낸 글만 남깁니다.</p>
-      </div>
-      <div className="alert alert-slate small">
-        '답장에 써도 됨' 자료 중 검색된 부분은 초안을 만들 때 초안용 LLM으로 보냅니다. 초안용 LLM이 Gemini 무료 등급이면 보낸 자료가
-        Google의 제품 개선에 쓰일 수 있습니다(메일 분석과 같은 조건). 내부용 자료는 어디로도 보내지 않습니다.
-      </div>
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <h1>자료실</h1>
+          <p className="page-sub">단가표 · 안내문을 올려 두면 답장 초안을 만들 때 찾아서 씁니다. 원본 파일은 저장하지 않고 뽑아낸 글만 남겨요.</p>
+        </div>
+      </header>
+      <dl className="share-table" aria-label="공유 등급별로 자료가 가는 곳">
+        <div>
+          <dt>답장에 써도 됨</dt>
+          <dd>
+            초안을 만들 때 검색된 부분만 초안용 LLM으로 보냅니다. Gemini 무료 등급이면 보낸 내용이 Google의 제품 개선에 쓰일 수 있어요(메일 분석과 같은
+            조건).
+          </dd>
+        </div>
+        <div>
+          <dt>내부용</dt>
+          <dd>어디로도 보내지 않습니다. 초안에 내부용 값이 들어가면 보내기 전에 경고합니다.</dd>
+        </div>
+      </dl>
 
       {!list ? (
         loadError ? (
@@ -258,7 +271,13 @@ export default function Knowledge() {
             </div>
           </div>
         ) : (
-          <div className="muted">불러오는 중…</div>
+          <div className="skeleton" role="status" aria-label="불러오는 중">
+            <div className="skeleton-row">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
         )
       ) : (
         <>
@@ -273,7 +292,10 @@ export default function Knowledge() {
           <div className="stack">
             <h2>올린 자료 {list.sources.length}개</h2>
             {list.sources.length === 0 ? (
-              <div className="muted">아직 올린 자료가 없습니다.</div>
+              <div className="empty">
+                <b>아직 올린 자료가 없어요</b>
+                <p>단가표나 배송 · 결제 안내처럼 답장에 자주 쓰는 자료를 올려 보세요. 처음 올린 자료는 '내부용'으로 두는 것이 안전합니다.</p>
+              </div>
             ) : (
               <ul className="knowledge-list">
                 {list.sources.map((s) => (

@@ -75,12 +75,12 @@ export default function Workspace() {
           {documents.map((d) => (
             <section key={d.id} className="card doc">
               <div className="section-head">
-                <h3>{d.title}</h3>
+                <h2>{d.title}</h2>
                 <span className="tag">{d.document_type}</span>
               </div>
               <div className="muted small">{company(d.customer_id)}</div>
               <pre className="doc-body">{d.content}</pre>
-              {/지시|무시/.test(d.content) && <div className="alert alert-amber small">⚠️ Prompt Injection 시연용 악성 문구가 포함된 문서입니다.</div>}
+              {/지시|무시/.test(d.content) && <div className="alert alert-amber small">Prompt Injection 시연용 악성 문구가 포함된 문서입니다.</div>}
             </section>
           ))}
         </div>

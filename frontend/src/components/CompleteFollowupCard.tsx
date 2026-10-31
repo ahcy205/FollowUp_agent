@@ -21,7 +21,7 @@ export default function CompleteFollowupCard({ taskId, onDone }: { taskId: numbe
   return (
     <section className="card followup-complete">
       <div className="section-head">
-        <h2>✅ 이 업무 완료 처리</h2>
+        <h2>이 업무 완료 처리</h2>
         <span className="tag">사용자 처리</span>
       </div>
       <p className="muted small">Agent가 정리해 준 후속 업무입니다. 처리한 뒤 결과를 남기면 원래 업무의 타임라인에도 기록됩니다.</p>

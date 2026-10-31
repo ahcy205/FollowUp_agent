@@ -2,9 +2,9 @@ import type { TaskStatus } from './types'
 
 export const STATUS_META: Record<TaskStatus, { label: string; tone: string; short: string }> = {
   COMPLETED: { label: '완료', short: '완료', tone: 'green' },
-  WAITING: { label: '대기 중', short: '대기', tone: 'amber' },
+  WAITING: { label: '답 기다림', short: '답 기다림', tone: 'slate' },
   IN_PROGRESS: { label: '진행 중', short: '진행', tone: 'blue' },
-  ACTION_REQUIRED: { label: '조치 필요', short: '조치 필요', tone: 'red' },
+  ACTION_REQUIRED: { label: '처리할 일', short: '처리할 일', tone: 'amber' },
   BLOCKED: { label: '중단됨', short: '중단', tone: 'slate' },
   PENDING: { label: '시작 전', short: '시작 전', tone: 'gray' },
   CANCELLED: { label: '취소됨', short: '취소', tone: 'gray' },
