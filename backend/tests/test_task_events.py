@@ -8,12 +8,19 @@ from sqlalchemy import select
 from app.agent.audit import log_action
 from app.api.tasks import task_event_frames, task_fingerprint
 from app.db import SessionLocal
-from app.models import AgentRun, RunStatus, Task, TaskStatus, User
+from app.models import Task, TaskStatus, User
 from tests.conftest import make_client, register
 
 
 def _task_id(client) -> int:
-    return client.get("/api/dashboard").json()["tasks"][0]["id"]
+    """로그인한 사용자의 메일 업무 하나를 만든다."""
+    uid = client.get("/api/auth/me").json()["id"]
+    with SessionLocal() as db:
+        t = Task(user_id=uid, title="견적 요청", goal="견적서 송부", status=TaskStatus.ACTION_REQUIRED, origin="mail",
+                 brief={"analysis": "done", "summary": "견적 요청"})
+        db.add(t)
+        db.commit()
+        return t.id
 
 
 def test_fingerprint_changes_only_when_the_task_view_changes(client):
@@ -25,25 +32,14 @@ def test_fingerprint_changes_only_when_the_task_view_changes(client):
         f0 = task_fingerprint(db, task)
         assert task_fingerprint(db, task) == f0  # stable while nothing happens
 
-        log_action(db, user_id=user.id, task_id=tid, run_id=None, action_type="EVENT_RECEIVED", reason="x")
+        log_action(db, user_id=user.id, task_id=tid, action_type="EVENT_RECEIVED", reason="x")
         db.commit()
         f1 = task_fingerprint(db, task)
         assert f1 != f0
 
-        run = AgentRun(user_id=user.id, task_id=tid, trigger="goal_submitted", status=RunStatus.RUNNING, messages=[])
-        db.add(run)
+        task.status = TaskStatus.WAITING
         db.commit()
-        f2 = task_fingerprint(db, task)
-        assert f2 != f1
-
-        run.steps += 1
-        db.commit()
-        f3 = task_fingerprint(db, task)
-        assert f3 != f2
-
-        task.status = TaskStatus.BLOCKED
-        db.commit()
-        assert task_fingerprint(db, task) != f3
+        assert task_fingerprint(db, task) != f1
 
 
 def test_event_stream_sends_the_current_snapshot_first(client):
@@ -66,7 +62,7 @@ def test_event_stream_sends_the_current_snapshot_first(client):
     assert lines[0] == "event: task"
     payload = json.loads(lines[1].removeprefix("data: "))
     assert payload["task"]["id"] == tid
-    assert "logs" in payload and "active_run" in payload
+    assert "logs" in payload and "mail" in payload and "active_run" not in payload
     assert frames[0].endswith(chr(10) * 2)
 
 

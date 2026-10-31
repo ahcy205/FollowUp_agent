@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agent.audit import log_action
-from app.agent.orchestrator import CLOSED_TASK_STATUSES
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.agent.guard import detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
 from app.config import get_settings
@@ -404,13 +404,13 @@ def _apply(db: Session, task: Task, email: Email, data: dict, tz: str) -> None:
         task.next_action = plan[0]["title"] if plan else ""
     email.processed = True
 
-    log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="MAIL_INTAKE",
+    log_action(db, user_id=task.user_id, task_id=task.id, action_type="MAIL_INTAKE",
                output_data={"email_id": email.id, "summary": summary, "todo_count": len(plan),
                             "deadline": best.at.isoformat() if best else None,
                             "deadline_kind": best.kind if best else "none"},
                reason="업무 메일을 분석해 업무로 정리했습니다")
     if flags:
-        log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="SECURITY_WARNING",
+        log_action(db, user_id=task.user_id, task_id=task.id, action_type="SECURITY_WARNING",
                    tool_name="mail_intake", input_data={"email_id": email.id}, output_data={"patterns": flags},
                    reason="업무 메일에서 Prompt Injection 의심 문구 탐지 — 지시를 따르지 않고 할 일로 넣지 않음",
                    risk_level=RiskLevel.HIGH, status="FLAGGED")
@@ -431,7 +431,7 @@ def link_email(db: Session, task: Task, email: Email) -> None:
     if is_snoozed(task, now, get_settings().user_timezone):
         task.snoozed_until = None
         task.snooze_returned_at = now
-    log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="MAIL_ATTACHED",
+    log_action(db, user_id=task.user_id, task_id=task.id, action_type="MAIL_ATTACHED",
                output_data={"email_id": email.id}, reason=ATTACHED_REASON)
 
 
@@ -446,9 +446,9 @@ def _thread_task(db: Session, user_id: int, thread_id: str | None) -> Task | Non
 def _create_task(db: Session, user_id: int, email: Email) -> Task | None:
     """분석 대기 업무를 만들어 메일에 연결하고 커밋한다. 스레드 경합으로 이미 있으면 None."""
     task = Task(
-        user_id=user_id, customer_id=None, title=_one_line(email.subject, TITLE_CHARS) or NO_SUBJECT,
+        user_id=user_id, title=_one_line(email.subject, TITLE_CHARS) or NO_SUBJECT,
         goal=PENDING_GOAL, status=TaskStatus.PENDING, current_step=PENDING_STEP, origin="mail",
-        agent_enabled=False, gmail_thread_id=email.gmail_thread_id, plan=[],
+        gmail_thread_id=email.gmail_thread_id, plan=[],
         brief={"analysis": "pending", "attempts": 0, "email_id": email.id},
     )
     db.add(task)

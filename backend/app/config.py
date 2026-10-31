@@ -18,7 +18,7 @@ DEFAULT_MODELS = {"gemini": "gemini-3.6-flash", "anthropic": "claude-opus-5"}
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8-sig", extra="ignore")
+    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8-sig", extra="ignore")  # 지운 설정(DEMO_MODE 등)이 .env에 남아 있어도 무시한다
 
     app_env: str = "development"
     secret_key: str = ""
@@ -28,21 +28,13 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = ""  # empty → provider default below
     llm_analysis_model: str = ""  # model for analyze_email; empty → llm_model (a separate model has its own quota)
-    llm_effort: str = "medium"
     llm_refusal_fallback: bool = True
     llm_request_timeout: float = 120.0
     llm_rpm_limit: int = Field(default=0, ge=0, le=1000)  # 0 = no client-side pacing (Gemini free tier: 5)
 
-    max_agent_steps: int = Field(default=10, ge=1, le=30)
-    llm_transient_retries: int = Field(default=2, ge=0, le=5)  # in-run retries for server errors / timeouts
-    agent_timeout_seconds: int = Field(default=240, ge=10, le=900)
-
     public_url: str = "http://localhost:5173"
     allowed_hosts: str = "localhost,127.0.0.1"
 
-    demo_mode: bool = False  # 가상 데이터 · 회신 시뮬레이터 · Demo Reset
-    demo_user_email: str = "demo@example.com"
-    demo_user_password: str = ""
     allow_registration: bool = True
 
     session_hours: int = 12

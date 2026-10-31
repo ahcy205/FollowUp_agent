@@ -1,6 +1,6 @@
 """받은 업무 화면에서 사용자가 메일 업무에 하는 동작.
 
-스누즈 · 중요도 · 기한 · 할 일 · 답장 필요 없음으로 닫기 · 다시 분석 · 업무로 처리.
+스누즈 · 중요도 · 기한 · 할 일 · 답장 필요 없음으로 닫기 · 업무 취소 · 다시 분석 · 업무로 처리.
 - 커밋하지 않는다. API가 커밋한다(업무로 처리에서 새 업무를 만들 때만 intake가 커밋한다).
 - 잘못된 요청은 ActionError(사용자에게 보일 한국어 문구, HTTP 상태)로 알린다.
 - 시각은 UTC로 저장하고, 날짜 · 시각 입력과 선택지(오늘 저녁 · 내일 아침 · 다음 주 월요일)는 사용자 시간대로 해석한다.
@@ -20,7 +20,8 @@ from app.mail.deadline import MAX_AHEAD_DAYS, USER_DEADLINE_SOURCE
 from app.mail.errors import ActionError
 from app.mail import inbox
 from app.mail.inbox import finalize_snooze, snooze_wake_at
-from app.models import Email, EmailDirection, Task, TaskStatus, User
+from app.mail.status import CLOSED_TASK_STATUSES
+from app.models import Email, EmailDirection, RiskLevel, Task, TaskStatus, User
 
 PRESETS = ("evening", "tomorrow", "next_monday")
 EVENING = _time(18, 0)
@@ -36,7 +37,6 @@ REOPENED_STEP = "새 메일로 다시 열림"
 PROMOTED_REASON = "사용자가 업무로 지정"
 PROMOTABLE_TRIAGE = ("not_work", "filtered")
 
-_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _TIME_RE = re.compile(r"(\d{2}):(\d{2})(?::(\d{2}))?")  # 브라우저 입력은 HH:MM:SS일 수 있다
 
@@ -56,7 +56,7 @@ def _iso(dt: datetime | None) -> str | None:
 
 
 def _require_open(task: Task) -> None:
-    if str(task.status) in _CLOSED or task.merged_into_id is not None:
+    if str(task.status) in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
         raise ActionError(CLOSED_MESSAGE, 409)
 
 
@@ -64,7 +64,7 @@ def _log(task: Task, action_type: str, data: dict | None = None, reason: str = "
     db = object_session(task)
     if db is None:  # 세션에 붙지 않은 업무는 기록할 곳이 없다 (호출 쪽 버그)
         raise RuntimeError("task is not attached to a session")
-    log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type=action_type,
+    log_action(db, user_id=task.user_id, task_id=task.id, action_type=action_type,
                output_data=data or {}, reason=reason)
 
 
@@ -305,8 +305,25 @@ def close_without_reply(db: Session, user: User, task: Task, reason: str) -> Non
     task.waiting_for = ""
     task.snoozed_until = None
     mark_calendar_dirty(task)  # 앱이 만든 캘린더 일정을 지운다(다시 열리면 되살린다)
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="TASK_CLOSED",
+    log_action(db, user_id=user.id, task_id=task.id, action_type="TASK_CLOSED",
                output_data={"reason": reason}, reason="답장 필요 없음으로 닫았습니다")
+
+
+def cancel_mail_task(db: Session, user: User, task: Task, reason: str = "") -> None:
+    """업무 취소: 닫고 기록은 남긴다. 완료 시각은 쓰지 않는다(취소는 완료가 아니다)."""
+    if str(task.status) in CLOSED_TASK_STATUSES:
+        raise ActionError(CLOSED_MESSAGE, 409)
+    reason = (reason or "").strip()[:CLOSE_REASON_MAX]
+    before = task.status
+    task.status = TaskStatus.CANCELLED
+    task.waiting_for = ""
+    task.next_action = "사용자가 취소한 업무입니다." + (f" 사유: {reason}" if reason else "")
+    task.snoozed_until = None  # 닫힌 업무의 스누즈는 의미가 없다
+    mark_calendar_dirty(task)  # 앱이 만든 캘린더 일정을 지운다(다시 열리면 되살린다)
+    log_action(db, user_id=user.id, task_id=task.id, action_type="TASK_CANCELLED",
+               input_data={"from": before, "to": TaskStatus.CANCELLED},
+               reason="사용자가 업무를 취소했습니다" + (f" — {reason}" if reason else ""),
+               risk_level=RiskLevel.MEDIUM, status="CANCELLED")
 
 
 def ensure_reanalyzable(task: Task) -> None:
@@ -358,7 +375,7 @@ def promote_email(db: Session, user: User, email: Email) -> Task:
         intake.link_email(db, task, email)
         if (task.brief or {}).get("analysis") not in ("pending", "failed"):
             intake.queue_changes(task, email_id)  # 분석이 끝난 업무: 다음 주기에 변경 분석(설계 6.1)
-        if str(task.status) in _CLOSED:
+        if str(task.status) in CLOSED_TASK_STATUSES:
             task.status = TaskStatus.ACTION_REQUIRED
             task.completed_at = None
             task.current_step = REOPENED_STEP
@@ -369,6 +386,6 @@ def promote_email(db: Session, user: User, email: Email) -> Task:
 
     email.triage = "work"
     email.triage_reason = PROMOTED_REASON
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="EMAIL_PROMOTED",
+    log_action(db, user_id=user.id, task_id=task.id, action_type="EMAIL_PROMOTED",
                output_data={"email_id": email_id}, reason="사용자가 메일을 업무로 처리했습니다")
     return task

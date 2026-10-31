@@ -17,13 +17,13 @@ from app.config import get_settings
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.errors import ActionError
 from app.mail.inbox import finalize_snooze
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.models import Email, ReplyDraft, Task, TaskStatus, User
 
 MAX_HOPS = 5
 UNDO_WINDOW = timedelta(minutes=10)
 MERGE_TARGET_STATUSES = (TaskStatus.ACTION_REQUIRED.value, TaskStatus.IN_PROGRESS.value,
                          TaskStatus.BLOCKED.value, TaskStatus.WAITING.value)
-_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 _RANK = {"HIGH": 3, "NORMAL": 2, "LOW": 1}
 _DEADLINE_KEYS = ("deadline_at", "deadline_all_day", "deadline_kind", "deadline_source")
 _PRIORITY_KEYS = ("priority", "priority_source")
@@ -142,7 +142,7 @@ def _requests(task: Task) -> list:
 
 
 def _log(db: Session, user: User, task: Task, action_type: str, data: dict, reason: str) -> None:
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type=action_type,
+    log_action(db, user_id=user.id, task_id=task.id, action_type=action_type,
                output_data=data, reason=reason)
 
 
@@ -174,7 +174,7 @@ def _mergeable(user: User, source: Task, target: Task) -> bool:
             and source.user_id == user.id and target.user_id == user.id
             and source.origin == "mail" and target.origin == "mail"
             and source.merged_into_id is None and target.merged_into_id is None
-            and str(source.status) not in _CLOSED
+            and str(source.status) not in CLOSED_TASK_STATUSES
             and (source.brief or {}).get("analysis") != "pending"  # 분석 중이면 워커가 결과를 덮어쓸 수 있다
             and str(target.status) in MERGE_TARGET_STATUSES)
 
@@ -314,7 +314,7 @@ def finish_by_stage5_rules(db: Session, target: Task, source: Task) -> None:
         records[str(source.id)] = rec
         target.merge_undo = records
     mark_calendar_dirty(target)
-    log_action(db, user_id=target.user_id, task_id=target.id, run_id=None, action_type="MERGE_ANALYSIS_FALLBACK",
+    log_action(db, user_id=target.user_id, task_id=target.id, action_type="MERGE_ANALYSIS_FALLBACK",
                output_data={"source_id": source.id},
                reason=f"업무 #{source.id}의 내용을 자동 분석하지 못해 요청을 합치고 이른 기한을 골랐습니다")
 

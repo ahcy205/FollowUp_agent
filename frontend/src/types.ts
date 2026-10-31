@@ -3,7 +3,6 @@ export type TaskStatus = 'PENDING' | 'IN_PROGRESS' | 'WAITING' | 'ACTION_REQUIRE
 export interface User {
   id: number
   email: string
-  demo_mode?: boolean // 서버 DEMO_MODE. 없으면 꺼짐으로 본다
   knowledge_enabled?: boolean // 서버 KNOWLEDGE_ENABLED. 없으면 꺼짐으로 본다
 }
 
@@ -58,11 +57,7 @@ export interface Task {
   waiting_for: string
   priority: string
   origin: string
-  agent_enabled: boolean
-  parent_task_id: number | null
-  customer_id: number | null
   plan: PlanStep[]
-  result_summary: string
   brief: MailBrief
   deadline_at: string | null
   deadline_all_day: boolean
@@ -81,33 +76,14 @@ export interface Task {
   calendar_error: string
 }
 
-export interface Customer {
-  id: number
-  company_name: string
-  contact_name: string
-  email: string
-  phone: string
-  meta: Record<string, string>
-}
-
-export interface Document {
-  id: number
-  customer_id: number | null
-  title: string
-  content: string
-  document_type: string
-  created_at: string
-}
-
 export interface Email {
   id: number
-  customer_id: number | null
   task_id: number | null
   sender: string
   receiver: string
   subject: string
   content: string
-  direction: 'INBOUND' | 'OUTBOUND' | 'DRAFT'
+  direction: 'INBOUND' | 'OUTBOUND'
   processed: boolean
   created_at: string
   sent_at: string | null
@@ -115,7 +91,6 @@ export interface Email {
 
 export interface ActionLog {
   id: number
-  run_id: number | null
   action_type: string
   tool_name: string
   input_data: Record<string, unknown>
@@ -126,52 +101,11 @@ export interface ActionLog {
   created_at: string
 }
 
-export interface Approval {
-  id: number
-  task_id: number
-  tool_name: string
-  tool_input: Record<string, unknown>
-  reason: string
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
-  user_comment: string
-  created_at: string
-  decided_at: string | null
-  email: Email | null
-}
-
-export interface TokenUsage {
-  input?: number
-  output?: number
-  cache_read?: number
-  total?: number
-  turns?: number
-}
-
-export interface Run {
-  id: number
-  trigger: string
-  status: 'RUNNING' | 'AWAITING_APPROVAL' | 'FINISHED' | 'STOPPED' | 'FAILED'
-  steps: number
-  usage: TokenUsage
-  final_message: string
-  error: string
-  created_at: string
-  finished_at: string | null
-}
-
 export interface TaskDetail {
   task: Task
-  customer: Customer | null
-  parent: Task | null
-  followups: Task[]
   emails: Email[]
   logs: ActionLog[]
-  approvals: Approval[]
-  runs: Run[]
-  active_run: Run | null
-  max_steps: number
-  can_simulate_reply: boolean
-  mail?: MailExtras | null
+  mail: MailExtras
 }
 
 export interface MailExtras {
@@ -256,14 +190,6 @@ export interface ReplyDraft {
 
 // 메일 업무 동작 하나를 보내고 응답(TaskDetail)으로 화면을 바꾼다. 실패하면 ApiError를 던진다.
 export type MailAct = (path: string, body?: unknown) => Promise<TaskDetail>
-
-export interface Dashboard {
-  counts: Record<TaskStatus, number>
-  tasks: Task[]
-  pending_approvals: number
-  agent_configured: boolean
-  model: string
-}
 
 export interface GoogleRecentMail {
   subject: string

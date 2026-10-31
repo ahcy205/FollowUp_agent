@@ -165,7 +165,7 @@ def _build_email(user_id: int, msg) -> Email:
     p = parse_raw(msg.raw)
     received = datetime.fromtimestamp(msg.internal_date_ms / 1000, tz=timezone.utc)
     return Email(
-        user_id=user_id, customer_id=None, task_id=None,
+        user_id=user_id, task_id=None,
         sender=p.sender_email[:ADDRESS_MAX],
         receiver=", ".join(p.to)[:ADDRESS_MAX],
         subject=p.subject, content=p.text,

@@ -41,7 +41,7 @@ def _run(account_id, fake):
 def _task(uid, thread="thr-1", **over):
     with SessionLocal() as db:
         f = dict(user_id=uid, title="견적 요청", goal="견적서", status=TaskStatus.ACTION_REQUIRED,
-                 origin="mail", agent_enabled=False, gmail_thread_id=thread, priority="NORMAL", brief={})
+                 origin="mail", gmail_thread_id=thread, priority="NORMAL", brief={})
         f.update(over)
         t = Task(**f)
         db.add(t)

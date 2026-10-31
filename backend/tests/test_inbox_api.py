@@ -133,7 +133,7 @@ def test_detail_mail_extras(client, monkeypatch):
         db.add_all([_mail(me["id"], thread="x", task_id=older.id), _mail(me["id"], thread="y", task_id=newer.id)])
         db.commit()
         older_id, newer_id = older.id, newer.id
-    assert client.get(f"/api/tasks/{agent}").json()["mail"] is None
+    assert client.get(f"/api/tasks/{agent}").status_code == 404  # 메일이 아닌 업무는 상세가 없다
     m = client.get(f"/api/tasks/{older_id}").json()["mail"]
     assert m["is_snoozed"] is True and m["wake_at"] and m["merge_candidates"] == []
     m = client.get(f"/api/tasks/{newer_id}").json()["mail"]

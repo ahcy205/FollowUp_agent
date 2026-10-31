@@ -7,7 +7,7 @@
 - 캘린더 오류는 업무 처리를 막지 않는다. 업무 1개마다 커밋하고 예외를 밖으로 내보내지 않는다.
 - 로그에는 업무 번호, 건수, 예외 타입 이름만 남긴다. 요약 · 상대 이름 · 일정 내용은 남기지 않는다.
 
-이 모듈은 app.agent.orchestrator를 가져오지 않는다 (orchestrator가 mark_calendar_dirty를 가져온다).
+이 모듈은 task_actions를 가져오지 않는다 (task_actions가 mark_calendar_dirty를 가져온다).
 """
 import logging
 import secrets
@@ -22,11 +22,11 @@ from app.google.client import (
 )
 from app.google.oauth import access_token_for, forget_access_token
 from app.mail.calendar_event import build_event, private_marker
-from app.models import GoogleAccount, Task, TaskStatus
+from app.mail.status import CLOSED_TASK_STATUSES
+from app.models import GoogleAccount, Task
 
 log = logging.getLogger(__name__)
 
-_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 
 MAX_TRANSIENT_ATTEMPTS = 5
 TRANSIENT_MESSAGE = "Google 캘린더 연결이 불안정해 일정을 반영하지 못했습니다."
@@ -73,10 +73,10 @@ def _targets(db: Session, user_id: int, max_tasks: int) -> list[int]:
                or_(Task.calendar_state == PENDING,
                    # 닫힌 업무는 새 일정을 만들지 않으므로 고르지 않는다 (매 주기 한도를 차지하지 않게)
                    and_(Task.calendar_state == NONE, Task.deadline_at.is_not(None),
-                        Task.status.not_in(_CLOSED)),
+                        Task.status.not_in(CLOSED_TASK_STATUSES)),
                    # 예전 규칙으로 ✓만 붙고 남은 닫힌 업무의 일정도 지운다
                    and_(Task.calendar_state == SYNCED, Task.calendar_event_id.is_not(None),
-                        Task.status.in_(_CLOSED))))
+                        Task.status.in_(CLOSED_TASK_STATUSES))))
         .order_by(Task.updated_at, Task.id)
         .limit(max_tasks)
     ).all())
@@ -87,7 +87,7 @@ def _set_state(db: Session, task: Task, state: str, action_type: str, *, reason:
     before = task.calendar_state
     task.calendar_state = state
     if before != state:
-        log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type=action_type,
+        log_action(db, user_id=task.user_id, task_id=task.id, action_type=action_type,
                    output_data={"task_id": task.id, "state": state, **extra}, reason=reason)
 
 
@@ -195,7 +195,7 @@ def _restore(db: Session, task: Task, client: GoogleClient, token: str, body: di
 def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str, public_url: str, salt: str) -> str:
     """업무 1개를 반영한다. 결과: created | updated | deleted | removed | error | skipped. GoogleError는 호출한 쪽이 처리한다."""
     if not task.calendar_event_id:
-        if task.deadline_at is None or task.status in _CLOSED:
+        if task.deadline_at is None or task.status in CLOSED_TASK_STATUSES:
             # 완료 · 취소된 업무는 새 일정을 만들지 않는다 (이미 있는 일정은 아래에서 지운다).
             task.calendar_state = NONE
             return "skipped"
@@ -222,7 +222,7 @@ def _process(db: Session, task: Task, client: GoogleClient, token: str, tz: str,
         _synced(db, task, event, created=True)
         return "created"
 
-    if task.status in _CLOSED:
+    if task.status in CLOSED_TASK_STATUSES:
         # 완료 · 취소 · 합쳐진 업무의 일정은 지운다. 다시 열리면 insert 409 → 되살리기로 같은 일정이 돌아온다.
         return _remove_event(db, task, client, token, salt, reason=CLOSED_REMOVED_REASON)
     if task.deadline_at is None:

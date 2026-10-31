@@ -307,17 +307,17 @@ def _add_gmail(user_id: int, gid: str, subject: str, received_at: datetime) -> N
 
 
 def test_disconnect_delete_mail(client, google_fake):
+    """메일 삭제를 고른 연결 해제는 내 Gmail 메일만 지운다. 다른 사용자의 메일은 그대로다."""
     me = register(client)
     _callback(client, _connect(client))
-    with SessionLocal() as db:
-        seed_count = len(list(db.scalars(select(Email).where(Email.user_id == me["id"]))))
-    assert seed_count > 0
+    with make_client() as other:
+        them = register(other, "other@example.com")
     _add_gmail(me["id"], "g1", "hello", datetime.now(timezone.utc))
+    _add_gmail(them["id"], "g2", "theirs", datetime.now(timezone.utc))
     assert client.post("/api/google/disconnect", json={"delete_mail": True}).status_code == 204
     with SessionLocal() as db:
-        left = list(db.scalars(select(Email).where(Email.user_id == me["id"])))
-    assert len(left) == seed_count
-    assert all(e.gmail_message_id is None for e in left)
+        assert list(db.scalars(select(Email).where(Email.user_id == me["id"]))) == []
+        assert [e.gmail_message_id for e in db.scalars(select(Email).where(Email.user_id == them["id"]))] == ["g2"]
 
 
 def test_disconnect_keeps_mail_by_default(client, google_fake):

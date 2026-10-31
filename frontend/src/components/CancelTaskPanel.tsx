@@ -23,7 +23,7 @@ export default function CancelTaskPanel({ taskId, onCancelled }: { taskId: numbe
 
   if (!open) {
     return (
-      <button type="button" className="btn btn-link btn-sm" onClick={() => setOpen(true)} title="업무를 취소합니다. 이력은 남고 Agent는 멈춥니다.">
+      <button type="button" className="btn btn-link btn-sm" onClick={() => setOpen(true)} title="업무를 취소합니다. 처리 기록은 남습니다.">
         업무 취소
       </button>
     )
@@ -31,7 +31,7 @@ export default function CancelTaskPanel({ taskId, onCancelled }: { taskId: numbe
   return (
     <div className="cancel-panel">
       <b>이 업무를 취소할까요?</b>
-      <div className="muted small">실행 중인 Agent는 멈추고 대기 중인 승인은 무효가 됩니다. 이력은 그대로 남습니다.</div>
+      <div className="muted small">완료 탭으로 옮겨지고 캘린더 일정은 지워집니다. 처리 기록은 그대로 남습니다.</div>
       <input value={reason} maxLength={500} placeholder="(선택) 취소 사유" onChange={(e) => setReason(e.target.value)} />
       {error && <div className="alert alert-red">{error}</div>}
       <div className="approval-actions">

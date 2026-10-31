@@ -28,7 +28,7 @@ def acct(client, google_fake):
 def _task(uid, *, state="none", deadline=DEADLINE, origin="mail", error="") -> int:
     with SessionLocal() as db:
         t = Task(user_id=uid, title="견적 요청", goal="견적서 송부", status=TaskStatus.ACTION_REQUIRED,
-                 origin=origin, agent_enabled=False, deadline_at=deadline, deadline_all_day=True,
+                 origin=origin, deadline_at=deadline, deadline_all_day=True,
                  deadline_kind="explicit", calendar_state=state, calendar_error=error, calendar_attempts=5)
         db.add(t)
         db.commit()
@@ -67,7 +67,7 @@ def test_calendar_runs_when_triage_off(acct, google_fake, monkeypatch):
     set_llm_override(llm)
     tid = _task(uid)
     run_sync_cycle()
-    assert llm.structured_prompts == [] and llm.calls == 0
+    assert llm.structured_prompts == []
     with SessionLocal() as db:
         assert db.get(Task, tid).calendar_state == "synced"
     assert len([c for c in google_fake.calendar_calls if c[0] == "insert"]) == 1

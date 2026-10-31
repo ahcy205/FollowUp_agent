@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
-from app.agent import orchestrator
+from app.mail import task_actions
 from app.db import SessionLocal
 from app.google.client import GoogleError, GoogleTransientError
 from app.google.crypto import encrypt_token
@@ -43,7 +43,7 @@ def setup(google_fake):
 
 def _task(db, uid, *, deadline=DEADLINE, all_day=True, state="none", event_id=None, origin="mail",
           status=TaskStatus.ACTION_REQUIRED) -> int:
-    t = Task(user_id=uid, title=SUMMARY, goal="견적서 송부", status=status, origin=origin, agent_enabled=False,
+    t = Task(user_id=uid, title=SUMMARY, goal="견적서 송부", status=status, origin=origin,
              plan=[{"id": 1, "title": "견적서 작성해 보내기", "done": False}],
              brief={"analysis": "done", "summary": SUMMARY,
                     "counterpart": {"name": NAME, "organization": "파트너"}, "requests": ["견적서 송부"]},
@@ -99,7 +99,7 @@ def test_creates_event_for_deadline_task(setup, google_fake):
         assert ev["start"] == {"date": "2026-10-30"} and ev["summary"] == f"[업무] {SUMMARY}"
         (log,) = _logs(db, tid, "CALENDAR_SYNCED")
         assert log.output_data == {"task_id": tid, "state": "synced", "created": True}
-        assert log.run_id is None and log.user_id == uid
+        assert log.user_id == uid
         # 다시 돌려도 아무 호출이 없다
         _sync(db, aid, google_fake)
         assert len(google_fake.calendar_calls) == 1
@@ -250,7 +250,8 @@ def test_cancel_removes_event(setup, google_fake):
         _sync(db, aid, google_fake)
         task = db.get(Task, tid)
         eid = event_id_for(task, _salt(db, aid))
-        orchestrator.cancel_task(db, db.get(User, uid), task, "")
+        task_actions.cancel_mail_task(db, db.get(User, uid), task, "")
+        db.commit()  # API가 커밋한다
         assert db.get(Task, tid).calendar_state == "pending"
         r = _sync(db, aid, google_fake)
         assert r.removed == 1
@@ -268,18 +269,11 @@ def test_cancel_after_user_deleted_untouched(setup, google_fake):
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid, state="deleted_by_user", event_id="fuag0000000100000001")
-        orchestrator.cancel_task(db, db.get(User, uid), db.get(Task, tid), "")
+        task_actions.cancel_mail_task(db, db.get(User, uid), db.get(Task, tid), "")
+        db.commit()  # API가 커밋한다
         assert db.get(Task, tid).calendar_state == "deleted_by_user"
         _sync(db, aid, google_fake)
         assert google_fake.calendar_calls == []
-
-
-def test_cancel_user_task_not_marked(setup, google_fake):
-    uid, aid = setup
-    with SessionLocal() as db:
-        tid = _task(db, uid, origin="user")
-        orchestrator.cancel_task(db, db.get(User, uid), db.get(Task, tid), "")
-        assert db.get(Task, tid).calendar_state == "none"
 
 
 def test_transient_retries_then_error(setup, google_fake):
@@ -613,7 +607,8 @@ def test_cancelled_before_first_sync_no_event(setup, google_fake):
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid)
-        orchestrator.cancel_task(db, db.get(User, uid), db.get(Task, tid), "")
+        task_actions.cancel_mail_task(db, db.get(User, uid), db.get(Task, tid), "")
+        db.commit()  # API가 커밋한다
         assert db.get(Task, tid).calendar_state == "pending"
         _sync(db, aid, google_fake)
         assert google_fake.calendar_calls == [] and google_fake.events == {}

@@ -24,7 +24,6 @@ def log_action(
     *,
     user_id: int,
     task_id: int | None,
-    run_id: int | None,
     action_type: str,
     tool_name: str = "",
     input_data: Any = None,
@@ -34,7 +33,7 @@ def log_action(
     status: str = "SUCCESS",
 ) -> AgentActionLog:
     entry = AgentActionLog(
-        user_id=user_id, task_id=task_id, run_id=run_id, action_type=action_type, tool_name=tool_name,
+        user_id=user_id, task_id=task_id, action_type=action_type, tool_name=tool_name,
         input_data=_clip(input_data), output_data=_clip(output_data), reason=(reason or "")[:2000],
         risk_level=risk_level, status=status,
     )

@@ -291,9 +291,9 @@ def test_thread_mail_goes_to_work_without_llm(client):
         uid = _user(db)
         other = _user(db, "o@example.com")
         db.add_all([
-            Task(user_id=uid, title="기존", goal="기존 업무", origin="mail", agent_enabled=False,
+            Task(user_id=uid, title="기존", goal="기존 업무", origin="mail",
                  gmail_thread_id="thr-T", brief={"analysis": "done", "email_id": 0}),
-            Task(user_id=other, title="남의 업무", goal="g", origin="mail", agent_enabled=False,
+            Task(user_id=other, title="남의 업무", goal="g", origin="mail",
                  gmail_thread_id="thr-O", brief={"analysis": "done", "email_id": 0}),
         ])
         db.commit()

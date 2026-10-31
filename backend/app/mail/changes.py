@@ -28,6 +28,7 @@ from app.mail.errors import ActionError
 from app.mail.intake import ITEM_CHARS, MAX_ITEMS, SUMMARY_CHARS, TITLE_CHARS, _is_suspicious
 from app.mail.lifecycle import clear_wait_on_inbound
 from app.mail.task_actions import REOPENED_STEP, _iso, _require_open
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.models import Email, RiskLevel, Task, TaskStatus
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,6 @@ CHANGED_STEP = "상대 답장으로 내용이 바뀌었습니다"
 REPLIED_STEP = "상대가 다시 답장했습니다"
 FAILED_STEP = "새 메일 자동 분석에 실패했습니다 — 메일을 직접 확인해 주세요"
 CONFLICT_MESSAGE = "그 뒤에 직접 고친 내용이 있어 되돌릴 수 없습니다."
-_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 _LABELS = {"title": "제목: ", "summary": "요약: ", "requests": "요청: ", "deadline": "기한 ", "todo_update": "할 일: "}
 
 
@@ -85,7 +85,7 @@ def _drop_pending(brief: dict, ids: list[int]) -> None:
 
 def _raise_to_todo(task: Task, step: str) -> None:
     """처리할 일로 올린다. 닫힌 업무는 다시 연다."""
-    if str(task.status) in _CLOSED:
+    if str(task.status) in CLOSED_TASK_STATUSES:
         task.completed_at = None
         step = step if step == FAILED_STEP else REOPENED_STEP
         mark_calendar_dirty(task)
@@ -163,7 +163,7 @@ def _fail(db: Session, task: Task, ids: list[int]) -> None:
     brief["change_failed_at"] = datetime.now(UTC).isoformat()
     task.brief = brief
     _raise_to_todo(task, FAILED_STEP)
-    log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="CHANGES_FAILED",
+    log_action(db, user_id=task.user_id, task_id=task.id, action_type="CHANGES_FAILED",
                output_data={"email_count": len(ids)}, reason="새 메일 분석에 실패해 처리할 일로 올렸습니다")
     db.flush()
 
@@ -293,13 +293,13 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str, me
     for e in emails:
         e.processed = True
     for entry in entries:
-        log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="TASK_CHANGED",
+        log_action(db, user_id=task.user_id, task_id=task.id, action_type="TASK_CHANGED",
                    output_data={"change_id": entry["id"], "field": entry["field"], "status": entry["status"],
                                 "email_id": entry["email_id"]}, reason=_line(entry))
     flags = list(dict.fromkeys([*(s[:ITEM_CHARS] for s in sus[:MAX_ITEMS]),
                                 *(f for e in emails for f in detect_injection(e.content or ""))]))
     if flags:
-        log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="SECURITY_WARNING",
+        log_action(db, user_id=task.user_id, task_id=task.id, action_type="SECURITY_WARNING",
                    tool_name="mail_changes", input_data={"email_ids": [e.id for e in emails]},
                    output_data={"patterns": flags}, risk_level=RiskLevel.HIGH, status="FLAGGED",
                    reason="새 메일에서 Prompt Injection 의심 문구 탐지 — 지시를 따르지 않고 반영하지 않음")
@@ -318,7 +318,7 @@ def _entry(task: Task, change_id: int) -> tuple[list[dict], dict]:
 
 def _record(task: Task, history: list[dict], entry: dict, action_type: str, reason: str) -> None:
     task.change_log = history  # 새 list
-    log_action(object_session(task), user_id=task.user_id, task_id=task.id, run_id=None, action_type=action_type,
+    log_action(object_session(task), user_id=task.user_id, task_id=task.id, action_type=action_type,
                output_data={"change_id": entry["id"], "field": entry["field"]}, reason=reason)
 
 

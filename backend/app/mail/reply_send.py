@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
 from app.agent.audit import log_action
-from app.agent.orchestrator import CLOSED_TASK_STATUSES
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.google.client import GoogleAuthError, GoogleClient, GoogleError, GoogleTransientError
 from app.google.oauth import access_token_for, forget_access_token
 from app.config import get_settings
@@ -201,7 +201,7 @@ def _sent_reason(draft: ReplyDraft) -> str:
 
 def _back_to_draft(db: Session, draft: ReplyDraft, error: Exception) -> None:
     _set(db, draft, ("sending",), status="draft", sending_at=None, updated_at=datetime.now(UTC))
-    log_action(db, user_id=draft.user_id, task_id=draft.task_id, run_id=None, action_type="REPLY_SEND_FAILED",
+    log_action(db, user_id=draft.user_id, task_id=draft.task_id, action_type="REPLY_SEND_FAILED",
                output_data={"error": type(error).__name__}, reason="답장을 보내지 못했습니다. 초안은 그대로 있습니다")
     db.commit()
     db.refresh(draft)
@@ -210,7 +210,7 @@ def _back_to_draft(db: Session, draft: ReplyDraft, error: Exception) -> None:
 def _to_unknown(db: Session, draft: ReplyDraft, error: Exception) -> None:
     log.warning("reply send %s: result unknown: %s", draft.id, type(error).__name__)
     if _set(db, draft, ("sending",), status="unknown"):
-        log_action(db, user_id=draft.user_id, task_id=draft.task_id, run_id=None, action_type="REPLY_SEND_UNKNOWN",
+        log_action(db, user_id=draft.user_id, task_id=draft.task_id, action_type="REPLY_SEND_UNKNOWN",
                    output_data={"error": type(error).__name__},
                    reason="발송 결과를 확인하지 못했습니다. 보낸편지함과 맞춰 보는 중입니다")
     db.commit()
@@ -331,7 +331,7 @@ def confirm_unknown(db: Session, user: User, task: Task, draft: ReplyDraft, *, s
         if not _set(db, draft, (draft.status,), status="draft", sending_at=None, updated_at=now):
             raise ActionError(NOT_UNKNOWN, 409)
         db.refresh(draft)
-        log_action(db, user_id=draft.user_id, task_id=draft.task_id, run_id=None, action_type="REPLY_SEND_NOT_SENT",
+        log_action(db, user_id=draft.user_id, task_id=draft.task_id, action_type="REPLY_SEND_NOT_SENT",
                    output_data={}, reason="보내지지 않은 것으로 확인해 초안으로 되돌렸습니다")
     db.flush()
 
@@ -358,6 +358,6 @@ def complete_remaining_todos(task: Task) -> int:
         task.plan = plan  # 새 리스트를 넣어야 JSON 컬럼 변경이 감지된다
         db = object_session(task)
         if db is not None:
-            log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="TODOS_COMPLETED",
+            log_action(db, user_id=task.user_id, task_id=task.id, action_type="TODOS_COMPLETED",
                        output_data={"count": changed}, reason=f"남은 할 일 {changed}개를 완료로 정리했습니다")
     return changed
