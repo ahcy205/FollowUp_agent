@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { relative } from '../format'
 import type { InboxCard as Card } from '../types'
 import Icon from './Icon'
 
@@ -62,6 +63,7 @@ export default function InboxCard({ card, extra }: { card: Card; extra?: ReactNo
             </span>
           )}
         </span>
+        <span className="ledger-recv muted">{card.received_at ? relative(card.received_at) : ''}</span>
         <span className="ledger-todo" aria-label={card.todo_total > 0 ? `할 일 ${card.todo_total}개 중 ${card.todo_done}개 완료` : '할 일 없음'}>
           {card.todo_total > 0 ? (
             <>
