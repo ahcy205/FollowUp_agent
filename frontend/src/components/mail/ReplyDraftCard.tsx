@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { parseDate } from '../../format'
+import Icon from '../Icon'
 import type { DraftSourceChunk, Email, MailAct, ReplyDraft, TaskDetail } from '../../types'
 
 const UNKNOWN_CONFIRM_MS = 5 * 60_000 // backend reply_send.UNKNOWN_CONFIRM_AFTER
@@ -214,7 +215,10 @@ export default function ReplyDraftCard({
       <dl className="draft-fields">
         <div>
           <dt>받는 사람</dt>
-          <dd>{draft.to_addr}</dd>
+          <dd className="locked" title="받는 사람은 받은 메일을 기준으로 서버가 정해요. 여기서 바꿀 수 없어요.">
+            <Icon name="lock" size={13} />
+            <span className="break">{draft.to_addr}</span>
+          </dd>
         </div>
         {draft.cc_candidates.length > 0 && (
           <div>
@@ -353,16 +357,18 @@ export default function ReplyDraftCard({
             {
               key: 'unsupported',
               label: '근거 없는 값',
-              state: needsUnsupportedAck ? (uacked ? 'ok' : 'confirm') : 'ok',
-              detail: needsUnsupportedAck
+              state: dirty ? 'confirm' : needsUnsupportedAck ? (uacked ? 'ok' : 'confirm') : 'ok',
+              detail: dirty
+                ? '고친 내용을 저장하면 다시 확인해요'
+                : needsUnsupportedAck
                 ? `메모 · 자료에 없는 값 ${w.unsupported.length}개 — 보낼 때 "확인했어요"를 체크해야 해요`
                 : '숫자 · 날짜가 모두 근거와 맞아요',
             },
             {
               key: 'internal',
               label: '내부용 자료 값',
-              state: needsAck ? (acked ? 'ok' : 'confirm') : 'ok',
-              detail: needsAck ? '원가 같은 내부용 값이 들어 있어요 — 보낼 때 "알고 보냅니다"를 체크해야 해요' : '내부용 값이 없어요',
+              state: dirty ? 'confirm' : needsAck ? (acked ? 'ok' : 'confirm') : 'ok',
+              detail: dirty ? '고친 내용을 저장하면 다시 확인해요' : needsAck ? '원가 같은 내부용 값이 들어 있어요 — 보낼 때 "알고 보냅니다"를 체크해야 해요' : '내부용 값이 없어요',
             },
             {
               key: 'sources',

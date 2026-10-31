@@ -5,6 +5,7 @@ import { api } from '../api'
 import { useAuth } from '../App'
 import Icon from '../components/Icon'
 import InboxCard from '../components/InboxCard'
+import { needsFollowup, openCards } from '../followup'
 import { dateTime, relative, shortDate } from '../format'
 import type { ActivityItem, GoogleStatus, Inbox as InboxData, InboxCard as Card } from '../types'
 
@@ -21,6 +22,13 @@ function isDueSoon(c: Card) {
 }
 
 /** 홈: 오늘 처리할 것 · 기한 임박 · 답 기다림 · 후속 필요 · 완료, AI 처리 상태, 새로 가져온 메일, 최근 업무 활동 */
+/** "이름 <주소>"에서 이름만. 이름이 없으면 주소. */
+function senderName(raw: string): string {
+  const m = raw.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/)
+  if (!m) return raw
+  return m[1].trim() || m[2].trim()
+}
+
 export default function Home() {
   const { user } = useAuth()
   const [inbox, setInbox] = useState<InboxData | null>(null)
@@ -63,9 +71,9 @@ export default function Home() {
   }
 
   const todo = inbox ? [...inbox.tabs.todo.now, ...inbox.tabs.todo.week, ...inbox.tabs.todo.later] : []
-  const all = inbox ? [...todo, ...inbox.tabs.sent, ...inbox.tabs.reference] : []
+  const all = inbox ? openCards(inbox) : []
   const dueSoon = todo.filter(isDueSoon)
-  const followup = all.filter((c) => c.no_reply || c.changed_unseen)
+  const followup = all.filter(needsFollowup)
   const pendingAnalysis = all.filter((c) => c.analysis === 'pending').length
   const failedAnalysis = all.filter((c) => c.analysis === 'failed').length
   const today = shortDate(new Date().toISOString(), false)
@@ -75,16 +83,17 @@ export default function Home() {
     { label: '오늘 처리할 업무', value: inbox?.counts.now, to: '/inbox', tone: 'navy', note: '기한이 가깝거나 중요한 업무' },
     { label: '기한 임박', value: inbox ? dueSoon.length : undefined, to: '/inbox', tone: dueSoon.some((c) => c.deadline_badge.late) ? 'red' : 'plain', note: '지났거나 오늘 · 내일까지' },
     { label: '답장 대기', value: inbox?.counts.sent, to: '/followup', tone: 'plain', note: '답장을 보내고 기다리는 중' },
-    { label: '후속 필요', value: inbox ? followup.length : undefined, to: '/followup', tone: followup.length > 0 ? 'amber' : 'plain', note: '무응답 3일 · 상대가 내용 바꿈' },
-    { label: '완료', value: inbox?.counts.done, to: '/inbox', tone: 'plain', note: '완료 · 닫은 업무' },
+    { label: '후속 필요', value: inbox ? followup.length : undefined, to: '/followup', tone: followup.length > 0 ? 'amber' : 'plain', note: '무응답 · 내용 바뀜 · 답장 안 함' },
+    { label: '완료', value: inbox?.counts.done, to: '/inbox?tab=done', tone: 'plain', note: '완료 · 닫은 업무' },
   ]
 
   return (
     <div className="page">
       <header className="page-head">
         <div>
-          <p className="eyebrow-date num">{today}</p>
-          <h1>오늘의 업무</h1>
+          <h1>
+            오늘의 업무<span className="page-date num">{today}</span>
+          </h1>
         </div>
         <Link to="/inbox" className="btn btn-primary">
           받은 업무 열기
@@ -225,7 +234,7 @@ export default function Home() {
                 const body = (
                   <>
                     <span className="feed-main">
-                      <b>{m.sender}</b>
+                      <b title={m.sender}>{senderName(m.sender)}</b>
                       <span>{m.subject || '(제목 없음)'}</span>
                     </span>
                     <span className="feed-side">

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { startAlerts } from './alerts'
 import { api, setUnauthorizedHandler } from './api'
+import { needsFollowup, openCards } from './followup'
 import GoogleBanner from './components/GoogleBanner'
 import Icon, { BrandMark, type IconName } from './components/Icon'
 import Home from './pages/Home'
@@ -31,7 +32,7 @@ const LINKS: { to: string; label: string; icon: IconName; badge?: keyof Badges; 
 
 /** 메뉴 옆 숫자: 처리할 일, 후속 관리(무응답 · 내용 바뀜). 받은 업무 응답에서 계산한다. */
 function useBadges(): Badges {
-  const { pathname } = useLocation()
+  const section = useLocation().pathname.split('/')[1]
   const [badges, setBadges] = useState<Badges>({ todo: 0, followup: 0 })
   useEffect(() => {
     let cancelled = false
@@ -40,8 +41,7 @@ function useBadges(): Badges {
         .get<InboxData>('/inbox')
         .then((d) => {
           if (cancelled) return
-          const cards = [...d.tabs.todo.now, ...d.tabs.todo.week, ...d.tabs.todo.later, ...d.tabs.sent, ...d.tabs.reference]
-          const followup = new Set(cards.filter((c) => c.no_reply || c.changed_unseen).map((c) => c.task_id)).size
+          const followup = new Set(openCards(d).filter(needsFollowup).map((c) => c.task_id)).size
           setBadges({ todo: d.counts.todo, followup })
         })
         .catch(() => {})
@@ -51,7 +51,7 @@ function useBadges(): Badges {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [pathname])
+  }, [section])
   return badges
 }
 
@@ -75,7 +75,7 @@ function Shell({ children, wide }: { children: React.ReactNode; wide?: boolean }
         </NavLink>
         <nav className="side-nav">
           {LINKS.map((l) => (
-            <NavLink key={l.to} to={l.to} end={l.end}>
+            <NavLink key={l.to} to={l.to} end={l.end} title={l.label}>
               <Icon name={l.icon} className="side-icon" />
               <span className="side-label">{l.label}</span>
               {l.badge && badges[l.badge] > 0 && <span className="side-badge num">{badges[l.badge]}</span>}

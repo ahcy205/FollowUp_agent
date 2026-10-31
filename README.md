@@ -26,7 +26,8 @@ Gmail 받은편지함에서 **업무 메일만 골라 업무로 바꾸고, 끝�
 | 받은 업무 화면 (설계 5단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-26-inbox-screen-design.md) · [구현 계획](docs/superpowers/plans/2026-10-26-inbox-screen.md) |
 | 답장과 수명주기 (설계 6단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-27-reply-and-lifecycle-design.md) · [구현 계획](docs/superpowers/plans/2026-10-27-reply-and-lifecycle.md) · [정확도 측정](docs/evals/2026-10-27-reply-lifecycle.md) |
 | RAG 1단계: 내 자료로 답장 초안 채우기 | 완료 (로컬 점검, 가상 자료) — [설계](docs/superpowers/specs/2026-10-29-rag-documents-design.md) · [구현 계획](docs/superpowers/plans/2026-10-29-rag-documents.md) · [정확도 측정](docs/evals/2026-10-29-rag-documents.md) |
-| 화면 전면 개편 (견적서 · 거래명세서 양식) | 완료 (가상 데이터 점검) — [설계](docs/superpowers/specs/2026-10-31-ui-redesign-design.md) · [디자인 체계](DESIGN.md) |
+| 화면 전면 개편 (견적서 · 거래명세서 양식) | 대체됨 (프리미엄 SaaS 리디자인) — [설계](docs/superpowers/specs/2026-10-31-ui-redesign-design.md) · [디자인 체계](DESIGN.md) |
+| 프리미엄 SaaS 리디자인 (사이드바 · 상세 패널 · 홈 · 후속 관리 · 발송 체크리스트) | 완료 (가상 데이터 점검) — [설계](docs/superpowers/specs/2026-10-31-saas-redesign-design.md) · [구현 계획](docs/superpowers/plans/2026-10-31-saas-redesign.md) · [디자인 체계](DESIGN.md) |
 | 데모 모드 · 목표 입력 Agent 제거 | 완료 — [설계](docs/superpowers/specs/2026-10-31-remove-demo-and-goal-agent-design.md) · [구현 계획](docs/superpowers/plans/2026-10-31-remove-demo-and-goal-agent.md) |
 | 정리 (설계 7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
 | RAG 다음 단계 (업무 요약 · 메일 색인 · 문체, 의미 검색) | 예정 — [상위 설계](docs/superpowers/specs/2026-10-26-rag-design.md) |

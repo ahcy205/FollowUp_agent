@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import Icon from '../components/Icon'
 import InboxCard from '../components/InboxCard'
+import { openCards } from '../followup'
 import TaskPanel from '../components/TaskPanel'
 import { dateTime, relative } from '../format'
 import type { GoogleStatus, Inbox as InboxData, InboxCard as Card } from '../types'
@@ -50,7 +51,7 @@ function matches(card: Card, q: string) {
 
 /** 후속 관리: 무응답 · 내용 바뀜 · 답장 안 함 · 답 기다림 (받은 업무 응답에서 고른다) */
 function followupGroups(d: InboxData): Group[] {
-  const all = [...d.tabs.todo.now, ...d.tabs.todo.week, ...d.tabs.todo.later, ...d.tabs.sent, ...d.tabs.reference]
+  const all = openCards(d)
   const seen = new Set<number>()
   const take = (pred: (c: Card) => boolean) =>
     all.filter((c) => {
@@ -73,13 +74,15 @@ export default function Inbox({ mode }: { mode: Mode }) {
   const [data, setData] = useState<InboxData | null>(null)
   const [google, setGoogle] = useState<GoogleStatus | null>(null)
   const [error, setError] = useState('')
-  const [tab, setTab] = useState<Tab>('todo')
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.key === params.get('tab'))?.key ?? 'todo')
   const [query, setQuery] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const [help, setHelp] = useState(false)
 
   const load = useCallback(() => {
     api
@@ -115,6 +118,15 @@ export default function Inbox({ mode }: { mode: Mode }) {
     return () => window.clearTimeout(t)
   }, [id, load])
 
+  const [tabFor, setTabFor] = useState<string | null>(null)
+  if (mode === 'inbox' && id && data && tabFor !== id) {
+    setTabFor(id)
+    const n = Number(id)
+    const has = (k: Tab) => (k === 'todo' ? [...data.tabs.todo.now, ...data.tabs.todo.week, ...data.tabs.todo.later] : data.tabs[k]).some((c) => c.task_id === n)
+    const owner = has(tab) ? tab : TABS.find((t) => has(t.key))?.key
+    if (owner && owner !== tab) setTab(owner)
+  }
+
   const groups: Group[] = useMemo(() => {
     if (!data) return []
     if (mode === 'followup') return followupGroups(data)
@@ -125,11 +137,21 @@ export default function Inbox({ mode }: { mode: Mode }) {
   const q = query.trim()
   const visible: Group[] = groups.map((g) => ({ ...g, cards: g.cards.filter((c) => matches(c, q)) })).filter((g) => g.cards.length > 0)
   const order = visible.flatMap((g) => g.cards.map((c) => c.task_id))
-  const at = id ? order.indexOf(Number(id)) : -1
+  const orderKey = order.join(',')
+  const inList = id ? order.indexOf(Number(id)) : -1
+  const [held, setHeld] = useState<{ key: string; order: number[] }>({ key: '', order: [] })
+  if (inList >= 0 && held.key !== orderKey) setHeld({ key: orderKey, order })
+  // 목록에서 빠진 업무: 직전 순서에서 앞뒤로 아직 목록에 있는 업무를 찾는다
+  const was = id && inList < 0 ? held.order.indexOf(Number(id)) : -1
+  const before = was >= 0 ? held.order.slice(0, was).reverse().find((t) => order.includes(t)) : undefined
+  const after = was >= 0 ? held.order.slice(was + 1).find((t) => order.includes(t)) : undefined
+  const at = inList
   const open = useCallback((taskId: number) => navigate(`${base}/${taskId}`), [navigate, base])
   const close = useCallback(() => navigate(base), [navigate, base])
-  const prev = at > 0 ? () => open(order[at - 1]) : undefined
-  const next = at >= 0 && at < order.length - 1 ? () => open(order[at + 1]) : undefined
+  const prevId = at > 0 ? order[at - 1] : before
+  const nextId = at >= 0 ? (at < order.length - 1 ? order[at + 1] : undefined) : was >= 0 ? after : undefined
+  const prev = prevId != null ? () => open(prevId) : undefined
+  const next = nextId != null ? () => open(nextId) : undefined
 
   // 키보드: j/k 다음 · 이전, Esc 닫기, / 검색 (입력칸에서는 Esc로 빠져나오기만)
   useEffect(() => {
@@ -142,17 +164,22 @@ export default function Inbox({ mode }: { mode: Mode }) {
       if (e.key === '/') {
         searchRef.current?.focus()
         e.preventDefault()
+      } else if (e.key === '?') {
+        setHelp((h) => !h)
+      } else if (e.key === 'Escape' && help) {
+        setHelp(false)
       } else if (e.key === 'Escape' && id) {
         close()
       } else if ((e.key === 'j' || e.key === 'k') && order.length > 0) {
-        const to = e.key === 'j' ? Math.min(at + 1, order.length - 1) : Math.max(at - 1, 0)
-        open(order[at < 0 ? 0 : to])
+        const to = e.key === 'j' ? nextId : prevId
+        if (to != null) open(to)
+        else if (at < 0 && was < 0) open(order[0])
         e.preventDefault()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, at, id, open, close])
+  }, [order, at, was, prevId, nextId, id, open, close, help])
 
   // 고른 줄이 목록에서 보이게
   useEffect(() => {
@@ -233,6 +260,20 @@ export default function Inbox({ mode }: { mode: Mode }) {
             <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="보낸 사람 · 내용 검색" aria-label="목록 검색" />
             <kbd>/</kbd>
           </label>
+          {help && (
+            <div className="shortcut-help" role="note" aria-label="단축키">
+              <ul>
+                <li><kbd>j</kbd> <kbd>k</kbd> 다음 · 이전 업무</li>
+                <li><kbd>Enter</kbd> 고른 줄 열기</li>
+                <li><kbd>Esc</kbd> 상세 닫기</li>
+                <li><kbd>/</kbd> 목록 검색</li>
+                <li><kbd>?</kbd> 이 안내 열고 닫기</li>
+              </ul>
+              <button type="button" className="icon-btn" onClick={() => setHelp(false)} aria-label="단축키 안내 닫기">
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+          )}
           {mode === 'inbox' && (
             <div className="seg" role="group" aria-label="업무 구분">
               {TABS.map((t) => (

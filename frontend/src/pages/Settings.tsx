@@ -309,7 +309,7 @@ export default function Settings() {
               <dt>받은 권한</dt>
               <dd className="scope-pills">
                 {SCOPES.map((sc) => {
-                  const has = status.scopes.some((x) => x.includes(sc.key))
+                  const has = status.scopes.some((x) => x === sc.key || x.endsWith(`/${sc.key}`))
                   return (
                     <span key={sc.key} className={`pill ${has ? 'pill-green' : 'pill-red'}`}>
                       {has ? '' : '없음 · '}

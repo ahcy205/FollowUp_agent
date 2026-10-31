@@ -468,6 +468,7 @@ export default function Knowledge() {
                 <thead>
                   <tr>
                     <th>이름</th>
+                    <th>형식</th>
                     <th>공유 등급</th>
                     <th>상태</th>
                     <th className="r">크기</th>
@@ -483,6 +484,7 @@ export default function Knowledge() {
                           <span className="break">{s.title}</span>
                         </button>
                       </td>
+                      <td className="muted small upper">{s.file_type}</td>
                       <td>
                         <span className={`pill ${s.visibility === 'shareable' ? 'pill-blue' : 'pill-gray'}`}>{VISIBILITY_LABELS[s.visibility]}</span>
                       </td>

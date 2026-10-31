@@ -95,7 +95,7 @@ export default function MailActions({
     <section className="card mail-actions" id={draft && draft.status === 'draft' ? undefined : 'reply'}>
       <div className="mail-action-row">
         <span className="reply-draft">
-          {draft?.status === 'draft' && !compose && (
+          {draft?.status === 'draft' && !compose && canDraft && (
             <a href="#reply" className="btn btn-primary btn-sm">
               답장 초안 보기
             </a>
