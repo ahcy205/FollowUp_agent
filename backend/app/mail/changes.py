@@ -163,7 +163,7 @@ def _fail(db: Session, task: Task, ids: list[int]) -> None:
     brief["change_failed_at"] = datetime.now(UTC).isoformat()
     task.brief = brief
     _raise_to_todo(task, FAILED_STEP)
-    log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="CHANGES_FAILED",
+    log_action(db, user_id=task.user_id, task_id=task.id, action_type="CHANGES_FAILED",
                output_data={"email_count": len(ids)}, reason="새 메일 분석에 실패해 처리할 일로 올렸습니다")
     db.flush()
 
@@ -293,13 +293,13 @@ def _apply(db: Session, task: Task, emails: list[Email], data: dict, tz: str, me
     for e in emails:
         e.processed = True
     for entry in entries:
-        log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="TASK_CHANGED",
+        log_action(db, user_id=task.user_id, task_id=task.id, action_type="TASK_CHANGED",
                    output_data={"change_id": entry["id"], "field": entry["field"], "status": entry["status"],
                                 "email_id": entry["email_id"]}, reason=_line(entry))
     flags = list(dict.fromkeys([*(s[:ITEM_CHARS] for s in sus[:MAX_ITEMS]),
                                 *(f for e in emails for f in detect_injection(e.content or ""))]))
     if flags:
-        log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="SECURITY_WARNING",
+        log_action(db, user_id=task.user_id, task_id=task.id, action_type="SECURITY_WARNING",
                    tool_name="mail_changes", input_data={"email_ids": [e.id for e in emails]},
                    output_data={"patterns": flags}, risk_level=RiskLevel.HIGH, status="FLAGGED",
                    reason="새 메일에서 Prompt Injection 의심 문구 탐지 — 지시를 따르지 않고 반영하지 않음")
@@ -318,7 +318,7 @@ def _entry(task: Task, change_id: int) -> tuple[list[dict], dict]:
 
 def _record(task: Task, history: list[dict], entry: dict, action_type: str, reason: str) -> None:
     task.change_log = history  # 새 list
-    log_action(object_session(task), user_id=task.user_id, task_id=task.id, run_id=None, action_type=action_type,
+    log_action(object_session(task), user_id=task.user_id, task_id=task.id, action_type=action_type,
                output_data={"change_id": entry["id"], "field": entry["field"]}, reason=reason)
 
 

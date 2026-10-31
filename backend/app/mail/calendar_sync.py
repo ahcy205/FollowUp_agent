@@ -87,7 +87,7 @@ def _set_state(db: Session, task: Task, state: str, action_type: str, *, reason:
     before = task.calendar_state
     task.calendar_state = state
     if before != state:
-        log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type=action_type,
+        log_action(db, user_id=task.user_id, task_id=task.id, action_type=action_type,
                    output_data={"task_id": task.id, "state": state, **extra}, reason=reason)
 
 

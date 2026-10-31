@@ -64,7 +64,7 @@ def _log(task: Task, action_type: str, data: dict | None = None, reason: str = "
     db = object_session(task)
     if db is None:  # 세션에 붙지 않은 업무는 기록할 곳이 없다 (호출 쪽 버그)
         raise RuntimeError("task is not attached to a session")
-    log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type=action_type,
+    log_action(db, user_id=task.user_id, task_id=task.id, action_type=action_type,
                output_data=data or {}, reason=reason)
 
 
@@ -305,7 +305,7 @@ def close_without_reply(db: Session, user: User, task: Task, reason: str) -> Non
     task.waiting_for = ""
     task.snoozed_until = None
     mark_calendar_dirty(task)  # 앱이 만든 캘린더 일정을 지운다(다시 열리면 되살린다)
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="TASK_CLOSED",
+    log_action(db, user_id=user.id, task_id=task.id, action_type="TASK_CLOSED",
                output_data={"reason": reason}, reason="답장 필요 없음으로 닫았습니다")
 
 
@@ -320,7 +320,7 @@ def cancel_mail_task(db: Session, user: User, task: Task, reason: str = "") -> N
     task.next_action = "사용자가 취소한 업무입니다." + (f" 사유: {reason}" if reason else "")
     task.snoozed_until = None  # 닫힌 업무의 스누즈는 의미가 없다
     mark_calendar_dirty(task)  # 앱이 만든 캘린더 일정을 지운다(다시 열리면 되살린다)
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="TASK_CANCELLED",
+    log_action(db, user_id=user.id, task_id=task.id, action_type="TASK_CANCELLED",
                input_data={"from": before, "to": TaskStatus.CANCELLED},
                reason="사용자가 업무를 취소했습니다" + (f" — {reason}" if reason else ""),
                risk_level=RiskLevel.MEDIUM, status="CANCELLED")
@@ -386,6 +386,6 @@ def promote_email(db: Session, user: User, email: Email) -> Task:
 
     email.triage = "work"
     email.triage_reason = PROMOTED_REASON
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="EMAIL_PROMOTED",
+    log_action(db, user_id=user.id, task_id=task.id, action_type="EMAIL_PROMOTED",
                output_data={"email_id": email_id}, reason="사용자가 메일을 업무로 처리했습니다")
     return task

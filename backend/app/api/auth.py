@@ -16,7 +16,6 @@ from app.security import (
     set_session_cookie,
     verify_password,
 )
-from app.seed import seed_user_data
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -25,9 +24,8 @@ _DUMMY_HASH = hash_password("timing-equalizer-password")
 
 
 def _out(user: User) -> UserOut:
-    """로그인 사용자 정보와 화면이 데모 메뉴를 보일지 정하는 스위치."""
-    s = get_settings()
-    return UserOut(id=user.id, email=user.email, demo_mode=s.demo_mode, knowledge_enabled=s.knowledge_enabled)
+    """로그인 사용자 정보와 화면이 자료실을 보일지 정하는 스위치."""
+    return UserOut(id=user.id, email=user.email, knowledge_enabled=get_settings().knowledge_enabled)
 
 
 @router.post("/register", response_model=UserOut, status_code=201)
@@ -41,9 +39,6 @@ def register(body: Credentials, request: Request, response: Response, db: Sessio
     user = User(email=email, password_hash=hash_password(body.password))
     db.add(user)
     try:
-        db.flush()
-        if get_settings().demo_mode:
-            seed_user_data(db, user)  # every account gets its own isolated demo workspace
         db.commit()
     except IntegrityError:
         db.rollback()

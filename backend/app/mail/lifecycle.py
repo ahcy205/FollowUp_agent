@@ -72,7 +72,7 @@ def mark_reply_sent(db: Session, task: Task, email: Email | None, now: datetime,
     task.no_reply_asked_at = None
     task.snoozed_until = None
     task.snooze_returned_at = None
-    log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="REPLY_SENT",
+    log_action(db, user_id=task.user_id, task_id=task.id, action_type="REPLY_SENT",
                output_data={"source": source,
                             "recipients": _recipient_count(email) if recipients is None else recipients,
                             **(extra or {})},
@@ -116,7 +116,7 @@ def check_no_reply(db: Session, user_id: int, now: datetime, tz: str) -> int:
         task.current_step = NO_REPLY_STEP
         task.waiting_for = ""
         task.no_reply_asked_at = now
-        log_action(db, user_id=user_id, task_id=task.id, run_id=None, action_type="NO_REPLY_ASKED",
+        log_action(db, user_id=user_id, task_id=task.id, action_type="NO_REPLY_ASKED",
                    output_data={"business_days": NO_REPLY_BUSINESS_DAYS},
                    reason="보낸 지 영업일 3일째 답이 없어 다시 연락할지 묻습니다")
         changed += 1
@@ -138,7 +138,7 @@ def answer_no_reply(db: Session, user: User, task: Task, choice: str, now: datet
         task.current_step = "답장 보냄"
         task.wait_from = now
         task.no_reply_asked_at = None
-        log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="NO_REPLY_WAIT",
+        log_action(db, user_id=task.user_id, task_id=task.id, action_type="NO_REPLY_WAIT",
                    output_data={}, reason="더 기다리기로 했습니다")
     elif choice == "close":
         task_actions.close_without_reply(db, user, task, NO_REPLY_CLOSE_REASON)

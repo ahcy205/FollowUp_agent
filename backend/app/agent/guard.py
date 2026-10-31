@@ -31,7 +31,6 @@ _COMPILED = [(re.compile(p, re.IGNORECASE), label) for p, label in _INJECTION_PA
 _COMPILED_DOCUMENT = [(re.compile(p, re.IGNORECASE), label) for p, label in _DOCUMENT_PATTERNS]
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-PHONE_RE = re.compile(r"\b0\d{1,2}-\d{3,4}-\d{4}\b")
 
 
 def detect_injection(text: str) -> list[str]:
@@ -61,10 +60,3 @@ def wrap_untrusted(source: str, text: str, max_chars: int = 4000) -> str:
         f'<untrusted_external_content source="{safe_source}">\n{body}\n</untrusted_external_content>'
     )
 
-
-def find_foreign_contacts(text: str, allowed: set[str], protected: set[str]) -> list[str]:
-    """Contacts (emails/phones) of *other* customers appearing in outgoing text — a data-leak signal."""
-    hits = set(EMAIL_RE.findall(text or "")) | set(PHONE_RE.findall(text or ""))
-    allowed_l = {a.lower() for a in allowed}
-    protected_l = {p.lower() for p in protected}
-    return sorted(h for h in hits if h.lower() in protected_l and h.lower() not in allowed_l)

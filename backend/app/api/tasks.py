@@ -9,38 +9,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.agent import orchestrator
-from app.agent.audit import log_action
 from app.agent.llm import get_llm
 from app.config import get_settings
 from app.db import SessionLocal, get_db
-from app.models import (
-    AgentActionLog,
-    AgentRun,
-    ApprovalRequest,
-    ApprovalStatus,
-    Customer,
-    Document,
-    Email,
-    EmailDirection,
-    ReplyDraft,
-    Task,
-    TaskStatus,
-    User,
-)
+from app.models import AgentActionLog, Email, EmailDirection, ReplyDraft, Task, User
 from app.schemas import (
-    ApprovalDecision,
-    ApprovalOut,
     CancelTaskIn,
     CloseTaskIn,
-    CompleteTaskIn,
-    CustomerOut,
-    DashboardOut,
     DeadlineIn,
-    DocumentOut,
-    EmailOut,
-    GoalIn,
-    GoalUpdateIn,
     MailExtras,
     NoReplyIn,
     MergeIn,
@@ -52,7 +28,6 @@ from app.schemas import (
     ReplyDraftOut,
     ReplyDraftUpdateIn,
     ReplySendIn,
-    RunOut,
     SnoozeIn,
     TaskBrief,
     TaskDetail,
@@ -68,7 +43,7 @@ from app.mail import reply_send
 from app.mail import sync as mail_sync
 from app.mail import task_actions
 from app.mail.task_actions import ActionError
-from app.security import agent_limiter, ai_action_limiter, calendar_retry_limiter, get_current_user, send_limiter
+from app.security import ai_action_limiter, calendar_retry_limiter, get_current_user, send_limiter
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
@@ -81,37 +56,18 @@ def get_owned(db: Session, model, obj_id: int, user: User):
     return obj
 
 
-@router.get("/dashboard", response_model=DashboardOut)
-def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    rows = db.execute(select(Task.status, func.count()).where(Task.user_id == user.id).group_by(Task.status)).all()
-    counts = {s.value: 0 for s in TaskStatus}
-    counts.update({st: n for st, n in rows})
-    tasks = db.scalars(select(Task).where(Task.user_id == user.id).order_by(Task.updated_at.desc())).all()
-    pending = db.scalar(select(func.count()).select_from(ApprovalRequest).where(
-        ApprovalRequest.user_id == user.id, ApprovalRequest.status == ApprovalStatus.PENDING))
-    s = get_settings()
-    return DashboardOut(counts=counts, tasks=tasks, pending_approvals=pending or 0,
-                        agent_configured=bool(s.llm_api_key), model=f"{s.llm_provider} · {s.llm_model}")
-
-
-@router.post("/tasks", response_model=TaskBrief, status_code=201)
-def create_task(body: GoalIn, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    agent_limiter.check(f"agent:{user.id}")
-    goal = body.goal.strip()
-    title = (body.title or "").strip() or (goal[:40] + ("…" if len(goal) > 40 else ""))
-    task = Task(user_id=user.id, title=title, goal=goal, status=TaskStatus.PENDING, origin="user",
-                current_step="업무 목표 접수", next_action="Agent가 목표를 분석합니다.")
-    db.add(task)
-    db.flush()
-    orchestrator.start_run(db, user, task, "goal_submitted")
-    db.refresh(task)
-    return task
-
-
 @router.get("/tasks/{task_id}", response_model=TaskDetail)
 def task_detail(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    task = get_owned(db, Task, task_id, user)
+    """메일 업무 상세. 메일이 아닌 업무는 없는 것처럼 404."""
+    task = _owned_mail_task(db, task_id, user)
     return build_task_detail(db, task, user)
+
+
+def _owned_mail_task(db: Session, task_id: int, user: User) -> Task:
+    task = db.scalar(select(Task).where(Task.id == task_id, Task.user_id == user.id, Task.origin == "mail"))
+    if task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "요청한 데이터를 찾을 수 없습니다.")
+    return task
 
 
 def build_task_detail(db: Session, task: Task, user: User) -> TaskDetail:
@@ -119,27 +75,7 @@ def build_task_detail(db: Session, task: Task, user: User) -> TaskDetail:
     emails = db.scalars(select(Email).where(Email.user_id == uid, Email.task_id == task.id).order_by(Email.created_at)).all()
     logs = db.scalars(select(AgentActionLog).where(AgentActionLog.user_id == uid, AgentActionLog.task_id == task.id)
                       .order_by(AgentActionLog.id)).all()
-    approvals = db.scalars(select(ApprovalRequest).where(ApprovalRequest.user_id == uid, ApprovalRequest.task_id == task.id)
-                           .order_by(ApprovalRequest.id.desc())).all()
-    email_by_id = {e.id: e for e in emails}
-    approvals_out = []
-    for a in approvals:
-        out = ApprovalOut.model_validate(a)
-        if a.email_id and a.email_id in email_by_id:
-            out.email = EmailOut.model_validate(email_by_id[a.email_id])
-        approvals_out.append(out)
-    runs = db.scalars(select(AgentRun).where(AgentRun.user_id == uid, AgentRun.task_id == task.id).order_by(AgentRun.id.desc())).all()
-    followups = db.scalars(select(Task).where(Task.user_id == uid, Task.parent_task_id == task.id).order_by(Task.id)).all()
-    parent = get_owned(db, Task, task.parent_task_id, user) if task.parent_task_id else None
-    active = next((r for r in runs if r.status in orchestrator.ACTIVE_RUN_STATUSES), None)
-    has_sent = any(e.direction == EmailDirection.OUTBOUND for e in emails)
-    return TaskDetail(
-        task=task, customer=task.customer, parent=parent, followups=followups, emails=emails, logs=logs,
-        approvals=approvals_out, runs=[RunOut.model_validate(r) for r in runs[:10]],
-        active_run=RunOut.model_validate(active) if active else None, max_steps=get_settings().max_agent_steps,
-        can_simulate_reply=get_settings().demo_mode and has_sent and active is None and task.agent_enabled and task.status not in orchestrator.CLOSED_TASK_STATUSES,
-        mail=_mail_extras(db, task, emails) if task.origin == "mail" else None,
-    )
+    return TaskDetail(task=task, emails=emails, logs=logs, mail=_mail_extras(db, task, emails))
 
 
 def _merged_sources(db: Session, task: Task) -> list[dict]:
@@ -206,8 +142,6 @@ def task_fingerprint(db: Session, task: Task) -> tuple:
     """Cheap summary of everything the task view shows; when it is unchanged, nothing needs to be pushed."""
     db.refresh(task)
     last_log = db.scalar(select(func.max(AgentActionLog.id)).where(AgentActionLog.task_id == task.id))
-    runs = db.execute(select(AgentRun.id, AgentRun.status, AgentRun.steps, AgentRun.updated_at)
-                      .where(AgentRun.task_id == task.id).order_by(AgentRun.id.desc()).limit(1)).first()
     mail_count = db.scalar(select(func.count()).select_from(Email).where(Email.task_id == task.id))
     snoozed = task.snoozed_until.isoformat() if task.snoozed_until else ""
     undo = len(task.merge_undo) if isinstance(task.merge_undo, dict) else 0
@@ -219,7 +153,7 @@ def task_fingerprint(db: Session, task: Task) -> tuple:
     if row is not None:
         draft_fp = (row[0].isoformat() if row[0] else None,
                     hash(json.dumps([row[1], row[2]], sort_keys=True, ensure_ascii=False, default=str)))
-    return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log, tuple(runs) if runs else None,
+    return (task.updated_at.isoformat() if task.updated_at else "", task.status, last_log,
             snoozed, undo, mail_count or 0, draft_fp)
 
 
@@ -230,7 +164,7 @@ SSE_HEARTBEAT_SECONDS = 15.0
 def _task_snapshot(task_id: int, uid: int, previous: tuple | None) -> tuple[tuple | None, str | None]:
     """(fingerprint, payload) — payload is None when nothing changed, fingerprint is None when the task is gone."""
     with SessionLocal() as s:
-        task = s.scalar(select(Task).where(Task.id == task_id, Task.user_id == uid))
+        task = s.scalar(select(Task).where(Task.id == task_id, Task.user_id == uid, Task.origin == "mail"))
         if task is None:
             return None, None
         fp = task_fingerprint(s, task)
@@ -260,21 +194,9 @@ async def task_event_frames(task_id: int, uid: int, is_disconnected):
 @router.get("/tasks/{task_id}/events", include_in_schema=False)
 async def task_events(task_id: int, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Server-sent events: the full task view, pushed immediately and then whenever it changes."""
-    get_owned(db, Task, task_id, user)  # 404 before the stream starts
+    _owned_mail_task(db, task_id, user)  # 404 before the stream starts
     return StreamingResponse(task_event_frames(task_id, user.id, request.is_disconnected), media_type="text/event-stream",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
-
-
-@router.post("/tasks/{task_id}/agent/retry", response_model=RunOut)
-def retry_agent(task_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    agent_limiter.check(f"agent:{user.id}")
-    task = get_owned(db, Task, task_id, user)
-    if task.status in orchestrator.CLOSED_TASK_STATUSES:
-        raise HTTPException(status.HTTP_409_CONFLICT, "이미 완료되었거나 취소된 업무입니다.")
-    try:
-        return orchestrator.start_run(db, user, task, "manual_retry")
-    except orchestrator.AgentBusyError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
 
 
 @router.post("/tasks/{task_id}/calendar/retry", response_model=TaskDetail)
@@ -528,85 +450,3 @@ def promote_email(email_id: int, user: User = Depends(get_current_user), db: Ses
     db.commit()
     mail_sync.wake()
     return PromoteOut(task_id=task.id)
-
-
-@router.post("/tasks/{task_id}/goal", response_model=TaskBrief)
-def update_goal(task_id: int, body: GoalUpdateIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Rewrite the goal. An agent-driven task is re-planned right away; a follow-up task just gets the new text."""
-    task = get_owned(db, Task, task_id, user)
-    if task.status in orchestrator.CLOSED_TASK_STATUSES:
-        raise HTTPException(status.HTTP_409_CONFLICT, "이미 완료되었거나 취소된 업무의 목표는 수정할 수 없습니다.")
-    if orchestrator.active_run(db, task) is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Agent가 실행 중이거나 승인을 기다리고 있습니다. 실행이 끝난 뒤 수정하세요.")
-    new_goal = body.goal.strip()
-    if new_goal == task.goal:
-        return task
-    previous = task.goal
-    task.goal = new_goal
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="GOAL_UPDATED",
-               input_data={"from": previous, "to": new_goal}, reason="사용자가 업무 목표를 수정했습니다.")
-    db.commit()
-    if task.agent_enabled:
-        agent_limiter.check(f"agent:{user.id}")
-        try:
-            orchestrator.start_run(db, user, task, "goal_updated", {"previous_goal": previous})
-        except orchestrator.AgentBusyError as e:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(e))
-    db.refresh(task)
-    return task
-
-
-@router.post("/tasks/{task_id}/complete", response_model=TaskBrief)
-def complete_followup(task_id: int, body: CompleteTaskIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """The user closes a follow-up task the agent created for them (agent-driven tasks are closed by the agent)."""
-    task = get_owned(db, Task, task_id, user)
-    if task.origin != "agent" or task.agent_enabled:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Agent가 처리하는 업무는 Agent가 완료합니다. 후속 업무만 직접 완료할 수 있습니다.")
-    if task.status == TaskStatus.COMPLETED:
-        raise HTTPException(status.HTTP_409_CONFLICT, "이미 완료된 업무입니다.")
-    note = body.note.strip()
-    before = task.status
-    task.status = TaskStatus.COMPLETED
-    task.completed_at = datetime.now(timezone.utc)
-    task.current_step = "사용자가 완료 처리"
-    task.next_action = ""
-    if note:
-        task.result_summary = note
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type="USER_COMPLETED",
-               input_data={"from": before, "to": TaskStatus.COMPLETED}, output_data={"note": note},
-               reason=note or "사용자가 후속 업무를 완료 처리했습니다.")
-    if task.parent_task_id:
-        log_action(db, user_id=user.id, task_id=task.parent_task_id, run_id=None, action_type="FOLLOWUP_COMPLETED",
-                   input_data={"followup_task_id": task.id}, output_data={"note": note},
-                   reason=f"후속 업무 '{task.title}' 완료" + (f" — {note}" if note else ""))
-    db.commit()
-    db.refresh(task)
-    return task
-
-
-@router.post("/approvals/{approval_id}/decide", response_model=RunOut)
-def decide(approval_id: int, body: ApprovalDecision, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    approval = get_owned(db, ApprovalRequest, approval_id, user)
-    if approval.status != ApprovalStatus.PENDING:
-        raise HTTPException(status.HTTP_409_CONFLICT, "이미 처리된 승인 요청입니다.")
-    try:
-        return orchestrator.decide_approval(db, user, approval, body.approved, body.comment,
-                                            edit={"subject": body.subject, "body": body.body})
-    except orchestrator.AgentBusyError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
-
-
-@router.get("/customers", response_model=list[CustomerOut])
-def customers(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.scalars(select(Customer).where(Customer.user_id == user.id).order_by(Customer.id)).all()
-
-
-@router.get("/documents", response_model=list[DocumentOut])
-def documents(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.scalars(select(Document).where(Document.user_id == user.id).order_by(Document.id)).all()
-
-
-@router.get("/emails", response_model=list[EmailOut])
-def emails(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.scalars(select(Email).where(Email.user_id == user.id, Email.direction != EmailDirection.DRAFT)
-                      .order_by(Email.created_at.desc())).all()

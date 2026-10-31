@@ -142,7 +142,7 @@ def _requests(task: Task) -> list:
 
 
 def _log(db: Session, user: User, task: Task, action_type: str, data: dict, reason: str) -> None:
-    log_action(db, user_id=user.id, task_id=task.id, run_id=None, action_type=action_type,
+    log_action(db, user_id=user.id, task_id=task.id, action_type=action_type,
                output_data=data, reason=reason)
 
 
@@ -314,7 +314,7 @@ def finish_by_stage5_rules(db: Session, target: Task, source: Task) -> None:
         records[str(source.id)] = rec
         target.merge_undo = records
     mark_calendar_dirty(target)
-    log_action(db, user_id=target.user_id, task_id=target.id, run_id=None, action_type="MERGE_ANALYSIS_FALLBACK",
+    log_action(db, user_id=target.user_id, task_id=target.id, action_type="MERGE_ANALYSIS_FALLBACK",
                output_data={"source_id": source.id},
                reason=f"업무 #{source.id}의 내용을 자동 분석하지 못해 요청을 합치고 이른 기한을 골랐습니다")
 

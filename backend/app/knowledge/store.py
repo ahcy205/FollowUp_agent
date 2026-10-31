@@ -95,7 +95,6 @@ def add_document(db: Session, user: User, filename: str, data: bytes, visibility
         db,
         user_id=user.id,
         task_id=None,
-        run_id=None,
         action_type="KNOWLEDGE_ADDED",
         output_data={"source_id": source.id, "chunks": len(chunks), "flagged": flagged, "status": source.status},
         reason="자료를 올렸습니다",

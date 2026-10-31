@@ -279,7 +279,7 @@ def generate_draft(db: Session, task: Task, user: User, llm: LLMClient, *, purpo
         draft = existing
         # LLM을 기다리는 동안 보내기가 시작됐을 수 있다. 상태 조건을 걸어 한 번에 바꾼다.
         _guarded(db, draft, ReplyDraft.status.not_in(_LOCKED), values, LOCKED)
-    log_action(db, user_id=task.user_id, task_id=task.id, run_id=None, action_type="REPLY_DRAFT_CREATED",
+    log_action(db, user_id=task.user_id, task_id=task.id, action_type="REPLY_DRAFT_CREATED",
                output_data=_counts(draft), reason="답장 초안을 만들었습니다")
     db.flush()
     return draft
@@ -323,7 +323,7 @@ def update_draft(draft: ReplyDraft, *, subject: str, body: str, cc_selected: lis
     values = dict(subject=subject, body=body, cc_selected=[c for c in allowed if c in chosen], warnings=warnings,
                   sources=sources, updated_at=utcnow())  # Core UPDATE: 시각을 직접 넣는다
     _guarded(db, draft, ReplyDraft.status == "draft", values, NOT_EDITABLE)
-    log_action(db, user_id=draft.user_id, task_id=draft.task_id, run_id=None, action_type="REPLY_DRAFT_UPDATED",
+    log_action(db, user_id=draft.user_id, task_id=draft.task_id, action_type="REPLY_DRAFT_UPDATED",
                output_data=_counts(draft), reason="답장 초안을 고쳤습니다")
     db.flush()
 
@@ -337,7 +337,7 @@ def delete_draft(db: Session, draft: ReplyDraft) -> None:
     if result.rowcount != 1:
         raise ActionError(NOT_EDITABLE, 409)
     db.expunge(draft)
-    log_action(db, user_id=user_id, task_id=task_id, run_id=None, action_type="REPLY_DRAFT_DELETED",
+    log_action(db, user_id=user_id, task_id=task_id, action_type="REPLY_DRAFT_DELETED",
                output_data={}, reason="답장 초안을 지웠습니다")
     db.flush()
 
