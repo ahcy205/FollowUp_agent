@@ -17,6 +17,7 @@ from app.mail import task_actions
 from app.mail.errors import ActionError
 from app.mail.inbox import _utc
 from app.mail.merge import resolve_merged
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.models import Email, EmailDirection, ReplyDraft, Task, TaskStatus, User
 
 NO_REPLY_BUSINESS_DAYS = 3
@@ -26,7 +27,6 @@ NOT_ASKED_MESSAGE = "다시 연락할지 묻는 업무가 아닙니다."
 CHOICES = ("followup", "wait", "close")
 SENT_MATCH_WINDOW = timedelta(minutes=10)
 SENT_MATCH_LEAD = timedelta(minutes=2)  # Gmail 시각(internalDate)과 서버 시계 차이: 보내기 직전 시각도 맞춘다
-_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 
 
 def add_business_days(start: datetime, days: int, tz: str) -> datetime:
@@ -61,7 +61,7 @@ def mark_reply_sent(db: Session, task: Task, email: Email | None, now: datetime,
 
     reason · recipients를 주면 타임라인 문구와 수신자 수로 쓴다(앱 발송은 '받는 사람 1명, 참조 N명').
     """
-    if str(task.status) in _CLOSED or task.merged_into_id is not None:
+    if str(task.status) in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
         return
     now = _utc(now)
     task.status = TaskStatus.WAITING
@@ -127,7 +127,7 @@ def check_no_reply(db: Session, user_id: int, now: datetime, tz: str) -> int:
 
 def answer_no_reply(db: Session, user: User, task: Task, choice: str, now: datetime) -> None:
     """followup은 상태를 그대로 둔다(초안은 답장 초안 API가 만든다). wait은 시계를 다시 시작하고, close는 닫는다."""
-    if task.no_reply_asked_at is None or str(task.status) in _CLOSED or task.merged_into_id is not None:
+    if task.no_reply_asked_at is None or str(task.status) in CLOSED_TASK_STATUSES or task.merged_into_id is not None:
         raise ActionError(NOT_ASKED_MESSAGE, 409)
     if choice not in CHOICES:
         raise ActionError("다시 연락 · 더 기다리기 · 완료로 닫기 중 하나를 고르세요.", 400)

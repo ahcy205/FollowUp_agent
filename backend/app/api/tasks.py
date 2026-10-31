@@ -295,24 +295,22 @@ def retry_calendar(task_id: int, user: User = Depends(get_current_user), db: Ses
     return build_task_detail(db, task, user)
 
 
-@router.post("/tasks/{task_id}/cancel", response_model=TaskBrief)
-def cancel_task(task_id: int, body: CancelTaskIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Close the task for good. The agent is stopped, pending approvals are voided, history stays."""
-    task = get_owned(db, Task, task_id, user)
-    try:
-        orchestrator.cancel_task(db, user, task, body.reason)
-    except orchestrator.AgentBusyError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
-    db.refresh(task)
-    return task
-
-
 # ------------------------------------------------------------------ 받은 업무: 메일 업무 동작
 
 def _mail_task(db: Session, task_id: int, user: User) -> Task:
     task = get_owned(db, Task, task_id, user)
     if task.origin != "mail":
         raise HTTPException(status.HTTP_409_CONFLICT, "메일 업무에서만 쓸 수 있습니다.")
+    return task
+
+
+@router.post("/tasks/{task_id}/cancel", response_model=TaskBrief)
+def cancel_task(task_id: int, body: CancelTaskIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """업무를 취소한다. 기록은 남는다."""
+    task = _mail_task(db, task_id, user)
+    _act(task_actions.cancel_mail_task, db, user, task, body.reason)
+    db.commit()
+    db.refresh(task)
     return task
 
 

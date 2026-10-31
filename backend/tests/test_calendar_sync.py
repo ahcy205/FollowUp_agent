@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
-from app.agent import orchestrator
+from app.mail import task_actions
 from app.db import SessionLocal
 from app.google.client import GoogleError, GoogleTransientError
 from app.google.crypto import encrypt_token
@@ -250,7 +250,8 @@ def test_cancel_removes_event(setup, google_fake):
         _sync(db, aid, google_fake)
         task = db.get(Task, tid)
         eid = event_id_for(task, _salt(db, aid))
-        orchestrator.cancel_task(db, db.get(User, uid), task, "")
+        task_actions.cancel_mail_task(db, db.get(User, uid), task, "")
+        db.commit()  # API가 커밋한다
         assert db.get(Task, tid).calendar_state == "pending"
         r = _sync(db, aid, google_fake)
         assert r.removed == 1
@@ -268,18 +269,11 @@ def test_cancel_after_user_deleted_untouched(setup, google_fake):
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid, state="deleted_by_user", event_id="fuag0000000100000001")
-        orchestrator.cancel_task(db, db.get(User, uid), db.get(Task, tid), "")
+        task_actions.cancel_mail_task(db, db.get(User, uid), db.get(Task, tid), "")
+        db.commit()  # API가 커밋한다
         assert db.get(Task, tid).calendar_state == "deleted_by_user"
         _sync(db, aid, google_fake)
         assert google_fake.calendar_calls == []
-
-
-def test_cancel_user_task_not_marked(setup, google_fake):
-    uid, aid = setup
-    with SessionLocal() as db:
-        tid = _task(db, uid, origin="user")
-        orchestrator.cancel_task(db, db.get(User, uid), db.get(Task, tid), "")
-        assert db.get(Task, tid).calendar_state == "none"
 
 
 def test_transient_retries_then_error(setup, google_fake):
@@ -613,7 +607,8 @@ def test_cancelled_before_first_sync_no_event(setup, google_fake):
     uid, aid = setup
     with SessionLocal() as db:
         tid = _task(db, uid)
-        orchestrator.cancel_task(db, db.get(User, uid), db.get(Task, tid), "")
+        task_actions.cancel_mail_task(db, db.get(User, uid), db.get(Task, tid), "")
+        db.commit()  # API가 커밋한다
         assert db.get(Task, tid).calendar_state == "pending"
         _sync(db, aid, google_fake)
         assert google_fake.calendar_calls == [] and google_fake.events == {}

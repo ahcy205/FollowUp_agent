@@ -3,9 +3,9 @@
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from app.models import Task, TaskStatus
+from app.mail.status import CLOSED_TASK_STATUSES
+from app.models import Task
 
-_CLOSED = {TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value}
 _TITLE_MAX = 200
 _DESC_MAX = 4000
 _TIMED_DURATION = timedelta(minutes=30)
@@ -37,7 +37,7 @@ def _local_deadline(task: Task, tz: str) -> datetime:
 def _title(task: Task) -> str:
     brief = task.brief or {}
     summary = " ".join(str(brief.get("summary") or task.title or "").split())
-    prefix = ("✓ " if str(task.status) in _CLOSED else "") + (
+    prefix = ("✓ " if str(task.status) in CLOSED_TASK_STATUSES else "") + (
         "(확인 필요) " if task.deadline_kind == "estimated" else ""
     )
     return (prefix + "[업무] " + summary)[:_TITLE_MAX]

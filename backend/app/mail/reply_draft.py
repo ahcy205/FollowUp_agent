@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, object_session
 from app.agent.audit import log_action
 from app.agent.guard import EMAIL_RE, detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
-from app.agent.orchestrator import CLOSED_TASK_STATUSES
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.config import get_settings
 from app.knowledge import draft_sources
 from app.mail.draft_checks import PLACEHOLDER_RE, draft_warnings, placeholders  # noqa: F401 - 다시 내보낸다

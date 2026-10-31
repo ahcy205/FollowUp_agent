@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agent.audit import log_action
-from app.agent.orchestrator import CLOSED_TASK_STATUSES
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.agent.guard import detect_injection, wrap_untrusted
 from app.agent.llm import LLMClient, LLMError
 from app.config import get_settings

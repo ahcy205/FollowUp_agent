@@ -17,13 +17,13 @@ from app.config import get_settings
 from app.mail.calendar_sync import mark_calendar_dirty
 from app.mail.errors import ActionError
 from app.mail.inbox import finalize_snooze
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.models import Email, ReplyDraft, Task, TaskStatus, User
 
 MAX_HOPS = 5
 UNDO_WINDOW = timedelta(minutes=10)
 MERGE_TARGET_STATUSES = (TaskStatus.ACTION_REQUIRED.value, TaskStatus.IN_PROGRESS.value,
                          TaskStatus.BLOCKED.value, TaskStatus.WAITING.value)
-_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 _RANK = {"HIGH": 3, "NORMAL": 2, "LOW": 1}
 _DEADLINE_KEYS = ("deadline_at", "deadline_all_day", "deadline_kind", "deadline_source")
 _PRIORITY_KEYS = ("priority", "priority_source")
@@ -174,7 +174,7 @@ def _mergeable(user: User, source: Task, target: Task) -> bool:
             and source.user_id == user.id and target.user_id == user.id
             and source.origin == "mail" and target.origin == "mail"
             and source.merged_into_id is None and target.merged_into_id is None
-            and str(source.status) not in _CLOSED
+            and str(source.status) not in CLOSED_TASK_STATUSES
             and (source.brief or {}).get("analysis") != "pending"  # 분석 중이면 워커가 결과를 덮어쓸 수 있다
             and str(target.status) in MERGE_TARGET_STATUSES)
 

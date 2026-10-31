@@ -28,6 +28,7 @@ from app.mail.errors import ActionError
 from app.mail.intake import ITEM_CHARS, MAX_ITEMS, SUMMARY_CHARS, TITLE_CHARS, _is_suspicious
 from app.mail.lifecycle import clear_wait_on_inbound
 from app.mail.task_actions import REOPENED_STEP, _iso, _require_open
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.models import Email, RiskLevel, Task, TaskStatus
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,6 @@ CHANGED_STEP = "상대 답장으로 내용이 바뀌었습니다"
 REPLIED_STEP = "상대가 다시 답장했습니다"
 FAILED_STEP = "새 메일 자동 분석에 실패했습니다 — 메일을 직접 확인해 주세요"
 CONFLICT_MESSAGE = "그 뒤에 직접 고친 내용이 있어 되돌릴 수 없습니다."
-_CLOSED = (TaskStatus.COMPLETED.value, TaskStatus.CANCELLED.value)
 _LABELS = {"title": "제목: ", "summary": "요약: ", "requests": "요청: ", "deadline": "기한 ", "todo_update": "할 일: "}
 
 
@@ -85,7 +85,7 @@ def _drop_pending(brief: dict, ids: list[int]) -> None:
 
 def _raise_to_todo(task: Task, step: str) -> None:
     """처리할 일로 올린다. 닫힌 업무는 다시 연다."""
-    if str(task.status) in _CLOSED:
+    if str(task.status) in CLOSED_TASK_STATUSES:
         task.completed_at = None
         step = step if step == FAILED_STEP else REOPENED_STEP
         mark_calendar_dirty(task)

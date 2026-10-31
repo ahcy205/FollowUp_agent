@@ -314,13 +314,29 @@ def test_close_without_reply():
 
 
 def test_cancel_clears_snooze():
-    from app.agent import orchestrator
     with SessionLocal() as db:
         u = _user(db)
         t = _task(db, u.id, snoozed_until=NOW + timedelta(days=2))
-        orchestrator.cancel_task(db, u, t, "")
+        task_actions.cancel_mail_task(db, u, t, "")
+        db.commit()  # API가 커밋한다
         db.refresh(t)
         assert t.status == TaskStatus.CANCELLED and t.snoozed_until is None
+
+
+def test_api_cancel_mail_task(client):
+    """업무 취소: 사유를 기록에 남기고(위험 MEDIUM), 완료 시각은 쓰지 않으며, 다시 취소할 수 없다."""
+    me = register(client)
+    tid = _api_task(me["id"])
+    r = client.post(f"/api/tasks/{tid}/cancel", json={"reason": "  고객이 구매를 보류함  "})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "CANCELLED" and body["completed_at"] is None
+    assert body["next_action"] == "사용자가 취소한 업무입니다. 사유: 고객이 구매를 보류함"
+    with SessionLocal() as db:
+        (log,) = _logs(db, tid, "TASK_CANCELLED")
+        assert log.risk_level == "MEDIUM" and log.status == "CANCELLED"
+        assert log.reason == "사용자가 업무를 취소했습니다 — 고객이 구매를 보류함"
+    assert client.post(f"/api/tasks/{tid}/cancel", json={}).status_code == 409
 
 
 def test_reanalyze():
@@ -485,7 +501,7 @@ def test_api_ownership_and_limits(client, monkeypatch):
 
     paths = [("snooze", {"preset": "tomorrow"}), ("unsnooze", None), ("priority", {"priority": "LOW"}),
              ("deadline", {"clear": True}), ("todos", {"op": "add", "title": "x"}), ("close", {}),
-             ("reanalyze", None)]
+             ("reanalyze", None), ("cancel", {})]
     with make_client() as other:
         register(other, "other@example.com")
         for p, body in paths:

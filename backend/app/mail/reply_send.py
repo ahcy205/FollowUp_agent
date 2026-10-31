@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
 from app.agent.audit import log_action
-from app.agent.orchestrator import CLOSED_TASK_STATUSES
+from app.mail.status import CLOSED_TASK_STATUSES
 from app.google.client import GoogleAuthError, GoogleClient, GoogleError, GoogleTransientError
 from app.google.oauth import access_token_for, forget_access_token
 from app.config import get_settings
