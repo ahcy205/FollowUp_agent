@@ -13,6 +13,16 @@ const PATHS: Record<string, string> = {
   mail: 'M4.5 6h15a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM4 7l8 6 8-6',
   chevron: 'M9.5 6l6 6-6 6',
   check: 'M5.5 12.5l4 4 9-9',
+  home: 'M4 11.5 12 5l8 6.5M6 10v9h4.5v-5h3v5H18v-9',
+  reply: 'M10 8 5 12.5l5 4.5M5.5 12.5H15a4.5 4.5 0 0 1 4.5 4.5v1',
+  search: 'M10.5 4.5a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM15 15l5 5',
+  close: 'M6 6l12 12M18 6 6 18',
+  lock: 'M7 11V8.5a5 5 0 0 1 10 0V11M6 11h12v9H6z',
+  spark: 'M12 4v4M12 16v4M4 12h4M16 12h4M7 7l2 2M15 15l2 2M17 7l-2 2M9 15l-2 2',
+  alert: 'M12 4 3 19h18zM12 10v4M12 16.5v.5',
+  up: 'M6 15l6-6 6 6',
+  down: 'M6 9l6 6 6-6',
+  file: 'M7 3.5h6.5L18 8v12.5H7zM13 3.5V8h5',
 }
 
 export type IconName = keyof typeof PATHS

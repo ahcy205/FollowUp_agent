@@ -60,7 +60,7 @@ export function startAlerts(navigate: (path: string) => void): () => void {
         const n = new Notification(alert.text, { tag: alert.key })
         n.onclick = () => {
           window.focus()
-          navigate(`/tasks/${alert.task_id}`)
+          navigate(`/inbox/${alert.task_id}`)
           n.close()
         }
       } catch {

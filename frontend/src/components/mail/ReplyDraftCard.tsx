@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { parseDate } from '../../format'
+import Icon from '../Icon'
 import type { DraftSourceChunk, Email, MailAct, ReplyDraft, TaskDetail } from '../../types'
 
 const UNKNOWN_CONFIRM_MS = 5 * 60_000 // backend reply_send.UNKNOWN_CONFIRM_AFTER
@@ -214,7 +215,10 @@ export default function ReplyDraftCard({
       <dl className="draft-fields">
         <div>
           <dt>받는 사람</dt>
-          <dd>{draft.to_addr}</dd>
+          <dd className="locked" title="받는 사람은 받은 메일을 기준으로 서버가 정해요. 여기서 바꿀 수 없어요.">
+            <Icon name="lock" size={13} />
+            <span className="break">{draft.to_addr}</span>
+          </dd>
         </div>
         {draft.cc_candidates.length > 0 && (
           <div>
@@ -339,6 +343,53 @@ export default function ReplyDraftCard({
           )}
           {dirty && <div className="muted small">경고는 저장한 내용 기준입니다. 저장하면 다시 확인합니다.</div>}
         </div>
+      )}
+
+      {editable && (
+        <SendChecklist
+          items={[
+            {
+              key: 'blanks',
+              label: '빈칸 채우기',
+              state: blanks.length > 0 ? 'block' : 'ok',
+              detail: blanks.length > 0 ? `[[ ]] 빈칸 ${blanks.length}개가 남아 있어요. 본문에서 채워 주세요.` : '남은 빈칸이 없어요',
+            },
+            {
+              key: 'unsupported',
+              label: '근거 없는 값',
+              state: dirty ? 'confirm' : needsUnsupportedAck ? (uacked ? 'ok' : 'confirm') : 'ok',
+              detail: dirty
+                ? '고친 내용을 저장하면 다시 확인해요'
+                : needsUnsupportedAck
+                ? `메모 · 자료에 없는 값 ${w.unsupported.length}개 — 보낼 때 "확인했어요"를 체크해야 해요`
+                : '숫자 · 날짜가 모두 근거와 맞아요',
+            },
+            {
+              key: 'internal',
+              label: '내부용 자료 값',
+              state: dirty ? 'confirm' : needsAck ? (acked ? 'ok' : 'confirm') : 'ok',
+              detail: dirty ? '고친 내용을 저장하면 다시 확인해요' : needsAck ? '원가 같은 내부용 값이 들어 있어요 — 보낼 때 "알고 보냅니다"를 체크해야 해요' : '내부용 값이 없어요',
+            },
+            {
+              key: 'sources',
+              label: '참고한 자료',
+              state: sourcesChanged ? 'block' : 'ok',
+              detail: sourcesChanged ? '자료가 지워졌거나 내부용으로 바뀌었어요. 초안을 다시 만들어 주세요.' : chunks.length > 0 ? `참고한 자료 ${chunks.length}개 그대로예요` : '참고한 자료가 없어요',
+            },
+            {
+              key: 'recipient',
+              label: '받는 사람',
+              state: sentLater ? 'block' : 'ok',
+              detail: sentLater ? '이미 이 업무에 답장을 보냈어요. 초안을 지우거나 다시 만들어 주세요.' : '서버가 정한 주소예요. 보내기 직전에 다시 확인해요.',
+            },
+            {
+              key: 'saved',
+              label: '고친 내용',
+              state: dirty ? 'confirm' : 'ok',
+              detail: dirty ? '저장하지 않은 고침이 있어요. 보내기를 누르면 저장한 뒤 다시 확인해요.' : '확인한 뒤 바뀌면 다시 확인을 받아요',
+            },
+          ]}
+        />
       )}
 
       {draft.status === 'sending' && <div className="alert alert-slate">보내는 중입니다…</div>}
@@ -473,5 +524,32 @@ export default function ReplyDraftCard({
 
       {error && <div className="alert alert-red">{error}</div>}
     </section>
+  )
+}
+
+type CheckState = 'ok' | 'confirm' | 'block'
+
+/** 발송 체크리스트: 서버가 막는 조건을 미리 보여 준다. 'block'은 고쳐야 하고, 'confirm'은 보낼 때 체크하면 된다. */
+function SendChecklist({ items }: { items: { key: string; label: string; state: CheckState; detail: string }[] }) {
+  const blocked = items.filter((i) => i.state === 'block').length
+  const toConfirm = items.filter((i) => i.state === 'confirm').length
+  const summary = blocked > 0 ? `보내기 전에 고칠 것 ${blocked}개` : toConfirm > 0 ? `보낼 때 확인할 것 ${toConfirm}개` : '보낼 준비가 됐어요'
+  return (
+    <div className={`checklist ${blocked > 0 ? 'is-block' : toConfirm > 0 ? 'is-confirm' : 'is-ok'}`} aria-label="발송 전 확인">
+      <div className="checklist-head">
+        <b>발송 전 확인</b>
+        <span>{summary}</span>
+      </div>
+      <ul>
+        {items.map((i) => (
+          <li key={i.key} className={`check-${i.state}`}>
+            <span className="check-mark" aria-hidden="true" />
+            <span className="check-label">{i.label}</span>
+            <span className="check-detail">{i.detail}</span>
+            <span className="sr-only">{i.state === 'ok' ? '통과' : i.state === 'confirm' ? '확인 필요' : '막힘'}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }

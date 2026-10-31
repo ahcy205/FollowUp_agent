@@ -38,6 +38,55 @@ function TriageTag({ mail }: { mail: GoogleRecentMail }) {
   )
 }
 
+const SCOPES: { key: string; label: string }[] = [
+  { key: 'gmail.readonly', label: '메일 읽기' },
+  { key: 'gmail.send', label: '답장 보내기' },
+  { key: 'calendar.events', label: '캘린더 일정' },
+]
+
+/** 기능 스위치(읽기 전용): 바꾸려면 backend/.env를 고치고 서버를 다시 켠다. 실제 메일을 LLM에 보내므로 켜는 것은 사용자가 정한다. */
+function Switches({ triage, knowledge }: { triage: boolean | undefined; knowledge: boolean | undefined }) {
+  const rows = [
+    {
+      name: 'MAIL_TRIAGE_ENABLED',
+      title: '업무 메일 판별 · 분석 · 답장 초안',
+      on: triage,
+      onText: '가져온 메일의 보낸 사람 · 제목 · 본문 일부를 LLM에 보내 업무를 정리해요.',
+      offText: '메일을 가져와 저장만 해요. 판별 · 요약 · 초안은 하지 않아요.',
+    },
+    {
+      name: 'KNOWLEDGE_ENABLED',
+      title: '자료로 답장 채우기',
+      on: knowledge,
+      onText: '"답장에 써도 됨" 자료에서 찾은 부분(최대 5덩어리)을 초안에 넣어요.',
+      offText: '자료실은 보기 · 지우기만 돼요. 초안에 자료를 쓰지 않아요.',
+    },
+  ]
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h2>기능 스위치</h2>
+        <span className="muted small">읽기 전용</span>
+      </div>
+      <ul className="switch-list">
+        {rows.map((r) => (
+          <li key={r.name}>
+            <span className={`state ${r.on ? 'ok' : 'off'}`}>{r.on === undefined ? '확인 중' : r.on ? '켜짐' : '꺼짐'}</span>
+            <div>
+              <b>{r.title}</b>
+              <p className="muted small">{r.on ? r.onText : r.offText}</p>
+              <code>{r.name}</code>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="muted small">
+        바꾸려면 <code>backend/.env</code>에 <code>이름=true</code> 또는 <code>false</code>를 적고 서버를 다시 켜 주세요. 실제 메일을 LLM에 보내는 기능이라 기본은 꺼져 있어요.
+      </p>
+    </div>
+  )
+}
+
 type Permission = NotificationPermission | 'unsupported'
 
 const PERMISSION_LABELS: Record<Permission, string> = {
@@ -68,7 +117,9 @@ function BrowserAlerts() {
 
   return (
     <div className="card">
-      <h2>브라우저 알림</h2>
+      <div className="card-head">
+        <h2>브라우저 알림</h2>
+      </div>
       <p className="muted">앱이 열려 있을 때 기한이 다가온 업무, 다시 표시된 업무, 답장하지 않은 업무를 알려 드립니다.</p>
       {permission === 'unsupported' ? (
         <div className="muted">이 브라우저는 알림을 지원하지 않습니다.</div>
@@ -209,7 +260,14 @@ export default function Settings() {
       {g === 'error' && <div className="alert alert-red">{REASONS[reason] ?? REASONS.exchange}</div>}
       {actionError && <div className="alert alert-red">{actionError}</div>}
       <div className="card">
-        <h2>Google 계정</h2>
+        <div className="card-head">
+          <h2>Google 계정</h2>
+          {status?.enabled && (
+            <span className={`state ${status.status === 'connected' ? 'ok' : status.status === 'reauth_required' ? 'bad' : 'off'}`}>
+              {status.status === 'connected' ? '연결됨' : status.status === 'reauth_required' ? '만료 · 다시 연결 필요' : '연결 안 됨'}
+            </span>
+          )}
+        </div>
         {!status ? (
           loadError ? (
             <div className="stack-lg">
@@ -249,7 +307,17 @@ export default function Settings() {
               <dt>연결된 주소</dt>
               <dd>{status.google_email}</dd>
               <dt>받은 권한</dt>
-              <dd>{status.scopes.join(', ')}</dd>
+              <dd className="scope-pills">
+                {SCOPES.map((sc) => {
+                  const has = status.scopes.some((x) => x === sc.key || x.endsWith(`/${sc.key}`))
+                  return (
+                    <span key={sc.key} className={`pill ${has ? 'pill-green' : 'pill-red'}`}>
+                      {has ? '' : '없음 · '}
+                      {sc.label}
+                    </span>
+                  )
+                })}
+              </dd>
               <dt>마지막 확인</dt>
               <dd>{status.last_synced_at ? dateTime(status.last_synced_at) : '아직 없음'}</dd>
               <dt>가져온 메일</dt>
@@ -259,12 +327,6 @@ export default function Settings() {
               <div className="muted small triage-summary">
                 업무 {status.triage_counts.work} · 업무 아님 {status.triage_counts.not_work} · 자동 필터{' '}
                 {status.triage_counts.filtered} · 판별 대기 {status.triage_counts.pending}
-              </div>
-            )}
-            {!status.triage_enabled && (
-              <div className="alert alert-amber settings-gap">
-                업무 메일 자동 판별이 꺼져 있습니다. <code>backend/.env</code>에서 <code>MAIL_TRIAGE_ENABLED=true</code>로 켜면
-                메일 내용이 LLM으로 전송되어 분석됩니다.
               </div>
             )}
             {status.last_sync_error && (
@@ -293,6 +355,7 @@ export default function Settings() {
           </>
         )}
       </div>
+      <Switches triage={status?.triage_enabled} knowledge={user?.knowledge_enabled} />
       <BrowserAlerts />
     </div>
   )
