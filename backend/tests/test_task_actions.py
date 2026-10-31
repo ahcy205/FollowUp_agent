@@ -379,7 +379,7 @@ def test_promote_new_and_existing(monkeypatch):
         assert len(_logs(db, closed.id, "MAIL_ATTACHED")) == 1
 
         # 3) 열린 업무 + 스누즈 → 붙이고 스누즈 해제
-        open_t = _task(db, u.id, snoozed_until=NOW + timedelta(days=5))
+        open_t = _task(db, u.id, snoozed_until=datetime.now(UTC) + timedelta(days=5))
         m3 = _mail(u.id, thread=open_t.gmail_thread_id, triage="not_work")
         db.add(m3)
         db.commit()
