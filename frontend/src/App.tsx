@@ -71,7 +71,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             <span className="user-chip" title={user?.email}>
               {user?.email}
             </span>
-            <button className="btn btn-link btn-sm topbar-logout" onClick={logout} title="로그아웃">
+            <button className="btn btn-link btn-sm topbar-logout" onClick={logout} title="로그아웃" aria-label="로그아웃">
               <Icon name="logout" size={16} />
               <span>로그아웃</span>
             </button>

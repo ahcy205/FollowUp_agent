@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
+import { useAuth } from '../App'
 import { dateTime } from '../format'
 import type { GoogleRecentMail, GoogleStatus } from '../types'
 
@@ -98,6 +99,7 @@ const connect = () => {
 }
 
 export default function Settings() {
+  const { user } = useAuth()
   const [params] = useSearchParams()
   const [status, setStatus] = useState<GoogleStatus | null>(null)
   const [loadError, setLoadError] = useState('')
@@ -189,7 +191,14 @@ export default function Settings() {
       <header className="page-head">
         <div>
           <h1>설정</h1>
-          <p className="page-sub">Google 계정을 연결하면 받은편지함의 메일을 90초마다 확인해 업무 메일을 정리합니다.</p>
+          <p className="page-sub">
+            {user?.email && (
+              <>
+                <b>{user.email}</b>로 로그인했어요.{' '}
+              </>
+            )}
+            Google 계정을 연결하면 받은편지함의 업무 메일을 자동으로 정리합니다.
+          </p>
         </div>
       </header>
       {g === 'connected' && (

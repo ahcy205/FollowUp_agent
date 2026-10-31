@@ -246,10 +246,19 @@ export default function Knowledge() {
           <p className="page-sub">단가표 · 안내문을 올려 두면 답장 초안을 만들 때 찾아서 씁니다. 원본 파일은 저장하지 않고 뽑아낸 글만 남겨요.</p>
         </div>
       </header>
-      <div className="alert alert-slate small">
-        '답장에 써도 됨' 자료 중 검색된 부분은 초안을 만들 때 초안용 LLM으로 보냅니다. 초안용 LLM이 Gemini 무료 등급이면 보낸 자료가
-        Google의 제품 개선에 쓰일 수 있습니다(메일 분석과 같은 조건). 내부용 자료는 어디로도 보내지 않습니다.
-      </div>
+      <dl className="share-table" aria-label="공유 등급별로 자료가 가는 곳">
+        <div>
+          <dt>답장에 써도 됨</dt>
+          <dd>
+            초안을 만들 때 검색된 부분만 초안용 LLM으로 보냅니다. Gemini 무료 등급이면 보낸 내용이 Google의 제품 개선에 쓰일 수 있어요(메일 분석과 같은
+            조건).
+          </dd>
+        </div>
+        <div>
+          <dt>내부용</dt>
+          <dd>어디로도 보내지 않습니다. 초안에 내부용 값이 들어가면 보내기 전에 경고합니다.</dd>
+        </div>
+      </dl>
 
       {!list ? (
         loadError ? (

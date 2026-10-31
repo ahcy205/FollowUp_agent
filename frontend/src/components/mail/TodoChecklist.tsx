@@ -123,6 +123,7 @@ export default function TodoChecklist({ task, act }: { task: Task; act: MailAct 
                     type="button"
                     className="btn btn-link btn-sm"
                     disabled={!!busy}
+                    aria-label={`${p.title} 메모`}
                     aria-expanded={memoOpen === p.id}
                     onClick={() => {
                       if (memoOpen === p.id) {
@@ -135,7 +136,7 @@ export default function TodoChecklist({ task, act }: { task: Task; act: MailAct 
                   >
                     메모
                   </button>
-                  <button type="button" className="btn btn-link btn-sm" disabled={!!busy} onClick={() => remove(p)}>
+                  <button type="button" className="btn btn-link btn-sm" disabled={!!busy} aria-label={`${p.title} 삭제`} onClick={() => remove(p)}>
                     {busy === `del-${p.id}` ? '삭제 중…' : '삭제'}
                   </button>
                 </div>
@@ -143,7 +144,7 @@ export default function TodoChecklist({ task, act }: { task: Task; act: MailAct 
             </div>
             {memoOpen === p.id && !closed && (
               <div className="todo-memo-edit">
-                <textarea rows={2} maxLength={1000} value={memo} placeholder="처리 메모 (예: 단가 12,000원 적용)" onChange={(e) => setMemo(e.target.value)} />
+                <textarea rows={2} maxLength={1000} value={memo} aria-label={`${p.title} 처리 메모`} placeholder="처리 메모 (예: 단가 12,000원 적용)" onChange={(e) => setMemo(e.target.value)} />
                 <div className="inline-actions">
                   <button type="button" className="btn btn-primary btn-sm" disabled={!!busy} onClick={() => saveMemo(p.id)}>
                     {busy === `memo-${p.id}` ? '저장 중…' : '메모 저장'}
@@ -159,7 +160,7 @@ export default function TodoChecklist({ task, act }: { task: Task; act: MailAct 
       </ul>
 
       {undo && (
-        <div className="todo-undo small">
+        <div className="todo-undo small" role="status">
           <span>삭제했습니다</span>
           <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={restore}>
             {busy === 'restore' ? '되돌리는 중…' : '되돌리기'}
@@ -177,7 +178,7 @@ export default function TodoChecklist({ task, act }: { task: Task; act: MailAct 
 
       {!closed && (
         <form className="todo-add" onSubmit={add}>
-          <input value={title} maxLength={300} placeholder="할 일 추가" onChange={(e) => setTitle(e.target.value)} />
+          <input value={title} maxLength={300} placeholder="할 일 추가" aria-label="새 할 일" onChange={(e) => setTitle(e.target.value)} />
           <button type="submit" className="btn btn-ghost btn-sm" disabled={!!busy || !title.trim()}>
             {busy === 'add' ? '추가 중…' : '추가'}
           </button>

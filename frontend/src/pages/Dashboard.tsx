@@ -158,7 +158,7 @@ function TaskRow({ task }: { task: Task }) {
         <div className="task-main">
           <div className="task-title">
             {task.origin === 'agent' && <span className="tag">후속</span>}
-            {task.priority === 'HIGH' && <span className="tag tag-red">긴급</span>}
+            {task.priority === 'HIGH' && <span className="flag">중요도 상</span>}
             {task.title}
           </div>
           <div className="task-sub muted">

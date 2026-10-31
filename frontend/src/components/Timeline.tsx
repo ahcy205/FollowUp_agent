@@ -135,7 +135,7 @@ export default function Timeline({ logs, live }: { logs: ActionLog[]; live?: str
               <div className="tl-meta">
                 {log.tool_name && PERMISSIONS[log.tool_name] && <span className="perm">{PERMISSIONS[log.tool_name]}</span>}
                 {log.risk_level === 'HIGH' && <span className="perm perm-red">위험도 HIGH</span>}
-                {hasData && log.action_type !== 'AGENT_THOUGHT' && (
+                {hasData && log.action_type !== 'AGENT_THOUGHT' && !(log.action_type in MAIL_LABELS) && (
                   <details>
                     <summary>입력 / 결과 보기</summary>
                     <pre>{JSON.stringify({ input: log.input_data, output: log.output_data }, null, 2)}</pre>

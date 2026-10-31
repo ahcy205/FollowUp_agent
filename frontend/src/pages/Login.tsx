@@ -87,12 +87,17 @@ export default function Login() {
       </section>
 
       <form className="login-card" onSubmit={submit}>
-        <h2>{mode === 'login' ? '로그인' : '계정 만들기'}</h2>
-        <div className="tabs-line tabs-compact" role="tablist">
-          <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
+        <div className="login-card-brand" aria-hidden="true">
+          <BrandMark size={28} />
+          <span className="brand-name">
+            FollowUp <span>Agent</span>
+          </span>
+        </div>
+        <div className="tabs-line tabs-compact" role="group" aria-label="로그인 또는 회원가입">
+          <button type="button" aria-pressed={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
             로그인
           </button>
-          <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>
+          <button type="button" aria-pressed={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>
             회원가입
           </button>
         </div>

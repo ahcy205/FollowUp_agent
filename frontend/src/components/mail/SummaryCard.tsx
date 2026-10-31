@@ -121,7 +121,7 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
           <dt>중요도</dt>
           <dd className="priority-row">
             <div className="priority-buttons" role="group" aria-label="중요도">
-              {PRIORITIES.map((p) => (
+              {PRIORITIES.filter((p) => !closed || task.priority === p.value).map((p) => (
                 <button
                   key={p.value}
                   type="button"

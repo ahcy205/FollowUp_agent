@@ -15,7 +15,7 @@ import MailBanners from '../components/mail/MailBanners'
 import ReplyDraftCard from '../components/mail/ReplyDraftCard'
 import SummaryCard from '../components/mail/SummaryCard'
 import TodoChecklist from '../components/mail/TodoChecklist'
-import { dateTime, STATUS_META, tokens, TOOL_LABELS } from '../format'
+import { dateTime, shortDate, STATUS_META, tokens, TOOL_LABELS } from '../format'
 import type { Run, TaskDetail, TokenUsage } from '../types'
 
 export default function TaskDetailPage() {
@@ -167,6 +167,10 @@ export default function TaskDetailPage() {
   const lastLog = data.logs[data.logs.length - 1]
   const isMail = task.origin === 'mail'
   const draft = data.mail?.draft ?? null
+  const order = readOrder()
+  const at = order.indexOf(task.id)
+  const prevId = at > 0 ? order[at - 1] : null
+  const nextId = at >= 0 && at < order.length - 1 ? order[at + 1] : null
 
   const calendarLine = task.calendar_state !== 'none' && (
     <div className="calendar-line small">
@@ -233,6 +237,15 @@ export default function TaskDetailPage() {
             <Icon name="back" size={16} /> 전체 업무
           </Link>
         )}
+        {isMail && at >= 0 && (
+          <span className="pager">
+            {prevId != null ? <Link to={`/tasks/${prevId}`}>이전 업무</Link> : <span className="muted">이전 업무</span>}
+            <span className="muted num">
+              {at + 1} / {order.length}
+            </span>
+            {nextId != null ? <Link to={`/tasks/${nextId}`}>다음 업무</Link> : <span className="muted">다음 업무</span>}
+          </span>
+        )}
         {data.parent && (
           <>
             <span>/</span>
@@ -252,13 +265,13 @@ export default function TaskDetailPage() {
               <div>
                 <h1>{task.title}</h1>
                 <div className="muted small">
-                  {isMail ? '업무 등록' : '생성'} {dateTime(task.created_at)}
+                  {isMail ? '업무 등록' : '생성'} {shortDate(task.created_at)}
                   {data.customer && ` · 고객 ${data.customer.company_name} ${data.customer.contact_name}`}
                   {task.origin === 'agent' && ' · Agent가 생성한 후속 업무'}
                 </div>
               </div>
               <div className="detail-title-right">
-                <StatusBadge status={task.status} large />
+                {task.status !== 'COMPLETED' && <StatusBadge status={task.status} large />}
                 {!closed && !isMail && <CancelTaskPanel taskId={task.id} onCancelled={load} />}
               </div>
             </div>
@@ -337,7 +350,7 @@ export default function TaskDetailPage() {
                 task={task}
                 act={act}
                 onCancelled={load}
-                emphasizeReply={task.plan.length > 0 && doneCount === task.plan.length}
+                emphasizeReply={task.status !== 'WAITING' && task.plan.length > 0 && doneCount === task.plan.length}
                 draft={draft}
                 compose={compose}
                 onCompose={onCompose}
@@ -493,7 +506,7 @@ export default function TaskDetailPage() {
               <span className="muted small num">{data.logs.length}건</span>
             </div>
             {data.logs.length === 0 && !live ? (
-              <p className="muted small">{isMail ? '이 업무에서 한 일이 여기에 시간 순으로 남습니다.' : '아직 Agent 기록이 없습니다.'}</p>
+              <p className="muted small">{isMail ? '이 업무에서 한 일이 여기에 시간 순으로 남아요.' : '아직 Agent 기록이 없습니다.'}</p>
             ) : (
               <Timeline logs={data.logs} live={live} />
             )}
@@ -502,4 +515,13 @@ export default function TaskDetailPage() {
       </div>
     </div>
   )
+}
+
+function readOrder(): number[] {
+  try {
+    const v: unknown = JSON.parse(window.sessionStorage.getItem('followup.order') ?? '[]')
+    return Array.isArray(v) ? v.filter((x): x is number => typeof x === 'number') : []
+  } catch {
+    return []
+  }
 }

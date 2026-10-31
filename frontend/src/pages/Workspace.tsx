@@ -75,7 +75,7 @@ export default function Workspace() {
           {documents.map((d) => (
             <section key={d.id} className="card doc">
               <div className="section-head">
-                <h3>{d.title}</h3>
+                <h2>{d.title}</h2>
                 <span className="tag">{d.document_type}</span>
               </div>
               <div className="muted small">{company(d.customer_id)}</div>

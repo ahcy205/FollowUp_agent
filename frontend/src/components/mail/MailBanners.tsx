@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../api'
-import { dateTime } from '../../format'
+import { dateTime, shortDate } from '../../format'
 import type { MailAct, TaskDetail } from '../../types'
 import type { ComposePurpose } from './MailActions'
 
@@ -74,7 +74,9 @@ export default function MailBanners({
   const todosKept = mail.reply_sent_at != null && (keptFor === mail.reply_sent_at || keptTodos(task.id, mail.reply_sent_at))
   const remaining = task.plan.filter((p) => !p.done).length
   const todosPrompt = mail.remaining_todos_prompt && remaining > 0 && !todosKept && !closed
+  const waitingNote = task.status === 'WAITING' && mail.reply_sent_at != null && !noReply && !thanks
   const hasAny =
+    waitingNote ||
     failed ||
     candidates.length > 0 ||
     mail.undoable_merges.length > 0 ||
@@ -106,6 +108,13 @@ export default function MailBanners({
           <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => run('reanalyze', () => act('/reanalyze'))}>
             {busy === 'reanalyze' ? '요청 중…' : '다시 분석'}
           </button>
+        </div>
+      )}
+
+      {waitingNote && (
+        <div className="alert alert-slate wait-note">
+          <b>{shortDate(mail.reply_sent_at!, false)}</b>에 {name ? `${name} 님께 ` : ''}답장을 보냈어요. 상대 답을 기다리는 중이고, 영업일 3일 동안
+          답이 없으면 다시 알려 드릴게요.
         </div>
       )}
 

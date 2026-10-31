@@ -10,7 +10,7 @@ type Tab = 'todo' | 'sent' | 'reference' | 'done'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'todo', label: '처리할 일' },
-  { key: 'sent', label: '답장 보냄' },
+  { key: 'sent', label: '답 기다림' },
   { key: 'reference', label: '참고용' },
   { key: 'done', label: '완료' },
 ]
@@ -40,6 +40,7 @@ export default function Inbox() {
       .then((d) => {
         setData(d)
         setError('')
+        rememberOrder(d)
       })
       .catch((e: Error) => setError(e.message))
     api
@@ -185,9 +186,9 @@ export default function Inbox() {
           ))}
         </div>
 
-        <div className="tabs-line" role="tablist" aria-label="업무 구분">
+        <div className="tabs-line" role="group" aria-label="업무 구분">
           {TABS.map((t) => (
-            <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
+            <button key={t.key} type="button" aria-pressed={tab === t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
               {t.label}
               {counts && <span className="tab-count num">{counts[t.key]}</span>}
             </button>
@@ -225,7 +226,7 @@ export default function Inbox() {
         {data && data.snoozed.length > 0 && (
           <details className="fold">
             <summary>
-              <span>나중에 보기</span>
+              <span>나중에 보기로 미룬 업무</span>
               <span className="num muted">{data.snoozed.length}건</span>
             </summary>
             <div className="ledger">
@@ -290,6 +291,18 @@ export default function Inbox() {
 }
 
 const WEEKDAYS = '일월화수목금토'
+
+/** 업무 상세의 "이전 · 다음 업무"에 쓰는 순서. 화면 상태라 이 탭(세션)에만 둔다. */
+function rememberOrder(d: InboxData) {
+  const ids = [...d.tabs.todo.now, ...d.tabs.todo.week, ...d.tabs.todo.later, ...d.tabs.sent, ...d.tabs.reference, ...d.tabs.done].map(
+    (c) => c.task_id,
+  )
+  try {
+    window.sessionStorage.setItem('followup.order', JSON.stringify(ids))
+  } catch {
+    // 저장소를 못 쓰면 이전 · 다음 링크만 빠진다
+  }
+}
 
 const EMPTY: Record<Exclude<Tab, 'todo'>, { title: string; body: string }> = {
   sent: { title: '답을 기다리는 업무가 없어요', body: '답장을 보내면 여기로 옮겨지고, 영업일 3일 동안 답이 없으면 다시 알려 드립니다.' },

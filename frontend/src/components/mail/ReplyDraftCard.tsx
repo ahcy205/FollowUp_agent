@@ -313,7 +313,13 @@ export default function ReplyDraftCard({
           )}
           {w.unsupported.length > 0 && (
             <div className="alert alert-amber">
-              <b>근거를 찾지 못한 내용</b> — {w.unsupported.join(', ')}. 맞는지 확인해 주세요.
+              <b>근거를 찾지 못한 값</b>{' '}
+              {w.unsupported.map((v) => (
+                <span key={v} className="value-chip">
+                  {v}
+                </span>
+              ))}{' '}
+              메모나 자료에 없는 값이에요. 맞는지 확인해 주세요.
             </div>
           )}
           {w.outside_contacts.length > 0 && (
@@ -354,9 +360,34 @@ export default function ReplyDraftCard({
 
       {editable && step === 'confirm-send' && !sentLater && (
         <div className="inline-panel draft-confirm">
-          <span>
-            <b>{draft.to_addr}</b>에게 보냅니다 · 참조 {draft.cc_selected.length}명
-          </span>
+          <b className="confirm-title">보내기 전에 한 번 더 확인해 주세요</b>
+          <dl className="confirm-grid">
+            <div>
+              <dt>받는 사람</dt>
+              <dd>{draft.to_addr}</dd>
+            </div>
+            <div>
+              <dt>참조</dt>
+              <dd>{draft.cc_selected.length > 0 ? draft.cc_selected.join(', ') : '없음'}</dd>
+            </div>
+            <div>
+              <dt>제목</dt>
+              <dd>{draft.subject}</dd>
+            </div>
+            {w.unsupported.length > 0 && (
+              <div className="confirm-warn">
+                <dt>확인 안 된 값</dt>
+                <dd>
+                  {w.unsupported.map((v) => (
+                    <span key={v} className="value-chip">
+                      {v}
+                    </span>
+                  ))}
+                  <span className="small"> 메모 · 자료에 근거가 없는 값이에요. 맞는지 확인했나요?</span>
+                </dd>
+              </div>
+            )}
+          </dl>
           {needsAck && (
             <label className="check-row small text-red">
               <input
@@ -371,14 +402,14 @@ export default function ReplyDraftCard({
           <div className="draft-actions">
             <button
               type="button"
-              className="btn btn-seal btn-sm"
+              className="btn btn-seal"
               disabled={!!busy || dirty || blanks.length > 0 || sentLater || sourcesChanged || (needsAck && !acked)}
               onClick={send}
             >
-              {busy === 'send' ? '보내는 중…' : '정말 보내기'}
+              {busy === 'send' ? '보내는 중…' : '이대로 보내기'}
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => setStep('edit')}>
-              취소
+            <button type="button" className="btn btn-ghost" disabled={!!busy} onClick={() => setStep('edit')}>
+              고치러 돌아가기
             </button>
           </div>
         </div>
