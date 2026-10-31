@@ -202,7 +202,6 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .shortcut-help kbd { margin-right: 2px; }
 .locked { display: inline-flex; align-items: center; gap: 6px; }
 .locked svg { color: var(--text-3); flex: none; }
-.upper { text-transform: uppercase; letter-spacing: 0.02em; }
 .search.grow { flex: 1; }
 .search-row { display: flex; gap: 8px; align-items: center; }
 

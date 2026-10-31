@@ -4,52 +4,55 @@
   "title": "Design System: FollowUp Agent",
   "extensions": {
     "colorMeta": {
-      "seal": { "role": "primary", "displayName": "인주 주홍", "canonical": "#c23a22", "tonalRamp": ["#41130b", "#712214", "#a52f1a", "#c23a22", "#e16751", "#ea9585", "#f5d6ce", "#fcf0ed"] },
-      "seal-600": { "role": "primary", "displayName": "인주 주홍 (눌림)", "canonical": "#a52f1a" },
-      "seal-50": { "role": "primary", "displayName": "인주 옅은 바탕", "canonical": "#fcf0ed" },
-      "seal-100": { "role": "primary", "displayName": "인주 옅은 테두리", "canonical": "#f5d6ce" },
-      "blue": { "role": "secondary", "displayName": "청색 볼펜", "canonical": "#2453a6", "tonalRamp": ["#0e1f3f", "#18366d", "#2453a6", "#2c65c9", "#5787db", "#8aabe6", "#cfdcf2", "#edf2fb"] },
-      "blue-50": { "role": "secondary", "displayName": "청색 옅은 바탕", "canonical": "#edf2fb" },
-      "blue-100": { "role": "secondary", "displayName": "청색 옅은 테두리", "canonical": "#cfdcf2" },
-      "green": { "role": "tertiary", "displayName": "장부 녹색", "canonical": "#2e6e48", "tonalRamp": ["#173623", "#2e6e48", "#388557", "#48ad71", "#6fc391", "#9ad5b2", "#cfe5d6", "#ebf4ee"] },
-      "green-50": { "role": "tertiary", "displayName": "녹색 옅은 바탕", "canonical": "#ebf4ee" },
-      "green-100": { "role": "tertiary", "displayName": "녹색 옅은 테두리", "canonical": "#cfe5d6" },
-      "amber": { "role": "tertiary", "displayName": "황토", "canonical": "#8a5800", "tonalRamp": ["#4c3100", "#8a5800", "#bd7800", "#f59c00", "#ffb533", "#ffcb70", "#f1dca8", "#fdf4df"] },
-      "amber-50": { "role": "tertiary", "displayName": "황토 옅은 바탕", "canonical": "#fdf4df" },
-      "amber-100": { "role": "tertiary", "displayName": "황토 옅은 테두리", "canonical": "#f1dca8" },
-      "ink": { "role": "neutral", "displayName": "잉크", "canonical": "#1e2328", "tonalRamp": ["#1e2328", "#39424c", "#4f5761", "#69717b", "#8a99a8", "#cfd4da", "#e2e5e9", "#f4f5f6"] },
-      "ink-2": { "role": "neutral", "displayName": "흐린 잉크", "canonical": "#4f5761" },
-      "ink-3": { "role": "neutral", "displayName": "더 흐린 잉크", "canonical": "#69717b" },
-      "desk": { "role": "neutral", "displayName": "차가운 회색 책상", "canonical": "#eff1f3" },
-      "paper": { "role": "neutral", "displayName": "흰 용지", "canonical": "#ffffff" },
-      "label": { "role": "neutral", "displayName": "라벨 칸", "canonical": "#f4f5f6" },
-      "hover": { "role": "neutral", "displayName": "행 hover", "canonical": "#f8f9fa" },
-      "rule": { "role": "neutral", "displayName": "구획선", "canonical": "#e2e5e9" },
-      "rule-2": { "role": "neutral", "displayName": "진한 구획선", "canonical": "#cfd4da" }
+      "accent": { "role": "primary", "displayName": "인디고-블루", "canonical": "#3554d1", "tonalRamp": ["#141f4f", "#1f3080", "#2a45b4", "#3554d1", "#6680e0", "#a3b4ef", "#d7e0fa", "#eef2fd"] },
+      "accent-600": { "role": "primary", "displayName": "인디고-블루 (hover · 눌림)", "canonical": "#2a45b4" },
+      "accent-50": { "role": "primary", "displayName": "인디고 옅은 바탕", "canonical": "#eef2fd" },
+      "accent-100": { "role": "primary", "displayName": "인디고 옅은 테두리", "canonical": "#d7e0fa" },
+      "navy": { "role": "secondary", "displayName": "딥 네이비", "canonical": "#0e1a33", "tonalRamp": ["#0e1a33", "#172544", "#22335a", "#3a4b72", "#5d6d92", "#8794b0", "#c8d1e3", "#eef1f7"] },
+      "navy-2": { "role": "secondary", "displayName": "네이비 hover", "canonical": "#172544" },
+      "navy-3": { "role": "secondary", "displayName": "네이비 활성", "canonical": "#22335a" },
+      "navy-text": { "role": "secondary", "displayName": "사이드바 글자", "canonical": "#c8d1e3" },
+      "red": { "role": "tertiary", "displayName": "경고 빨강", "canonical": "#c4321c", "tonalRamp": ["#43110a", "#8a2414", "#c4321c", "#de5a44", "#e98a7a", "#f1b4a9", "#f6d3cc", "#fdf1ef"] },
+      "red-50": { "role": "tertiary", "displayName": "빨강 옅은 바탕", "canonical": "#fdf1ef" },
+      "red-100": { "role": "tertiary", "displayName": "빨강 옅은 테두리", "canonical": "#f6d3cc" },
+      "amber": { "role": "tertiary", "displayName": "황토", "canonical": "#965c00", "tonalRamp": ["#3d2600", "#6e4400", "#965c00", "#c07a0d", "#dda042", "#ebc57f", "#f2dfb0", "#fdf6e7"] },
+      "amber-50": { "role": "tertiary", "displayName": "황토 옅은 바탕", "canonical": "#fdf6e7" },
+      "amber-100": { "role": "tertiary", "displayName": "황토 옅은 테두리", "canonical": "#f2dfb0" },
+      "green": { "role": "tertiary", "displayName": "초록", "canonical": "#18794e", "tonalRamp": ["#0a3321", "#135a3b", "#18794e", "#2a9a68", "#5bb98d", "#94d4b4", "#c9ead8", "#edf8f2"] },
+      "green-50": { "role": "tertiary", "displayName": "초록 옅은 바탕", "canonical": "#edf8f2" },
+      "green-100": { "role": "tertiary", "displayName": "초록 옅은 테두리", "canonical": "#c9ead8" },
+      "text": { "role": "neutral", "displayName": "잉크", "canonical": "#0f172a", "tonalRamp": ["#0f172a", "#3b4658", "#5f6b7e", "#727c8c", "#9aa3b2", "#d5d9e0", "#e6e8ec", "#f2f4f7"] },
+      "text-2": { "role": "neutral", "displayName": "보조 글자", "canonical": "#3b4658" },
+      "text-3": { "role": "neutral", "displayName": "흐린 글자", "canonical": "#5f6b7e" },
+      "bg": { "role": "neutral", "displayName": "밝은 회색 바탕", "canonical": "#f6f7f9" },
+      "surface": { "role": "neutral", "displayName": "흰 면", "canonical": "#ffffff" },
+      "surface-2": { "role": "neutral", "displayName": "옅은 면", "canonical": "#f9fafb" },
+      "surface-3": { "role": "neutral", "displayName": "회색 면", "canonical": "#f2f4f7" },
+      "border": { "role": "neutral", "displayName": "구획선", "canonical": "#e6e8ec" },
+      "border-2": { "role": "neutral", "displayName": "진한 구획선", "canonical": "#d5d9e0" }
     },
     "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "로그인 첫 화면 문장 하나에만." },
-      "headline": { "displayName": "Headline", "purpose": "페이지 제목. 업무 상세는 1.45rem." },
-      "title": { "displayName": "Title", "purpose": "시트 안 구획 제목." },
-      "body": { "displayName": "Body", "purpose": "본문, 기입란 값." },
-      "label": { "displayName": "Label", "purpose": "서식 라벨 칸, 합계 칸 이름, 대장 묶음 제목. 대문자 · 넓은 자간 없음." },
-      "figure": { "displayName": "Figure", "purpose": "합계 칸 숫자. 고정폭 숫자. 지금 처리는 2.1rem 주홍." }
+      "display": { "displayName": "Display", "purpose": "홈 숫자 칸의 큰 숫자(고정폭). 로그인 첫 문장만 2.1rem." },
+      "headline": { "displayName": "Headline", "purpose": "페이지 제목. 상세 패널 제목 1.35rem, 목록 판 제목 1.2rem." },
+      "title": { "displayName": "Title", "purpose": "카드 제목." },
+      "body": { "displayName": "Body", "purpose": "본문 14px(휴대폰 15px). 목록 행 요약은 550 / 0.92rem 두 줄." },
+      "label": { "displayName": "Label", "purpose": "라벨 칸, 표 머리, 숫자 칸 이름, 표지 글자. 대문자 · 넓은 자간 없음." }
     },
     "shadows": [
-      { "name": "sheet", "value": "0 1px 2px rgba(30, 35, 40, 0.04), 0 4px 16px -6px rgba(30, 35, 40, 0.06)", "purpose": "책상 위 용지 한 장. 용지 안 구획에는 쓰지 않는다." },
-      { "name": "popover", "value": "0 8px 24px -8px rgba(30, 35, 40, 0.18)", "purpose": "내용 위에 겹치는 확인 판." },
-      { "name": "modal", "value": "0 24px 60px -12px rgba(30, 35, 40, 0.3)", "purpose": "데모 초기화 창." },
-      { "name": "focus-input", "value": "0 0 0 3px #edf2fb", "purpose": "입력칸 포커스 고리(청색 테두리와 함께)." }
+      { "name": "shadow-1", "value": "0 1px 2px rgba(15, 23, 42, 0.05)", "purpose": "쉬는 면: 카드 · 숫자 칸 · 표 상자 · 버튼 · 분할 탭 활성 칸." },
+      { "name": "shadow-2", "value": "0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -10px rgba(15, 23, 42, 0.12)", "purpose": "떠 있는 판: 업무 취소 확인 판, 보내기 확인 카드, 숫자 칸 hover, 로그인 카드." },
+      { "name": "focus-input", "value": "0 0 0 3px #eef2fd", "purpose": "입력칸 · 검색칸 포커스 고리(accent 테두리와 함께)." }
     ],
     "motion": [
-      { "name": "ease", "value": "cubic-bezier(0.2, 0.8, 0.2, 1)", "purpose": "도장 · 펼침 · 체크 표시." },
-      { "name": "state", "value": "150ms", "purpose": "색 · 바탕 · 테두리 상태 전환." },
-      { "name": "stamp", "value": "200ms", "purpose": "도장이 찍힐 때 한 번: 1.35배 → 0.96 → 1, 불투명도 0 → 1, -8° 유지." },
-      { "name": "unfold", "value": "180ms", "purpose": "화면 안 확인 판이 4px 아래로 펼쳐짐." }
+      { "name": "ease", "value": "cubic-bezier(0.2, 0.8, 0.2, 1)", "purpose": "체크 표시 · 화면 안 확인 판 펼침 · 보냄 표시." },
+      { "name": "state", "value": "120ms", "purpose": "색 · 바탕 · 테두리 · 그림자 상태 전환." },
+      { "name": "unfold", "value": "160ms", "purpose": "화면 안 확인 판이 3px 위에서 펼쳐짐." },
+      { "name": "pop", "value": "200ms", "purpose": "보냄 표시가 1.2배에서 줄어들며 나타남. prefers-reduced-motion이면 즉시." }
     ],
     "breakpoints": [
       { "name": "mobile", "value": "720px" },
-      { "name": "tablet", "value": "1080px" }
+      { "name": "tablet", "value": "980px" },
+      { "name": "desktop-narrow", "value": "1200px" }
     ]
   },
   "components": [
@@ -57,119 +60,119 @@
       "name": "주 버튼",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "일반 주 동작(로그인, 연결, 저장, 확정). 잉크 바탕.",
-      "html": "<button class=\"ds-btn ds-btn-primary\">Gmail 연결하기</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 6px; padding: 9px 16px; font-weight: 650; font-size: 0.92rem; line-height: 1.3; cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.1s; } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 2px solid var(--blue, #2453a6); outline-offset: 2px; } .ds-btn-primary { background: var(--ink, #1e2328); color: #fff; } .ds-btn-primary:hover { background: #343b43; }"
+      "description": "일반 주 동작(답장 초안 보기, Gmail 연결하기). 인디고-블루.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">답장 초안 보기</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 7px; padding: 8px 14px; font-weight: 600; font-size: 0.9rem; line-height: 1.3; cursor: pointer; white-space: nowrap; transition: background 0.12s, border-color 0.12s, box-shadow 0.12s; } .ds-btn:focus-visible { outline: 2px solid var(--accent, #3554d1); outline-offset: 2px; } .ds-btn-primary { background: var(--accent, #3554d1); color: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); } .ds-btn-primary:hover { background: var(--accent-600, #2a45b4); }"
     },
     {
       "name": "보내기 버튼",
       "kind": "button",
-      "refersTo": "button-seal",
-      "description": "답장 보내기 · 보내기 확정처럼 되돌릴 수 없는 마지막 단계에만.",
-      "html": "<button class=\"ds-btn ds-btn-seal\">이대로 보내기</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 6px; padding: 9px 16px; font-weight: 650; font-size: 0.92rem; line-height: 1.3; cursor: pointer; transition: background 0.15s, transform 0.1s; } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 2px solid var(--blue, #2453a6); outline-offset: 2px; } .ds-btn-seal { background: var(--seal, #c23a22); color: #fff; } .ds-btn-seal:hover { background: var(--seal-600, #a52f1a); }"
+      "refersTo": "button-send",
+      "description": "발송 체크리스트를 통과한 뒤의 마지막 단계에만. 딥 네이비.",
+      "html": "<button class=\"ds-btn ds-btn-send\">이대로 보내기</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 7px; padding: 8px 14px; font-weight: 600; font-size: 0.9rem; line-height: 1.3; cursor: pointer; white-space: nowrap; transition: background 0.12s; } .ds-btn:focus-visible { outline: 2px solid var(--accent, #3554d1); outline-offset: 2px; } .ds-btn-send { background: var(--navy, #0e1a33); color: #fff; } .ds-btn-send:hover { background: var(--navy-3, #22335a); }"
     },
     {
       "name": "고스트 버튼",
       "kind": "button",
       "refersTo": "button-ghost",
-      "description": "보조 동작. 흰 바탕 + 구획선 테두리.",
+      "description": "보조 동작. 흰 바탕 + 진한 구획선 테두리.",
       "html": "<button class=\"ds-btn ds-btn-ghost\">나중에 보기</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 6px; padding: 9px 16px; font-weight: 650; font-size: 0.92rem; line-height: 1.3; cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.1s; } .ds-btn:active { transform: translateY(1px); } .ds-btn:focus-visible { outline: 2px solid var(--blue, #2453a6); outline-offset: 2px; } .ds-btn-ghost { background: #fff; border-color: var(--rule-2, #cfd4da); color: var(--ink, #1e2328); } .ds-btn-ghost:hover { background: var(--label, #f4f5f6); border-color: #bcc2c9; }"
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 7px; padding: 8px 14px; font-weight: 600; font-size: 0.9rem; line-height: 1.3; cursor: pointer; white-space: nowrap; transition: background 0.12s, border-color 0.12s; } .ds-btn:focus-visible { outline: 2px solid var(--accent, #3554d1); outline-offset: 2px; } .ds-btn-ghost { background: #fff; border-color: var(--border-2, #d5d9e0); color: var(--text, #0f172a); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); } .ds-btn-ghost:hover { background: var(--surface-2, #f9fafb); border-color: #c3c8d1; }"
     },
     {
-      "name": "입력칸",
+      "name": "검색칸",
       "kind": "input",
       "refersTo": "input",
-      "description": "흰 기입란, 포커스 시 청색 테두리 + 옅은 고리.",
-      "html": "<label class=\"ds-field\">이메일<input class=\"ds-input\" placeholder=\"name@company.example\"></label>",
-      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; font-size: 0.86rem; font-weight: 650; color: #4f5761; } .ds-input { width: 100%; font: inherit; font-size: 0.95rem; font-weight: 400; color: #1e2328; border: 1px solid #cfd4da; border-radius: 6px; padding: 10px 12px; background: #fff; outline: none; transition: border-color 0.15s, box-shadow 0.15s; } .ds-input::placeholder { color: #878e97; } .ds-input:hover { border-color: #bcc2c9; } .ds-input:focus { border-color: #2453a6; box-shadow: 0 0 0 3px #edf2fb; }"
+      "description": "목록 검색. 포커스 시 인디고 테두리 + 옅은 고리, 오른쪽 / 단축키.",
+      "html": "<label class=\"ds-search\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\"><circle cx=\"11\" cy=\"11\" r=\"6.5\"/><path d=\"M16 16l4 4\"/></svg><input placeholder=\"보낸 사람 · 내용 검색\"><kbd>/</kbd></label>",
+      "css": ".ds-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-2, #d5d9e0); border-radius: 7px; padding: 0 10px; background: #fff; color: var(--text-3, #5f6b7e); transition: border-color 0.12s, box-shadow 0.12s; } .ds-search:hover { border-color: #b4bac5; } .ds-search:focus-within { border-color: var(--accent, #3554d1); box-shadow: 0 0 0 3px var(--accent-50, #eef2fd); } .ds-search input { flex: 1; border: 0; outline: none; padding: 7px 0; font: inherit; color: var(--text, #0f172a); background: none; } .ds-search input::placeholder { color: #727c8c; } .ds-search kbd { font-family: inherit; font-size: 0.75rem; font-weight: 600; padding: 0 5px; border: 1px solid var(--border-2, #d5d9e0); border-bottom-width: 2px; border-radius: 4px; color: var(--text-3, #5f6b7e); }"
     },
     {
-      "name": "밑줄 탭",
+      "name": "사이드바",
       "kind": "nav",
-      "refersTo": "tabs-line",
-      "description": "메뉴와 탭. 활성은 잉크 글자 + 잉크 2px 밑줄, 개수는 알약형.",
-      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab active\">처리할 일 <span class=\"ds-count\">6</span></button><button class=\"ds-tab\">답장 보냄 <span class=\"ds-count\">2</span></button><button class=\"ds-tab\">완료 <span class=\"ds-count\">1</span></button></div>",
-      "css": ".ds-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e2e5e9; padding: 0 20px; } .ds-tab { border: 0; background: none; font: inherit; padding: 12px 10px 11px; font-weight: 600; color: #69717b; cursor: pointer; position: relative; display: inline-flex; align-items: center; gap: 7px; transition: color 0.15s; } .ds-tab::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: transparent; transition: background 0.15s; } .ds-tab:hover { color: #1e2328; } .ds-tab:focus-visible { outline: 2px solid #2453a6; outline-offset: 2px; border-radius: 4px; } .ds-tab.active { color: #1e2328; font-weight: 700; } .ds-tab.active::after { background: #1e2328; } .ds-count { font-size: 0.78rem; font-weight: 650; color: #69717b; background: #f4f5f6; border: 1px solid #e2e5e9; border-radius: 999px; padding: 0 7px; min-width: 22px; text-align: center; } .ds-tab.active .ds-count { color: #1e2328; border-color: #cfd4da; }"
+      "refersTo": "side-nav",
+      "description": "딥 네이비 사이드바. 활성 메뉴는 navy-3, 활성 개수 배지는 인디고.",
+      "html": "<nav class=\"ds-side\"><a href=\"#\">홈</a><a href=\"#\" class=\"active\">받은 업무 <span class=\"ds-badge\">5</span></a><a href=\"#\">후속 관리 <span class=\"ds-badge\">1</span></a><a href=\"#\">자료실</a><a href=\"#\">설정</a></nav>",
+      "css": ".ds-side { width: 232px; background: var(--navy, #0e1a33); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; } .ds-side a { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 7px; color: var(--navy-text, #c8d1e3); font-weight: 550; text-decoration: none; transition: background 0.12s, color 0.12s; } .ds-side a:hover { background: var(--navy-2, #172544); color: #fff; } .ds-side a:focus-visible { outline: 2px solid var(--accent, #3554d1); outline-offset: 2px; } .ds-side a.active { background: var(--navy-3, #22335a); color: #fff; } .ds-badge { min-width: 22px; padding: 0 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); color: #fff; font-size: 0.82rem; font-weight: 700; text-align: center; line-height: 1.6; font-variant-numeric: tabular-nums; } .ds-side a.active .ds-badge { background: var(--accent, #3554d1); }"
     },
     {
-      "name": "상태 표지",
+      "name": "AI 표지 · 직접 정함 · 근거 인용",
       "kind": "chip",
-      "refersTo": "flag",
-      "description": "대장 행의 상태 표지. 옅은 바탕 + 진한 글자 + 중간 테두리.",
-      "html": "<span class=\"ds-flag\">분석 중</span> <span class=\"ds-flag ds-flag-blue\">합치기 제안</span> <span class=\"ds-flag ds-flag-amber\">6일째 답장 안 함</span> <span class=\"ds-flag ds-flag-red\">분석 실패</span>",
-      "css": ".ds-flag { display: inline-flex; align-items: center; font-size: 0.76rem; font-weight: 650; padding: 1px 8px; border-radius: 999px; background: #f4f5f6; color: #4f5761; border: 1px solid #e2e5e9; line-height: 1.6; white-space: nowrap; } .ds-flag-blue { background: #edf2fb; color: #2453a6; border-color: #cfdcf2; } .ds-flag-amber { background: #fdf4df; color: #8a5800; border-color: #f1dca8; } .ds-flag-red { background: #fcf0ed; color: #c23a22; border-color: #f5d6ce; }"
+      "refersTo": "ai-tag",
+      "description": "AI가 만든 값은 파란 점 표지, 사용자가 정한 값은 회색 표지, 근거는 인용 상자.",
+      "html": "<span class=\"ds-ai\">AI 판단</span> <span class=\"ds-user\">직접 정함</span><div class=\"ds-evidence\"><span class=\"ds-ai\">AI · 메일의 근거 문장</span>“이번 주 금요일까지 회신 부탁드립니다”</div>",
+      "css": ".ds-ai { display: inline-flex; align-items: center; gap: 4px; font-size: 0.82rem; font-weight: 700; color: var(--accent-600, #2a45b4); padding: 0 6px; border-radius: 4px; background: var(--accent-50, #eef2fd); line-height: 1.7; white-space: nowrap; } .ds-ai::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--accent, #3554d1); } .ds-user { display: inline-flex; align-items: center; font-size: 0.82rem; font-weight: 700; color: var(--text-2, #3b4658); padding: 0 6px; border-radius: 4px; background: var(--surface-3, #f2f4f7); border: 1px solid var(--border, #e6e8ec); line-height: 1.6; } .ds-evidence { margin-top: 8px; padding: 7px 11px; border: 1px solid var(--border, #e6e8ec); background: var(--surface-2, #f9fafb); border-radius: 6px; display: flex; flex-direction: column; gap: 3px; align-items: flex-start; color: var(--text-2, #3b4658); font-size: 0.86rem; }"
     },
     {
-      "name": "서식 표",
+      "name": "상태 표지 · 기한 칩",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "세 톤 상태 표지(알약형)와 사각 기한 칩. 누르지 않는다.",
+      "html": "<span class=\"ds-pill\">할 일 0/2</span> <span class=\"ds-pill ds-amber\">6일째 답장 안 함</span> <span class=\"ds-pill ds-red\">분석 실패</span> <span class=\"ds-due\">오늘</span> <span class=\"ds-due late\">D+1 지남</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; font-size: 0.82rem; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border, #e6e8ec); background: var(--surface-3, #f2f4f7); color: var(--text-2, #3b4658); line-height: 1.6; white-space: nowrap; } .ds-amber { background: var(--amber-50, #fdf6e7); color: var(--amber, #965c00); border-color: var(--amber-100, #f2dfb0); } .ds-red { background: var(--red-50, #fdf1ef); color: var(--red, #c4321c); border-color: var(--red-100, #f6d3cc); } .ds-due { font-size: 0.78rem; font-weight: 700; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--border-2, #d5d9e0); color: var(--text-2, #3b4658); background: #fff; font-variant-numeric: tabular-nums; } .ds-due.late { border-color: var(--red-100, #f6d3cc); color: var(--red, #c4321c); background: var(--red-50, #fdf1ef); }"
+    },
+    {
+      "name": "목록 행 · 중요도 막대",
+      "kind": "custom",
+      "refersTo": "list-row",
+      "description": "행 전체가 상세 링크. 세 칸 중요도 막대 · 보낸 사람 · 요약 · 표지 · 오른쪽 기한.",
+      "html": "<a class=\"ds-row\" href=\"#\"><span class=\"ds-prio ds-prio-high\" role=\"img\" aria-label=\"중요도 높음\"><i></i><i></i><i></i></span><span class=\"ds-main\"><span class=\"ds-top\"><b>이서연</b> <span class=\"ds-org\">대성테크</span><span class=\"ds-when\">1일 전</span></span><span class=\"ds-title\">PC-10 납품을 11/20에서 11/13으로 당길 수 있는지 문의</span></span><span class=\"ds-rdue late\">D+1 지남</span></a>",
+      "css": ".ds-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 11px 18px; color: var(--text, #0f172a); text-decoration: none; background: #fff; border-bottom: 1px solid var(--border, #e6e8ec); transition: background 0.1s; } .ds-row:hover { background: var(--surface-2, #f9fafb); } .ds-row:focus-visible { outline: 2px solid var(--accent, #3554d1); outline-offset: -2px; } .ds-prio { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; margin-top: 3px; } .ds-prio i { width: 3px; border-radius: 1px; background: var(--border-2, #d5d9e0); } .ds-prio i:nth-child(1) { height: 6px; } .ds-prio i:nth-child(2) { height: 10px; } .ds-prio i:nth-child(3) { height: 14px; } .ds-prio-high i { background: var(--red, #c4321c); } .ds-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .ds-top { display: flex; align-items: baseline; gap: 6px; font-size: 0.84rem; } .ds-top b { font-weight: 650; } .ds-org { color: var(--text-3, #5f6b7e); } .ds-when { margin-left: auto; font-size: 0.82rem; color: var(--text-3, #5f6b7e); } .ds-title { font-weight: 550; font-size: 0.92rem; line-height: 1.45; } .ds-rdue { font-weight: 700; font-size: 0.82rem; white-space: nowrap; font-variant-numeric: tabular-nums; } .ds-rdue.late { color: var(--red, #c4321c); }"
+    },
+    {
+      "name": "발송 체크리스트",
+      "kind": "custom",
+      "refersTo": "checklist",
+      "description": "보내기 전 확인 항목. 통과 · 확인 필요 · 막힘을 표시 모양과 색으로.",
+      "html": "<div class=\"ds-check is-block\"><div class=\"ds-check-head\"><span>보내기 전에 1개를 해결해 주세요</span></div><ul><li class=\"ok\"><i></i><b>받는 사람</b><span>서버가 정한 주소</span></li><li class=\"confirm\"><i></i><b>근거 없는 값</b><span>12,000원 — 확인했어요를 체크해 주세요</span></li><li class=\"block\"><i></i><b>빈칸</b><span>[[납기일]]이 남아 있어요</span></li></ul></div>",
+      "css": ".ds-check { border: 1px solid var(--border, #e6e8ec); border-radius: 7px; overflow: hidden; font-size: 0.86rem; background: #fff; } .ds-check-head { padding: 9px 13px; background: var(--surface-2, #f9fafb); border-bottom: 1px solid var(--border, #e6e8ec); font-weight: 650; } .ds-check.is-block .ds-check-head span { color: var(--red, #c4321c); } .ds-check ul { list-style: none; margin: 0; padding: 4px 0; } .ds-check li { display: grid; grid-template-columns: 18px 110px minmax(0, 1fr); gap: 10px; align-items: start; padding: 6px 13px; } .ds-check li b { font-weight: 650; } .ds-check li span { color: var(--text-2, #3b4658); } .ds-check i { width: 16px; height: 16px; border-radius: 50%; margin-top: 2px; display: grid; place-items: center; } .ds-check .ok i { background: var(--green-50, #edf8f2); border: 1.5px solid var(--green, #18794e); } .ds-check .ok i::after { content: ''; width: 3px; height: 7px; border-right: 1.6px solid var(--green, #18794e); border-bottom: 1.6px solid var(--green, #18794e); transform: rotate(45deg) translate(-1px, -1px); } .ds-check .confirm i { background: var(--amber-50, #fdf6e7); border: 1.5px solid var(--amber, #965c00); } .ds-check .confirm i::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--amber, #965c00); } .ds-check .confirm b { color: var(--amber, #965c00); } .ds-check .block i { background: var(--red-50, #fdf1ef); border: 1.5px solid var(--red, #c4321c); } .ds-check .block i::after { content: ''; width: 7px; height: 1.6px; background: var(--red, #c4321c); } .ds-check .block b { color: var(--red, #c4321c); }"
+    },
+    {
+      "name": "숫자 칸",
       "kind": "card",
-      "refersTo": "form-label-cell",
-      "description": "요약 · 답장 초안의 라벨 칸 + 기입란. 기한 지남 행은 라벨 칸만 주홍.",
-      "html": "<dl class=\"ds-form\"><div class=\"ds-row\"><dt>상대</dt><dd><b>김민수 (한빛전자)</b> · 10/29(목) 받음</dd></div><div class=\"ds-row\"><dt>원하는 것</dt><dd>TS-200 100개 견적과 납기 회신</dd></div><div class=\"ds-row late\"><dt>기한</dt><dd><b>11/1(일)</b> D+1 지남</dd></div></dl>",
-      "css": ".ds-form { margin: 0; border: 1px solid #e2e5e9; border-radius: 6px; overflow: hidden; background: #fff; color: #1e2328; } .ds-row { display: grid; grid-template-columns: 104px minmax(0, 1fr); } .ds-row + .ds-row { border-top: 1px solid #e2e5e9; } .ds-row > dt { background: #f4f5f6; border-right: 1px solid #e2e5e9; padding: 12px 14px; font-size: 0.82rem; font-weight: 650; color: #69717b; } .ds-row > dd { margin: 0; padding: 11px 14px; } .ds-row.late > dt { color: #c23a22; background: #fcf0ed; }"
-    },
-    {
-      "name": "업무 대장 행",
-      "kind": "custom",
-      "refersTo": "ledger-row",
-      "description": "행 전체가 상세로 가는 링크. 중요도 칸 · 상대 · 요약 · 할 일 · 오른쪽 정렬 기한.",
-      "html": "<a class=\"ds-ledger\" href=\"#\"><span class=\"ds-prio ds-prio-high\">상</span><span class=\"ds-main\"><span class=\"ds-who\"><b>이서연</b> <span>대성테크</span></span><span class=\"ds-title\">PC-10 납품을 11/20에서 11/13으로 당길 수 있는지 문의</span></span><span class=\"ds-todo\">0/2</span><span class=\"ds-due late\">D+1 지남</span><svg class=\"ds-go\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M9.5 6l6 6-6 6\"/></svg></a>",
-      "css": ".ds-ledger { display: grid; grid-template-columns: 52px minmax(0, 1fr) 92px 112px 20px; align-items: center; column-gap: 12px; padding: 13px 20px; color: #1e2328; text-decoration: none; background: #fff; transition: background 0.12s; } .ds-ledger:hover { background: #f8f9fa; } .ds-ledger:focus-visible { outline: 2px solid #2453a6; outline-offset: 2px; } .ds-prio { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; font-size: 0.78rem; font-weight: 750; border: 1.5px solid; line-height: 1; } .ds-prio-high { background: #1e2328; border-color: #1e2328; color: #fff; } .ds-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .ds-who { font-size: 0.84rem; color: #4f5761; } .ds-who b { font-weight: 650; color: #1e2328; } .ds-who span { color: #69717b; } .ds-title { font-weight: 600; font-size: 0.97rem; } .ds-todo { font-size: 0.85rem; color: #4f5761; font-variant-numeric: tabular-nums; } .ds-due { text-align: right; font-weight: 700; font-size: 0.93rem; font-variant-numeric: tabular-nums; white-space: nowrap; } .ds-due.late { color: #c23a22; } .ds-go { color: #b2b8bf; transition: color 0.15s, transform 0.15s; } .ds-ledger:hover .ds-go { color: #1e2328; transform: translateX(2px); }"
-    },
-    {
-      "name": "중요도 칸",
-      "kind": "custom",
-      "refersTo": "priority-high",
-      "description": "상 · 중 · 하 글자 칸. 상은 잉크로 채운다. 색만으로 구분하지 않는다.",
-      "html": "<span class=\"ds-p ds-p-high\">상</span> <span class=\"ds-p ds-p-mid\">중</span> <span class=\"ds-p ds-p-low\">하</span>",
-      "css": ".ds-p { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; font-size: 0.78rem; font-weight: 750; border: 1.5px solid; line-height: 1; margin-right: 6px; } .ds-p-high { background: #1e2328; border-color: #1e2328; color: #fff; } .ds-p-mid { background: #fff; border-color: #4f5761; color: #1e2328; } .ds-p-low { background: #fff; border-color: #cfd4da; color: #69717b; }"
-    },
-    {
-      "name": "도장",
-      "kind": "custom",
-      "refersTo": "stamp",
-      "description": "보냄 · 완료 때 한 번 찍히는 둥근 주홍 인감. 200ms.",
-      "html": "<span class=\"ds-stamp\">완료</span>",
-      "css": ".ds-stamp { display: inline-grid; place-items: center; width: 54px; height: 54px; border-radius: 50%; border: 2.5px solid #c23a22; color: #c23a22; font-weight: 800; font-size: 0.92rem; letter-spacing: 0.08em; transform: rotate(-8deg); box-shadow: inset 0 0 0 2px #fff, inset 0 0 0 3.5px rgba(194, 58, 34, 0.55); background: rgba(252, 240, 237, 0.6); animation: ds-stamp 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both; } .ds-stamp:hover { animation: none; } @keyframes ds-stamp { from { transform: rotate(-8deg) scale(1.35); opacity: 0; } 60% { transform: rotate(-8deg) scale(0.96); opacity: 1; } to { transform: rotate(-8deg) scale(1); } } @media (prefers-reduced-motion: reduce) { .ds-stamp { animation: none; } }"
+      "refersTo": "tile",
+      "description": "홈 현황 칸. 첫 칸은 네이비 채움, 칸 전체가 링크.",
+      "html": "<div style=\"display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px\"><a class=\"ds-tile ds-tile-navy\" href=\"#\"><span class=\"l\">오늘 처리할 업무</span><span class=\"v\">5</span><span class=\"n\">지금 처리 2</span></a><a class=\"ds-tile ds-tile-red\" href=\"#\"><span class=\"l\">기한 임박</span><span class=\"v\">2</span><span class=\"n\">3일 안</span></a><a class=\"ds-tile\" href=\"#\"><span class=\"l\">답장 대기</span><span class=\"v\">2</span><span class=\"n\">상대 답 기다림</span></a></div>",
+      "css": ".ds-tile { background: #fff; border: 1px solid var(--border, #e6e8ec); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; color: var(--text, #0f172a); text-decoration: none; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); transition: border-color 0.12s, box-shadow 0.12s; } .ds-tile:hover { border-color: var(--border-2, #d5d9e0); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -10px rgba(15, 23, 42, 0.12); } .ds-tile:focus-visible { outline: 2px solid var(--accent, #3554d1); outline-offset: 2px; } .ds-tile .l { font-size: 0.82rem; font-weight: 600; color: var(--text-3, #5f6b7e); } .ds-tile .v { font-size: 1.85rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums; } .ds-tile .n { font-size: 0.82rem; color: var(--text-3, #5f6b7e); } .ds-tile-navy { background: var(--navy, #0e1a33); border-color: var(--navy, #0e1a33); } .ds-tile-navy .l, .ds-tile-navy .n { color: var(--navy-text, #c8d1e3); } .ds-tile-navy .v { color: #fff; } .ds-tile-red .v { color: var(--red, #c4321c); }"
     }
   ],
   "narrative": {
-    "northStar": "부드러운 서식 용지",
-    "overview": "차가운 회색 책상 위에 흰 서식 용지가 한 장씩 놓여 있다. 업무는 카드 더미가 아니라 견적서 · 거래명세서처럼 **구획선 · 회색 라벨 칸 · 기입란**으로 정리되고, 끝난 일에는 주홍 인주 도장이 찍힌다. 받은 업무는 \"업무 대장\" 표 한 장, 업무 상세는 용지 한 장이며, 그 안의 구획은 상자를 겹치지 않고 가는 선으로 나눈다.\n\n처음 방향은 각진 양식(모서리 2px, 사각 도장)이었지만, 제작 중 사용자가 \"양식으로 하되 너무 딱딱해 보이지 않게\"를 요청해 부드럽게 다듬었다. 모서리는 6~10px, 구획선은 옅은 회색(#e2e5e9), 도장은 둥근 인감, 문구는 \"~했어요\"체의 친근한 말투다. 완성 검토 뒤에는 바탕을 차가운 회색으로 정리하고, 주홍을 보내기 · 확정, 기한 지남, 지금 처리, 도장, 로고에만 남겼다. 선택 · 메뉴 표시는 잉크색이다.\n\n실무자가 하루에 여러 번 여는 도구라서 밀도와 일관성이 장식보다 우선한다. 사용자가 확인한 거부 대상: 보라 · 파랑 그라데이션, 이모지 · 유니코드 기호 아이콘, 그림자 카드 반복, 보라색 강조.",
+    "northStar": "조용한 관제실",
+    "overview": "밝은 회색 바탕 위에 흰 면이 놓이고, 왼쪽에는 딥 네이비 사이드바가 화면을 고정한다. 받은 업무는 사이드바 · 목록 · 상세 패널의 3단으로 열리며, 사용자는 목록을 위아래로 훑고(`j`/`k`) 오른쪽 패널에서 처리한다. 장식은 없고, 색은 상태를 말할 때만 쓴다: 인디고-블루는 선택 · 링크 · 주 동작, 빨강은 기한 지남 · 막힘, 황토는 확인 필요, 초록은 완료 · 준비됨.\n\n이 시스템의 중심 약속은 **AI가 한 일과 사용자가 정한 일을 눈으로 구분하는 것**이다. AI가 만든 값에는 작은 파란 점이 붙은 `AI` 표지가, 사용자가 고친 값에는 회색 \"직접 정함\" 표지가 붙고, 근거가 필요한 값 옆에는 메일의 근거 문장이 인용된다. 되돌릴 수 없는 보내기는 발송 체크리스트 한 장을 모두 통과해야 열린다.\n\n하루에 여러 번 여는 실무 도구라서 밀도(본문 14px, 행 안쪽 11px 18px)와 일관성이 우선이다. 사용자가 확정한 거부 대상: 그라데이션 장식, 보라색 AI 장식, 이모지 아이콘, 브라우저 확인창.",
     "keyCharacteristics": [
-      "흰 용지(#ffffff) + 차가운 회색 책상(#eff1f3) 두 층. 구획은 선으로 나눈다.",
-      "강조색은 인주 주홍 하나. 화면에서 드물수록 급한 일이 보인다.",
-      "선택 · 현재 위치 · 중요도 \"상\"은 잉크색으로 채운다.",
-      "라벨은 회색 칸 안의 작은 굵은 글씨, 값은 흰 기입란.",
-      "숫자(합계 · D-day · 할 일 n/m)는 고정폭 숫자.",
-      "아이콘은 직접 그린 24 격자 선 아이콘(선 1.6). 로고는 둥근 사각 도장 안의 FU."
+      "바탕(`bg`) · 흰 면(`surface`) · 네이비 사이드바(`navy`) 세 층. 면 안의 구획은 1px `border` 선.",
+      "강조색은 인디고-블루(`accent`) 하나. 상태색 셋은 옅은 바탕 + 진한 글자 + 중간 테두리로만 쓴다.",
+      "데스크톱 3단(사이드바 232px · 목록 · 상세 패널), 1200 · 980 · 720px에서 단계적으로 접힌다.",
+      "중요도는 세 칸 막대, 기한은 오른쪽 정렬 고정폭 숫자.",
+      "AI 값은 `ai-tag`, 사용자 값은 `by-user`. 근거는 인용 상자로 붙인다.",
+      "아이콘은 `Icon.tsx`의 24 격자 · 선 1.6 직접 그린 선 아이콘."
     ],
     "rules": [
-      { "name": "The 인주 하나 Rule", "body": "주홍은 보내기 · 확정, 기한 지남, 지금 처리, 도장, 로고, 그리고 오류 · 위험에만 쓴다. 선택 상태, 일반 주 버튼, 장식에는 쓰지 않는다.", "section": "colors" },
-      { "name": "The 잉크 선택 Rule", "body": "선택 · 현재 위치 · 가장 중요한 칸은 잉크로 채우거나 잉크 밑줄(2px)을 긋는다. 청색은 링크와 포커스용이다.", "section": "colors" },
-      { "name": "The 보라 없음 Rule", "body": "보라 · 바이올렛과 그라데이션 강조는 쓰지 않는다(사용자 확정).", "section": "colors" },
-      { "name": "The 고정폭 숫자 Rule", "body": "건수 · D-day · 할 일 n/m · 시간은 모두 `tabular-nums`로 세로 줄을 맞춘다.", "section": "typography" },
-      { "name": "The 용지 한 장 Rule", "body": "한 주제는 용지 한 장이다. 그 안의 구획은 `rule` 1px 선으로 나누고, 카드 안에 그림자 카드를 넣지 않는다.", "section": "elevation" }
+      { "name": "The 파랑 하나 Rule", "body": "강조색은 `accent` 하나다. 선택 · 링크 · 포커스 · 주 동작 · AI 표지에만 쓰고, 장식에는 쓰지 않는다.", "section": "colors" },
+      { "name": "The 상태색 세 톤 Rule", "body": "빨강 · 황토 · 초록(그리고 파랑)은 항상 `-50` 바탕 + 본색 글자 + `-100` 테두리 세 톤으로 쓴다. 진한 상태색 면을 채우지 않는다.", "section": "colors" },
+      { "name": "The 네이비 마지막 단계 Rule", "body": "네이비 채움 버튼은 보내기처럼 되돌릴 수 없는 마지막 단계에만 쓴다. 일반 주 동작은 인디고-블루다.", "section": "colors" },
+      { "name": "The 고정폭 숫자 Rule", "body": "건수 · 기한 · D-day · 할 일 n/m · 시각은 `.num`(`tabular-nums`)으로 세로 줄을 맞춘다. 기한은 행의 오른쪽 끝에 정렬한다.", "section": "typography" },
+      { "name": "The 그림자 두 단계 Rule", "body": "쉬는 면은 `--shadow-1`, 겹치거나 hover로 떠오르는 것만 `--shadow-2`. 카드 안에서 그림자를 다시 쌓지 않고 안쪽 구획은 1px 선으로 나눈다.", "section": "elevation" }
     ],
     "dos": [
-      "**Do** 한 주제를 용지 한 장(10px 모서리, `rule` 테두리, 용지 그림자)에 담고 안쪽 구획은 1px 선으로 나눈다.",
-      "**Do** 라벨-값 정보는 104px 회색 라벨 칸 + 흰 기입란 서식 표로 보인다.",
-      "**Do** 주홍은 보내기 · 확정, 기한 지남, 지금 처리, 도장, 로고, 오류 · 위험에만 쓴다.",
-      "**Do** 선택 · 활성 표시는 잉크(채움 또는 2px 밑줄)로, 링크 · 포커스는 청색으로 한다.",
-      "**Do** 중요도는 상/중/하 글자 칸으로, 상태는 색과 글자를 함께 쓴다.",
-      "**Do** 숫자는 고정폭 숫자로, 기한은 오른쪽 정렬로 맞춘다.",
-      "**Do** 아이콘은 `Icon.tsx`의 24 격자 · 선 1.6 직접 그린 선 아이콘에 추가한다.",
-      "**Do** 문구는 짧고 친근하게(\"급한 순서로 정리했어요\"), AI가 했다는 말 대신 결과를 보인다."
+      "**Do** 강조는 `accent` 하나로, 선택 · 링크 · 포커스 · 주 동작 · AI 표지에만 쓴다.",
+      "**Do** 상태는 빨강(기한 지남 · 막힘) · 황토(확인 필요) · 초록(완료 · 준비됨)을 `-50` 바탕 + 본색 글자 + `-100` 테두리 세 톤으로, 항상 글자와 함께 보인다.",
+      "**Do** AI가 만든 값에는 `ai-tag`, 사용자가 정한 값에는 `by-user`를 붙이고, 근거가 있으면 근거 인용 상자로 원문을 보인다.",
+      "**Do** 되돌릴 수 없는 보내기는 발송 체크리스트를 통과한 뒤 `navy` 버튼과 화면 안 확인 카드로 받는다.",
+      "**Do** 건수 · 기한 · 할 일 · 시각은 고정폭 숫자로, 기한은 행 오른쪽에 정렬한다.",
+      "**Do** 면은 10px 흰 카드 + `border` + `--shadow-1`, 안쪽 구획은 1px 선으로 나눈다.",
+      "**Do** 아이콘은 `Icon.tsx`의 24 격자 · 선 1.6 선 아이콘에 추가한다.",
+      "**Do** 확인 단계는 카드 안 확인 판이나 확인 버튼처럼 화면 안에 만든다."
     ],
     "donts": [
-      "**Don't** 보라 · 바이올렛 강조나 보라 · 파랑 그라데이션을 쓴다.",
+      "**Don't** 바탕 · 버튼 · 표지 · 제목에 그라데이션을 쓴다. 로딩 자리 표시의 반짝임만 예외다.",
+      "**Don't** 보라 · 바이올렛이나 반짝이 · 별 같은 AI 장식을 쓴다. AI 표시는 `ai-tag` 하나다.",
+      "**Don't** 카드 · 행 · 알림의 한쪽에만 굵은 색 테두리를 긋는다. 상태는 표지 · 점 · 글자색으로 보인다.",
       "**Don't** 이모지나 유니코드 기호(✓ ★ ⚠ 등)를 아이콘으로 쓴다.",
-      "**Don't** 용지 안에 그림자 카드를 다시 쌓거나, 카드 더미 대시보드로 업무를 늘어놓는다.",
-      "**Don't** 주홍을 선택 상태 · 일반 주 버튼 · 장식에 쓴다.",
-      "**Don't** 모서리를 2px 이하로 각지게 하거나 굵은 바깥 테두리로 딱딱하게 만든다(사용자 요청으로 부드럽게 다듬음).",
-      "**Don't** 도장 외의 장식 움직임을 추가한다. 상태 전환은 150~200ms.",
-      "**Don't** 생성 이미지 · 일러스트를 넣는다."
+      "**Don't** `window.confirm` / `alert` / `prompt`를 쓴다.",
+      "**Don't** 네이비 채움 버튼을 일반 주 동작에 쓰거나, 상태색을 진하게 면으로 채운다.",
+      "**Don't** 카드 안에 그림자 카드를 다시 쌓는다."
     ]
   }
 }

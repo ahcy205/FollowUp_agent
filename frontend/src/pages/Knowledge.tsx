@@ -484,7 +484,7 @@ export default function Knowledge() {
                           <span className="break">{s.title}</span>
                         </button>
                       </td>
-                      <td className="muted small upper">{s.file_type}</td>
+                      <td className="muted small">{s.file_type}</td>
                       <td>
                         <span className={`pill ${s.visibility === 'shareable' ? 'pill-blue' : 'pill-gray'}`}>{VISIBILITY_LABELS[s.visibility]}</span>
                       </td>
