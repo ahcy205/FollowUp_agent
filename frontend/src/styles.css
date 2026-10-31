@@ -184,7 +184,6 @@ textarea { resize: vertical; line-height: 1.6; }
 label { display: flex; flex-direction: column; gap: 6px; font-size: 0.86rem; font-weight: 650; color: var(--ink-2); }
 label input:not([type='checkbox']):not([type='radio']), label textarea { font-size: 0.95rem; font-weight: 400; color: var(--ink); }
 
-.spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--blue-100); border-top-color: var(--blue); animation: spin 0.8s linear infinite; display: inline-block; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* 밑줄 탭 */
@@ -199,7 +198,6 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .tabs-line button.active .tab-count { color: var(--ink); border-color: var(--rule-2); }
 .tabs-compact { padding: 0; }
 
-/* 옛 탭 (전체 업무 등) */
 
 /* ---------- 받은 업무: 합계 칸 · 업무 대장 */
 .sync-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 0.85rem; }
@@ -446,6 +444,7 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .tl-time { font-size: 0.8rem; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; padding-top: 2px; }
 .tl-detail { font-size: 0.83rem; color: var(--ink-2); margin-top: 1px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tl-item.tl-red .tl-title { color: var(--seal); }
+.tl-risk { margin-top: 4px; }
 
 /* 확인 버튼 줄 (설정 · 업무 취소) */
 .approval-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; flex-wrap: wrap; }

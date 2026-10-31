@@ -31,3 +31,7 @@
 | 4 | 2026-10-31 | Task 1 | 설정 삭제 목록 | `LLM_EFFORT`도 지웠다(Agent 호출만 썼다). `LLM_ANALYSIS_MODEL`은 남김 | 사용처 없음 | `.env`에 남아도 무시(`extra="ignore"`) |
 | 5 | 2026-10-31 | Task 1 | 마이그레이션 확인: SQLite 사본 downgrade → upgrade | PostgreSQL 16 임시 컨테이너에서도 예시 행으로 upgrade → downgrade → upgrade, 양쪽 `alembic check` 차이 없음 | 규칙상 양쪽에서 동작해야 하고 CI에는 PostgreSQL이 없다 | 없음 |
 | 6 | 2026-10-31 | Task 1 | 테스트 파일 정리 | `test_gemini_conversion.py`를 남은 내용에 맞게 `test_gemini_helpers.py`로 이름을 바꿨다. `test_inbox_fields` · `test_task_calendar_fields` · `test_task_mail_fields`도 데모 가상 업무 대신 메일 업무를 만들도록 고쳤다 | 데모 가상 데이터가 없어졌다 | 없음 |
+| 7 | 2026-10-31 | Task 1 (리뷰) | 업무 취소 동작 동일 | 새 `cancel_mail_task`는 Agent 실행과 겨루던 잠금(`_task_lock` · `refresh`)을 쓰지 않는다. 취소 API는 다른 메일 동작처럼 동기화를 바로 깨운다 | 다른 메일 동작에도 잠금이 없고 이제 경쟁할 Agent 실행이 없다. 깨우기는 예전 동작(캘린더 즉시 반영)을 되살린 것 | 취소 직후 캘린더 일정 삭제가 바로 반영 |
+| 8 | 2026-10-31 | Task 1 (리뷰) | 모델 정리 | 업무 `origin` 기본값을 `user`에서 `mail`로 | 남은 업무는 메일 업무뿐 | 모든 생성 경로가 `origin="mail"`을 직접 넣어 영향 없음 |
+| 9 | 2026-10-31 | Task 1 (리뷰) | 메일이 아닌 업무 삭제 | 그 업무에 연결돼 있던 Gmail 메일은 지우지 않고 연결만 끊는다(`task_id` NULL). 판별이 `work`이면 다음 접수 주기에 메일 업무로 다시 만들어질 수 있다 | 사용자의 실제 Gmail 메일은 지우지 않는다(작업 규칙). 로컬 해당 행 0건 | 없음 |
+| 10 | 2026-10-31 | Task 2 (리뷰) | 처리 기록에서 Agent 기록 이름 제거 | 정리하면서 빠졌던 보안 경고의 탐지 문구 · 위험도 표시를 되살렸다. 개발용 "입력 / 결과 보기"는 메일 기록에서 이미 숨기기로 한 것(사용성 검토)이라 그대로 뺐다 | 보안 경고 정보는 남기는 기능 | 없음(예전 표시와 같음) |

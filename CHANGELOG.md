@@ -3,6 +3,27 @@
 이 프로젝트의 주요 변경을 날짜별로 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따릅니다.
 세부 판단과 이유는 [`docs/decisions.md`](docs/decisions.md), 설계와 구현 계획은 [`docs/superpowers/`](docs/superpowers/)에 있습니다.
 
+## 2026-10-31 — 데모 모드 · 목표 입력 Agent 제거
+
+해커톤 PoC의 흔적을 지우고 앱을 Gmail 업무 메일 Agent 하나로 정리했다.
+[설계](docs/superpowers/specs/2026-10-31-remove-demo-and-goal-agent-design.md) · [구현 계획과 변경 이력](docs/superpowers/plans/2026-10-31-remove-demo-and-goal-agent.md) · [판단 기록](docs/decisions.md#데모-모드--목표-입력-agent-제거-2026-10-31)
+
+### 삭제
+- **데모 모드:** `DEMO_MODE` · 데모 계정 설정, 가상 고객 · 문서 · 메일, 데모 초기화, 회신 시뮬레이터, 워크스페이스.
+- **목표 입력 Agent:** 목표로 업무 만들기 · 목표 고치기 · Agent 실행 · 재시도 · 승인 · 후속 업무 · 토큰 사용량, `/api/dashboard`와 관련 API, 설정 `MAX_AGENT_STEPS` · `AGENT_TIMEOUT_SECONDS` · `LLM_TRANSIENT_RETRIES` · `LLM_EFFORT`.
+- **화면:** "전체 업무"를 받은 업무로 합쳐 메뉴는 받은 업무 · 자료실 · 설정. 예전 주소(`/tasks` · `/workspace`)는 받은 업무로.
+- **DB:** 마이그레이션 `d8e2f6a1c9b4` — Agent 실행 · 승인 · 가상 고객 · 가상 문서 테이블과 그 칸, Agent 전용 업무 칸을 지우고, 메일이 아닌 업무 · Gmail이 아닌 메일을 지운다(로컬 0건, `dev.db.bak-20261031` 백업 후 반영). `.env`에 남은 옛 설정은 무시된다.
+
+### 변경
+- 업무 취소 · 닫힌 상태 판단을 메일 코드로 옮겼다. 동작은 같고, 취소 직후 캘린더 반영을 바로 시작한다.
+- 업무 상세 · 실시간 갱신은 메일 업무만 연다(그 밖은 404). 응답에서 Agent 필드를 뺐다.
+- 오류 문구의 "'Agent 재시도'" 안내를 "잠시 후 다시 시도해 주세요"로.
+
+### 확인
+- 백엔드 테스트 707개(데모 · Agent 전용 테스트는 지우고 섞인 테스트는 메일 업무 기준으로), 프론트 빌드 · lint.
+- 마이그레이션: SQLite 사본 upgrade → downgrade → upgrade, PostgreSQL 16에서 예시 행으로 같은 순서, 모델과 차이 없음.
+- 점검 서버: 메뉴 3개, `/tasks` 이동, 업무 상세, 업무 취소 → 완료 탭 · 처리 기록.
+
 ## 2026-10-31 — 화면 전면 개편: 견적서 · 거래명세서 양식
 
 처음 연 사람이 "오늘 누구에게 무엇을 언제까지"를 바로 보고, AI가 만든 화면처럼 보이지 않게 앱 전체를 다시 만들었다. API · DB · 동작은 그대로다.

@@ -105,7 +105,7 @@ export interface TaskDetail {
   task: Task
   emails: Email[]
   logs: ActionLog[]
-  mail?: MailExtras | null
+  mail: MailExtras
 }
 
 export interface MailExtras {

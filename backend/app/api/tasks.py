@@ -232,6 +232,7 @@ def cancel_task(task_id: int, body: CancelTaskIn, user: User = Depends(get_curre
     task = _mail_task(db, task_id, user)
     _act(task_actions.cancel_mail_task, db, user, task, body.reason)
     db.commit()
+    mail_sync.wake()  # 캘린더 일정 삭제를 다음 주기(90초)까지 기다리지 않는다
     db.refresh(task)
     return task
 
