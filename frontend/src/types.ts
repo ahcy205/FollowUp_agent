@@ -312,3 +312,42 @@ export interface KnowledgeUploadResult {
   error: string
   source: KnowledgeSource | null
 }
+
+// 최근 업무 활동 (GET /api/activity)
+export interface ActivityItem {
+  id: number
+  task_id: number
+  task_title: string
+  action_type: string
+  reason: string
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH'
+  created_at: string
+}
+
+// 자료 상세 (GET /api/knowledge/sources/{id})
+export interface KnowledgeChunkOut {
+  ordinal: number
+  lines: string[]
+  flagged: boolean
+}
+
+export interface KnowledgeReference {
+  task_id: number
+  task_title: string
+  draft_status: string
+  updated_at: string
+}
+
+export interface KnowledgeDetail extends KnowledgeSource {
+  chunks: KnowledgeChunkOut[]
+  referenced_by: KnowledgeReference[]
+}
+
+// 자료 검색 시험 (POST /api/knowledge/search)
+export interface KnowledgeHit {
+  source_id: number
+  title: string
+  chunk_ordinal: number
+  score: number
+  lines: string[]
+}

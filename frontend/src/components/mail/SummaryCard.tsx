@@ -56,9 +56,6 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
     if (await run('clear', () => act('/deadline', { clear: true }))) setEditing(false)
   }
 
-  const cp = brief.counterpart
-  const sender = cp?.name ? (cp.organization ? `${cp.name} (${cp.organization})` : cp.name) : ''
-  const source = data.emails.find((e) => e.id === brief.email_id) ?? data.emails.find((e) => e.direction === 'INBOUND')
   const requests = (brief.requests ?? []).filter((r) => r.trim())
   const badge = mail?.deadline_badge
   const estimated = task.deadline_at != null && task.deadline_kind === 'estimated'
@@ -73,13 +70,6 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
       )}
 
       <dl className="form-grid">
-        <div className="form-row">
-          <dt>상대</dt>
-          <dd>
-            <b>{sender || source?.sender || '보낸 사람 모름'}</b>
-            {source && <span className="muted"> · {shortDate(source.created_at, false)} 받음</span>}
-          </dd>
-        </div>
 
         {(mail?.merged_sources.length ?? 0) > 0 && (
           <div className="form-row">
@@ -137,7 +127,7 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
                 </button>
               ))}
             </div>
-            {mail?.priority_source === 'user' && <span className="muted small">직접 정함</span>}
+            {mail?.priority_source === 'user' ? <span className="by-user">직접 정함</span> : <span className="ai-tag">AI 판단</span>}
           </dd>
         </div>
 
@@ -178,9 +168,12 @@ export default function SummaryCard({ data, act, calendarLine }: { data: TaskDet
             {task.deadline_at &&
               task.deadline_source &&
               (task.deadline_source === USER_DEADLINE_SOURCE ? (
-                <div className="muted small">직접 정한 기한</div>
+                <div><span className="by-user">직접 정함</span></div>
               ) : (
-                <div className="evidence small">근거 “{task.deadline_source}”</div>
+                <blockquote className="evidence">
+                  <span className="ai-tag">AI · 메일의 근거 문장</span>
+                  <span>“{task.deadline_source}”</span>
+                </blockquote>
               ))}
             {!task.deadline_at && brief.deadline_note && <div className="evidence small">메일에 적힌 기한 “{brief.deadline_note}”</div>}
 

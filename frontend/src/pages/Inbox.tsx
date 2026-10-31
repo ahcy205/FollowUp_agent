@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import Icon from '../components/Icon'
 import InboxCard from '../components/InboxCard'
-import { dateTime, relative, shortDate } from '../format'
+import TaskPanel from '../components/TaskPanel'
+import { dateTime, relative } from '../format'
 import type { GoogleStatus, Inbox as InboxData, InboxCard as Card } from '../types'
 
 type Tab = 'todo' | 'sent' | 'reference' | 'done'
+type Mode = 'inbox' | 'followup'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'todo', label: '처리할 일' },
@@ -21,18 +23,63 @@ const BUCKETS: { key: 'now' | 'week' | 'later'; label: string }[] = [
   { key: 'later', label: '나중에' },
 ]
 
+const EMPTY: Record<Tab, { title: string; body: string }> = {
+  todo: { title: '지금 처리할 업무가 없어요', body: '새 업무 메일이 오면 기한과 중요도 순으로 여기에 올라옵니다.' },
+  sent: { title: '답을 기다리는 업무가 없어요', body: '답장을 보내면 여기로 옮겨지고, 영업일 3일 동안 답이 없으면 다시 알려 드려요.' },
+  reference: { title: '참고용 업무가 없어요', body: '답장이 필요 없는 공지 · 안내 메일이 여기에 모입니다.' },
+  done: { title: '완료한 업무가 없어요', body: '완료하거나 답장 없이 닫은 업무가 여기에 남습니다.' },
+}
+
 const REFRESH_MS = 30_000
 
-export default function Inbox() {
+type Group = { key: string; label: string; tone?: 'red' | 'amber' | 'blue'; hint?: string; cards: Card[] }
+
+function isTyping(target: EventTarget | null) {
+  const el = target as HTMLElement | null
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+}
+
+function matches(card: Card, q: string) {
+  if (!q) return true
+  const hay = `${card.sender_name} ${card.sender_org} ${card.summary} ${card.title}`.toLowerCase()
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .every((w) => hay.includes(w))
+}
+
+/** 후속 관리: 무응답 · 내용 바뀜 · 답장 안 함 · 답 기다림 (받은 업무 응답에서 고른다) */
+function followupGroups(d: InboxData): Group[] {
+  const all = [...d.tabs.todo.now, ...d.tabs.todo.week, ...d.tabs.todo.later, ...d.tabs.sent, ...d.tabs.reference]
+  const seen = new Set<number>()
+  const take = (pred: (c: Card) => boolean) =>
+    all.filter((c) => {
+      if (seen.has(c.task_id) || !pred(c)) return false
+      seen.add(c.task_id)
+      return true
+    })
+  return [
+    { key: 'no-reply', label: '답이 없어요', tone: 'red', hint: '보낸 지 영업일 3일째', cards: take((c) => c.no_reply) },
+    { key: 'changed', label: '상대가 내용을 바꿨어요', tone: 'blue', hint: '전후 비교 · 근거 · 되돌리기', cards: take((c) => c.changed_unseen) },
+    { key: 'nudge', label: '아직 답장하지 않았어요', tone: 'amber', hint: '받은 지 며칠 지난 업무', cards: take((c) => c.nudge_days != null) },
+    { key: 'waiting', label: '답 기다리는 중', hint: '답장을 보낸 업무', cards: d.tabs.sent.filter((c) => !seen.has(c.task_id)) },
+  ]
+}
+
+export default function Inbox({ mode }: { mode: Mode }) {
+  const { id } = useParams()
   const navigate = useNavigate()
+  const base = mode === 'followup' ? '/followup' : '/inbox'
   const [data, setData] = useState<InboxData | null>(null)
   const [google, setGoogle] = useState<GoogleStatus | null>(null)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<Tab>('todo')
+  const [query, setQuery] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(() => {
     api
@@ -40,7 +87,6 @@ export default function Inbox() {
       .then((d) => {
         setData(d)
         setError('')
-        rememberOrder(d)
       })
       .catch((e: Error) => setError(e.message))
     api
@@ -49,34 +95,70 @@ export default function Inbox() {
       .catch(() => {})
   }, [])
 
-  // j / k: 대장 줄 사이 이동, Enter: 열기 (입력칸에서는 무시)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return
-      if (e.key !== 'j' && e.key !== 'k') return
-      const rows = [...document.querySelectorAll<HTMLAnchorElement>('.ledger-link')]
-      if (rows.length === 0) return
-      const at = rows.indexOf(document.activeElement as HTMLAnchorElement)
-      const next = e.key === 'j' ? Math.min(at + 1, rows.length - 1) : Math.max(at - 1, 0)
-      rows[at < 0 ? 0 : next].focus()
-      e.preventDefault()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
   useEffect(() => {
     load()
-    const id = window.setInterval(load, REFRESH_MS)
+    const t = window.setInterval(load, REFRESH_MS)
     const onVisible = () => {
       if (document.visibilityState === 'visible') load()
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => {
-      window.clearInterval(id)
+      window.clearInterval(t)
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [load])
+
+  // 상세에서 한 동작(상태 · 탭 이동)을 목록에도 곧 반영한다
+  useEffect(() => {
+    if (!id) return
+    const t = window.setTimeout(load, 1500)
+    return () => window.clearTimeout(t)
+  }, [id, load])
+
+  const groups: Group[] = useMemo(() => {
+    if (!data) return []
+    if (mode === 'followup') return followupGroups(data)
+    if (tab === 'todo') return BUCKETS.map((b) => ({ key: b.key, label: b.label, tone: b.key === 'now' ? ('red' as const) : undefined, cards: data.tabs.todo[b.key] }))
+    return [{ key: tab, label: '', cards: data.tabs[tab] }]
+  }, [data, mode, tab])
+
+  const q = query.trim()
+  const visible: Group[] = groups.map((g) => ({ ...g, cards: g.cards.filter((c) => matches(c, q)) })).filter((g) => g.cards.length > 0)
+  const order = visible.flatMap((g) => g.cards.map((c) => c.task_id))
+  const at = id ? order.indexOf(Number(id)) : -1
+  const open = useCallback((taskId: number) => navigate(`${base}/${taskId}`), [navigate, base])
+  const close = useCallback(() => navigate(base), [navigate, base])
+  const prev = at > 0 ? () => open(order[at - 1]) : undefined
+  const next = at >= 0 && at < order.length - 1 ? () => open(order[at + 1]) : undefined
+
+  // 키보드: j/k 다음 · 이전, Esc 닫기, / 검색 (입력칸에서는 Esc로 빠져나오기만)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (isTyping(e.target)) {
+        if (e.key === 'Escape') (e.target as HTMLElement).blur()
+        return
+      }
+      if (e.key === '/') {
+        searchRef.current?.focus()
+        e.preventDefault()
+      } else if (e.key === 'Escape' && id) {
+        close()
+      } else if ((e.key === 'j' || e.key === 'k') && order.length > 0) {
+        const to = e.key === 'j' ? Math.min(at + 1, order.length - 1) : Math.max(at - 1, 0)
+        open(order[at < 0 ? 0 : to])
+        e.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [order, at, id, open, close])
+
+  // 고른 줄이 목록에서 보이게
+  useEffect(() => {
+    if (!id) return
+    document.querySelector(`.row-link[data-task="${id}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [id])
 
   const sync = async () => {
     setSyncing(true)
@@ -111,153 +193,143 @@ export default function Inbox() {
     setRowError(null)
     try {
       const res = await api.post<{ task_id: number }>(`/emails/${emailId}/promote`)
-      navigate(`/tasks/${res.task_id}`)
+      load()
+      open(res.task_id)
     } catch (e) {
       setRowError({ key, message: (e as Error).message })
+    } finally {
       setBusy(null)
     }
   }
 
   const notConnected = !!google && (!google.enabled || google.status !== 'connected')
   const connected = google?.enabled && google.status === 'connected'
-
   const counts = data?.counts
   const errorFor = (key: string) => (rowError?.key === key ? <div className="alert alert-red small">{rowError.message}</div> : null)
-  const todayText = shortDate(new Date().toISOString(), false)
-
-  const tally: { key: string; label: string; value: number | undefined; tab: Tab; lead?: boolean; hint: string }[] = [
-    { key: 'now', label: '지금 처리', value: counts?.now, tab: 'todo', lead: true, hint: '기한이 가깝거나 지났거나 중요도가 높은 업무' },
-    { key: 'week', label: '이번 주', value: counts?.week, tab: 'todo', hint: '이번 주 안에 기한이 있는 업무' },
-    { key: 'later', label: '나중에', value: counts?.later, tab: 'todo', hint: '기한이 멀거나 없는 업무' },
-    { key: 'sent', label: '답 기다림', value: counts?.sent, tab: 'sent', hint: '답장을 보내고 상대 회신을 기다리는 업무' },
-  ]
+  const followCount = mode === 'followup' ? groups.reduce((n, g) => n + (g.key === 'waiting' ? 0 : g.cards.length), 0) : 0
 
   return (
-    <div className="page">
-      <header className="page-head">
-        <div>
-          <h1>받은 업무</h1>
-          <p className="page-sub">
-            오늘 <span className="num">{todayText}</span> 기준 · 급한 순서로 정리했어요
-            <span className="key-hint">
-              {' '}
-              · <kbd>j</kbd> <kbd>k</kbd>로 줄 이동
-            </span>
-          </p>
-        </div>
-        {connected && (
-          <div className="sync-line">
-            <span className="sync-state">
-              <span className="live-dot" aria-hidden="true" />
-              <span className="sync-mail">{google.google_email}</span>
-            </span>
-            <span className="muted">{google.last_synced_at ? `${relative(google.last_synced_at)} 확인` : '아직 확인 전'}</span>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={sync} disabled={syncing}>
-              <Icon name="refresh" size={15} className={syncing ? 'spin' : ''} />
-              {syncing ? '확인 중…' : '지금 확인'}
-            </button>
-          </div>
-        )}
-      </header>
-
-      {notConnected && (
-        <section className="notice notice-action">
-          <div>
-            <b>{google.enabled && google.status === 'reauth_required' ? 'Gmail 연결이 만료되었어요' : 'Gmail을 연결하면 여기서 시작돼요'}</b>
-            <p>
-              {google.enabled && google.status === 'reauth_required'
-                ? '다시 연결하면 그동안 온 업무 메일을 이어서 정리합니다. 이미 만든 업무는 아래에 그대로 있습니다.'
-                : '받은 메일 중 업무 메일만 골라 요약 · 할 일 · 기한을 정리하고, 기한은 캘린더에 올려 드립니다.'}
-            </p>
-          </div>
-          <Link to="/settings" className="btn btn-primary btn-sm">
-            {google.enabled && google.status === 'reauth_required' ? '다시 연결하기' : 'Gmail 연결하기'}
-          </Link>
-        </section>
-      )}
-      {syncError && <div className="alert alert-red">{syncError}</div>}
-      {google?.status === 'connected' && google.last_sync_error && <div className="alert alert-red">{google.last_sync_error}</div>}
-      {error && (
-        <div className="alert alert-red alert-action">
-          <span>받은 업무를 불러오지 못했습니다. {error}</span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={load}>
-            다시 불러오기
-          </button>
-        </div>
-      )}
-
-      <section className="sheet">
-        <div className="tally" role="group" aria-label="업무 합계">
-          {tally.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              className={`tally-cell${t.lead ? ' lead' : ''}`}
-              onClick={() => setTab(t.tab)}
-              title={t.hint}
-            >
-              <span className="tally-label">{t.label}</span>
-              <span className="tally-value num">
-                {t.value ?? '–'}
-                <small>건</small>
+    <div className={`split${id ? ' has-panel' : ''}`}>
+      <section className="list-pane" aria-label={mode === 'followup' ? '후속 관리 목록' : '받은 업무 목록'}>
+        <header className="pane-head">
+          <div className="pane-title">
+            <h1>{mode === 'followup' ? '후속 관리' : '받은 업무'}</h1>
+            {mode === 'followup' ? (
+              <span className="muted small">
+                챙길 업무 <b className="num">{followCount}</b>건
               </span>
-            </button>
-          ))}
-        </div>
-
-        <div className="tabs-line" role="group" aria-label="업무 구분">
-          {TABS.map((t) => (
-            <button key={t.key} type="button" aria-pressed={tab === t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-              {t.label}
-              {counts && <span className="tab-count num">{counts[t.key]}</span>}
-            </button>
-          ))}
-        </div>
-
-        <div className="ledger">
-          <div className="ledger-head" aria-hidden="true">
-            <span>중요</span>
-            <span>상대 · 업무</span>
-            <span>받은 날</span>
-            <span>할 일</span>
-            <span>기한</span>
-            <span />
-          </div>
-          {!data && !error && <LedgerSkeleton />}
-          {data &&
-            tab === 'todo' &&
-            (counts?.todo === 0 ? (
-              <Empty title="지금 처리할 업무가 없어요" body="새 업무 메일이 오면 기한과 중요도 순으로 여기에 올라옵니다. 답장을 보낸 업무는 '답장 보냄'에서 볼 수 있어요." />
             ) : (
-              BUCKETS.filter((b) => data.tabs.todo[b.key].length > 0).map((b) => (
-                <div key={b.key} className="ledger-group">
-                  <div className={`ledger-group-head${b.key === 'now' ? ' now' : ''}`}>
-                    <span>{b.label}</span>
-                    <span className="num">{data.tabs.todo[b.key].length}건</span>
-                  </div>
-                  <CardList cards={data.tabs.todo[b.key]} />
+              connected && (
+                <button type="button" className="sync" onClick={sync} disabled={syncing} title="Gmail에서 새 메일 확인">
+                  <span className="live-dot" aria-hidden="true" />
+                  <span>{syncing ? '확인 중…' : google.last_synced_at ? `${relative(google.last_synced_at)} 확인` : '아직 확인 전'}</span>
+                  <Icon name="refresh" size={14} className={syncing ? 'spin' : ''} />
+                </button>
+              )
+            )}
+          </div>
+          <label className="search">
+            <Icon name="search" size={16} />
+            <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="보낸 사람 · 내용 검색" aria-label="목록 검색" />
+            <kbd>/</kbd>
+          </label>
+          {mode === 'inbox' && (
+            <div className="seg" role="group" aria-label="업무 구분">
+              {TABS.map((t) => (
+                <button key={t.key} type="button" aria-pressed={tab === t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
+                  {t.label}
+                  {counts && <span className="num">{counts[t.key]}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </header>
+
+        <div className="list-scroll">
+          {notConnected && mode === 'inbox' && (
+            <div className="notice">
+              <b>{google.enabled && google.status === 'reauth_required' ? 'Gmail 연결이 만료되었어요' : 'Gmail을 연결해 주세요'}</b>
+              <p>{google.enabled && google.status === 'reauth_required' ? '다시 연결하면 그동안 온 업무 메일을 이어서 정리합니다.' : '업무 메일만 골라 요약 · 할 일 · 기한을 정리해 드려요.'}</p>
+              <Link to="/settings" className="btn btn-primary btn-sm">
+                {google.enabled && google.status === 'reauth_required' ? '다시 연결하기' : 'Gmail 연결하기'}
+              </Link>
+            </div>
+          )}
+          {syncError && <div className="alert alert-red">{syncError}</div>}
+          {google?.status === 'connected' && google.last_sync_error && <div className="alert alert-red">{google.last_sync_error}</div>}
+          {error && (
+            <div className="alert alert-red alert-action">
+              <span>목록을 불러오지 못했습니다. {error}</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={load}>
+                다시 불러오기
+              </button>
+            </div>
+          )}
+
+          {!data && !error && (
+            <div className="skeleton" role="status" aria-label="불러오는 중">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="skeleton-row">
+                  <span />
+                  <span />
+                  <span />
                 </div>
-              ))
-            ))}
-          {data &&
-            tab !== 'todo' &&
-            (data.tabs[tab].length === 0 ? <Empty title={EMPTY[tab].title} body={EMPTY[tab].body} /> : <CardList cards={data.tabs[tab]} />)}
-        </div>
-        {data && data.snoozed.length > 0 && (
-          <details className="fold">
-            <summary>
-              <span>나중에 보기로 미룬 업무</span>
-              <span className="num muted">{data.snoozed.length}건</span>
-            </summary>
-            <div className="ledger">
+              ))}
+            </div>
+          )}
+
+          {data && visible.length === 0 && (
+            <div className="empty">
+              {q ? (
+                <>
+                  <b>"{q}"에 맞는 업무가 없어요</b>
+                  <p>보낸 사람 이름 · 회사 · 요약으로 찾습니다.</p>
+                </>
+              ) : mode === 'followup' ? (
+                <>
+                  <b>챙길 업무가 없어요</b>
+                  <p>답이 없거나 상대가 내용을 바꾼 업무가 생기면 여기에 모여요.</p>
+                </>
+              ) : (
+                <>
+                  <b>{EMPTY[tab].title}</b>
+                  <p>{EMPTY[tab].body}</p>
+                </>
+              )}
+            </div>
+          )}
+
+          {visible.map((g) => (
+            <div key={g.key} className="group">
+              {g.label && (
+                <div className={`group-head${g.tone ? ` tone-${g.tone}` : ''}`}>
+                  <span>{g.label}</span>
+                  <span className="num">{g.cards.length}</span>
+                  {g.hint && <span className="group-hint">{g.hint}</span>}
+                </div>
+              )}
+              {g.cards.map((c) => (
+                <InboxCard key={c.task_id} card={c} to={`${base}/${c.task_id}`} active={String(c.task_id) === id} />
+              ))}
+            </div>
+          ))}
+
+          {mode === 'inbox' && data && data.snoozed.length > 0 && (
+            <details className="fold">
+              <summary>
+                <span>나중에 보기로 미룬 업무</span>
+                <span className="muted num">{data.snoozed.length}</span>
+              </summary>
               {data.snoozed.map((c) => {
                 const key = `snooze-${c.task_id}`
                 return (
                   <InboxCard
                     key={c.task_id}
                     card={c}
+                    to={`${base}/${c.task_id}`}
+                    active={String(c.task_id) === id}
                     extra={
-                      <div className="ledger-extra">
+                      <div className="row-extra">
                         <span className="muted small">{dateTime(c.wake_at)}에 다시 표시</span>
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => unsnooze(c.task_id)} disabled={busy === key}>
                           {busy === key ? '처리 중…' : '지금 보기'}
@@ -268,100 +340,62 @@ export default function Inbox() {
                   />
                 )
               })}
-            </div>
-          </details>
-        )}
+            </details>
+          )}
 
-        {data && data.not_work.length > 0 && (
-          <details className="fold">
-            <summary>
-              <span>업무 아님으로 분류된 메일</span>
-              <span className="num muted">{data.not_work.length}건</span>
-            </summary>
-            {!data.triage_enabled && <div className="alert alert-amber fold-note">자동 판별이 꺼져 있어 업무로 분석할 수 없습니다.</div>}
-            <ul className="not-work-list">
-              {data.not_work.map((m) => {
-                const key = `mail-${m.email_id}`
-                return (
-                  <li key={m.email_id}>
-                    <div className="not-work-main">
-                      <div className="small">
-                        <b>{m.sender}</b>
-                        {m.received_at && <span className="muted"> · {dateTime(m.received_at)}</span>}
+          {mode === 'inbox' && data && data.not_work.length > 0 && (
+            <details className="fold">
+              <summary>
+                <span>업무 아님으로 분류된 메일</span>
+                <span className="muted num">{data.not_work.length}</span>
+              </summary>
+              {!data.triage_enabled && <div className="alert alert-amber fold-note">자동 판별이 꺼져 있어 업무로 분석할 수 없습니다.</div>}
+              <ul className="plain-list">
+                {data.not_work.map((m) => {
+                  const key = `mail-${m.email_id}`
+                  return (
+                    <li key={m.email_id}>
+                      <div className="plain-main">
+                        <div className="small">
+                          <b>{m.sender}</b>
+                          {m.received_at && <span className="muted"> · {dateTime(m.received_at)}</span>}
+                        </div>
+                        <div>{m.subject || '(제목 없음)'}</div>
+                        {m.triage_reason && (
+                          <div className="muted small">
+                            <span className="ai-tag">AI 판단</span> {m.triage_reason}
+                          </div>
+                        )}
+                        {errorFor(key)}
                       </div>
-                      <div>{m.subject || '(제목 없음)'}</div>
-                      {m.triage_reason && <div className="muted small">분류 이유: {m.triage_reason}</div>}
-                      {errorFor(key)}
-                    </div>
-                    {data.triage_enabled && (
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => promote(m.email_id)} disabled={busy === key}>
-                        {busy === key ? '분석 중…' : '업무로 처리'}
-                      </button>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
-          </details>
-        )}
+                      {data.triage_enabled && (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => promote(m.email_id)} disabled={busy === key}>
+                          {busy === key ? '분석 중…' : '업무로 처리'}
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </details>
+          )}
+          <p className="key-hint muted small">
+            <kbd>j</kbd> <kbd>k</kbd> 이동 · <kbd>Esc</kbd> 닫기 · <kbd>/</kbd> 검색
+          </p>
+        </div>
       </section>
 
+      <section className="detail-pane" aria-label="업무 상세">
+        {id ? (
+          <TaskPanel id={id} onClose={close} onOpen={open} onPrev={prev} onNext={next} position={at >= 0 ? `${at + 1} / ${order.length}` : undefined} />
+        ) : (
+          <div className="pane-empty">
+            <Icon name="inbox" size={28} />
+            <b>업무를 고르면 여기에 열려요</b>
+            <p className="muted small">요약 · 할 일 · 답장 초안을 목록을 떠나지 않고 처리할 수 있어요.</p>
+          </div>
+        )}
+      </section>
     </div>
-  )
-}
-
-/** 업무 상세의 "이전 · 다음 업무"에 쓰는 순서. 화면 상태라 이 탭(세션)에만 둔다. */
-function rememberOrder(d: InboxData) {
-  const ids = [...d.tabs.todo.now, ...d.tabs.todo.week, ...d.tabs.todo.later, ...d.tabs.sent, ...d.tabs.reference, ...d.tabs.done].map(
-    (c) => c.task_id,
-  )
-  try {
-    window.sessionStorage.setItem('followup.order', JSON.stringify(ids))
-  } catch {
-    // 저장소를 못 쓰면 이전 · 다음 링크만 빠진다
-  }
-}
-
-const EMPTY: Record<Exclude<Tab, 'todo'>, { title: string; body: string }> = {
-  sent: { title: '답을 기다리는 업무가 없어요', body: '답장을 보내면 여기로 옮겨지고, 영업일 3일 동안 답이 없으면 다시 알려 드립니다.' },
-  reference: { title: '참고용 업무가 없어요', body: '답장이 필요 없는 공지 · 안내 메일이 여기에 모입니다.' },
-  done: { title: '완료한 업무가 없어요', body: '완료하거나 답장 없이 닫은 업무가 여기에 남습니다.' },
-}
-
-function isTyping(target: EventTarget | null) {
-  const el = target as HTMLElement | null
-  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
-}
-
-function Empty({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="empty">
-      <b>{title}</b>
-      <p>{body}</p>
-    </div>
-  )
-}
-
-function LedgerSkeleton() {
-  return (
-    <div className="skeleton" role="status" aria-label="불러오는 중">
-      {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="skeleton-row">
-          <span />
-          <span />
-          <span />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function CardList({ cards }: { cards: Card[] }) {
-  return (
-    <>
-      {cards.map((c) => (
-        <InboxCard key={c.task_id} card={c} />
-      ))}
-    </>
   )
 }
