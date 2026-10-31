@@ -29,6 +29,7 @@
 | 답장과 수명주기 (설계 6단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-27-reply-and-lifecycle-design.md) · [구현 계획](docs/superpowers/plans/2026-10-27-reply-and-lifecycle.md) · [정확도 측정](docs/evals/2026-10-27-reply-lifecycle.md) |
 | 정리 (설계 7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
 | RAG 1단계: 내 자료로 답장 초안 채우기 | 완료 (로컬 점검, 가상 자료) — [설계](docs/superpowers/specs/2026-10-29-rag-documents-design.md) · [구현 계획](docs/superpowers/plans/2026-10-29-rag-documents.md) · [정확도 측정](docs/evals/2026-10-29-rag-documents.md) |
+| 화면 전면 개편 (견적서 · 거래명세서 양식) | 완료 (가상 데이터 점검) — [설계](docs/superpowers/specs/2026-10-31-ui-redesign-design.md) · [디자인 체계](DESIGN.md) |
 | RAG 다음 단계 (업무 요약 · 메일 색인 · 문체, 의미 검색) | 예정 — [상위 설계](docs/superpowers/specs/2026-10-26-rag-design.md) |
 
 **문서** · [변경 이력](CHANGELOG.md) · [결정 기록](docs/decisions.md) · [데이터 · 개인정보 흐름](docs/privacy.md) · [문제 해결](docs/troubleshooting.md) · [설계 문서 · 구현 계획](docs/superpowers/)
