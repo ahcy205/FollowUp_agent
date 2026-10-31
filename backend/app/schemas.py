@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StrictBool, field_validator
 
 
 class ORM(BaseModel):
@@ -344,3 +344,66 @@ class KnowledgeSourceOut(ORM):
 
 class VisibilityIn(_Strict):
     visibility: Literal["shareable", "internal"]
+
+
+class KnowledgeChunkOut(BaseModel):
+    ordinal: int
+    lines: list[str]
+    flagged: bool
+
+
+class KnowledgeReferenceOut(BaseModel):
+    """이 자료를 참고한 내 답장 초안."""
+    task_id: int
+    task_title: str
+    draft_status: str
+    updated_at: datetime
+
+
+class KnowledgeSourceDetailOut(KnowledgeSourceOut):
+    chunks: list[KnowledgeChunkOut] = []
+    referenced_by: list[KnowledgeReferenceOut] = []
+
+
+SEARCH_Q_MAX = 200
+
+
+class KnowledgeSearchIn(_Strict):
+    q: str = Field(max_length=2000)  # 앞뒤 공백을 걷어낸 뒤 1~200자인지는 아래에서 한국어 문구로 확인
+
+    @field_validator("q")
+    @classmethod
+    def _q(cls, v: str) -> str:
+        v = v.strip()
+        if not 1 <= len(v) <= SEARCH_Q_MAX:
+            raise ValueError(f"검색어를 1~{SEARCH_Q_MAX}자로 입력해 주세요.")
+        return v
+
+
+class KnowledgeHitOut(BaseModel):
+    source_id: int
+    title: str
+    chunk_ordinal: int
+    score: float
+    lines: list[str]
+
+
+class KnowledgeSearchOut(BaseModel):
+    hits: list[KnowledgeHitOut]
+
+
+# ------------------------------------------------------------------ 최근 업무 활동
+
+class ActivityItemOut(BaseModel):
+    """메일 업무의 처리 기록 한 줄. 입력 · 출력 데이터(input_data · output_data)는 넣지 않는다."""
+    id: int
+    task_id: int
+    task_title: str
+    action_type: str
+    reason: str
+    risk_level: str
+    created_at: datetime
+
+
+class ActivityOut(BaseModel):
+    items: list[ActivityItemOut]

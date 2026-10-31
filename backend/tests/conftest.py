@@ -34,7 +34,15 @@ from app.google.client import set_google_override  # noqa: E402
 from app.mail import sync as mail_sync  # noqa: E402
 from app.db import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
-from app.security import ai_action_limiter, calendar_retry_limiter, google_sync_limiter, login_limiter, send_limiter, upload_limiter  # noqa: E402
+from app.security import (  # noqa: E402
+    ai_action_limiter,
+    calendar_retry_limiter,
+    google_sync_limiter,
+    knowledge_search_limiter,
+    login_limiter,
+    send_limiter,
+    upload_limiter,
+)
 from tests.fake_google import FakeGoogle  # noqa: E402
 
 TEST_GOOGLE_TOKEN_KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="  # base64 of 32 bytes
@@ -72,6 +80,7 @@ def _fresh_db():
     ai_action_limiter.reset()
     send_limiter.reset()
     upload_limiter.reset()
+    knowledge_search_limiter.reset()
     oauth.clear_access_token_cache()
     mail_sync.clear_skipped()
     yield

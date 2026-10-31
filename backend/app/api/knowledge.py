@@ -1,4 +1,4 @@
-"""자료실 API: 목록 · 올리기 · 공유 등급 · 지우기."""
+"""자료실 API: 목록 · 상세 · 올리기 · 공유 등급 · 지우기 · 검색 시험."""
 import logging
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -8,17 +8,28 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.knowledge import store
+from app.knowledge import search, store
+from app.knowledge.draft_sources import _cites
 from app.mail.errors import ActionError
-from app.models import KnowledgeChunk, KnowledgeSource, User
-from app.schemas import KnowledgeSourceOut, VisibilityIn
-from app.security import get_current_user, upload_limiter
+from app.models import KnowledgeChunk, KnowledgeSource, ReplyDraft, Task, User
+from app.schemas import (
+    KnowledgeChunkOut,
+    KnowledgeHitOut,
+    KnowledgeReferenceOut,
+    KnowledgeSearchIn,
+    KnowledgeSearchOut,
+    KnowledgeSourceDetailOut,
+    KnowledgeSourceOut,
+    VisibilityIn,
+)
+from app.security import get_current_user, knowledge_search_limiter, upload_limiter
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 log = logging.getLogger(__name__)
 
 OFF_MESSAGE = "자료 기능이 꺼져 있습니다."
 UPLOAD_FAILED = "파일을 처리하지 못했습니다. 잠시 후 다시 올려 주세요."
+HIT_LINES = 5  # 검색 시험 결과에 보여 줄 덩어리 앞부분 줄 수
 
 
 def _require_enabled() -> None:
@@ -115,3 +126,44 @@ def delete_source(source_id: int, user: User = Depends(get_current_user), db: Se
     store.delete_source(db, source)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/sources/{source_id}", response_model=KnowledgeSourceDetailOut)
+def source_detail(source_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """자료 정보 + 덩어리 + 이 자료를 참고한 내 초안. 스위치가 꺼져도 볼 수 있다(목록과 같음)."""
+    source = _get(db, user, source_id)
+    chunks = db.scalars(
+        select(KnowledgeChunk)
+        .where(KnowledgeChunk.source_id == source.id, KnowledgeChunk.user_id == user.id)
+        .order_by(KnowledgeChunk.ordinal)
+    ).all()
+    # sources는 JSON이라 내 초안을 한 번에 읽어 파이썬에서 거른다(개인 규모, purge_source_from_drafts와 같음).
+    drafts = db.execute(
+        select(ReplyDraft, Task.title)
+        .join(Task, Task.id == ReplyDraft.task_id)
+        .where(ReplyDraft.user_id == user.id, Task.user_id == user.id)
+        .order_by(ReplyDraft.updated_at.desc(), ReplyDraft.id.desc())
+    ).all()
+    base = _out(source, _counts(db, [source.id]))
+    return KnowledgeSourceDetailOut(
+        **base.model_dump(),
+        chunks=[KnowledgeChunkOut(ordinal=c.ordinal, lines=[str(x) for x in (c.lines or [])], flagged=bool(c.flagged))
+                for c in chunks],
+        referenced_by=[KnowledgeReferenceOut(task_id=d.task_id, task_title=title, draft_status=d.status,
+                                             updated_at=d.updated_at)
+                       for d, title in drafts if _cites(d.sources, source.id)],
+    )
+
+
+@router.post("/search", response_model=KnowledgeSearchOut)
+def search_preview(body: KnowledgeSearchIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """답장 초안과 같은 검색(답장에 써도 되는 자료 · 의심 없는 덩어리)을 미리 본다.
+    검색어가 주소 · 접속 기록에 남지 않게 POST로 받는다. 검색어는 로그에 남기지 않는다."""
+    _require_enabled()
+    knowledge_search_limiter.check(f"ksearch:{user.id}")
+    hits = search.search_shareable(db, user.id, body.q)
+    return KnowledgeSearchOut(hits=[
+        KnowledgeHitOut(source_id=h.source_id, title=h.title, chunk_ordinal=h.ordinal, score=round(h.score, 3),
+                        lines=[str(x) for x in h.lines[:HIT_LINES]])
+        for h in hits
+    ])
