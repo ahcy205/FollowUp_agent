@@ -39,7 +39,7 @@ def _run(db, llm, case) -> dict:
     t = case["task"]
     thread = f"ks-thr-{next(_seq)}"
     task = Task(user_id=user.id, title=t["title"], goal="\n".join(t["requests"]), status=TaskStatus.ACTION_REQUIRED,
-                origin="mail", agent_enabled=False, gmail_thread_id=thread,
+                origin="mail", gmail_thread_id=thread,
                 plan=[{"id": i, "title": title, "done": False, "evidence": memo, "due_at": None, "source": "agent"}
                       for i, (title, memo) in enumerate(t["plan"], 1)],
                 brief={"analysis": "done", "summary": t["summary"], "requests": list(t["requests"]),

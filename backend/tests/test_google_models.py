@@ -40,17 +40,6 @@ def test_same_gmail_id_other_user_ok():
         db.commit()
 
 
-def test_seed_emails_have_null_gmail_fields(client):
-    register(client)
-    with SessionLocal() as db:
-        emails = db.scalars(select(Email)).all()
-        assert emails
-        for e in emails:
-            assert e.gmail_message_id is None
-            assert e.triage is None
-            assert e.cc == [] and e.attachments == [] and e.gmail_meta == {}
-
-
 def test_one_google_account_per_user():
     with SessionLocal() as db:
         u = _user(db, "a@example.com")

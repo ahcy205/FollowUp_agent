@@ -36,7 +36,7 @@ def _task(db, uid, *, thread="thr-a", status=TaskStatus.ACTION_REQUIRED, **over)
              "counterpart": {"name": "박지은", "organization": "B상사"}, "needs_reply": True, "priority": "NORMAL"}
     brief.update(over.pop("brief", {}))
     t = Task(user_id=uid, title="B상사 납품 요청", goal="수량 100개 납품", status=status, origin="mail",
-             agent_enabled=False, gmail_thread_id=thread, brief=brief,
+             gmail_thread_id=thread, brief=brief,
              plan=over.pop("plan", [{"id": 1, "title": "견적 회신", "done": False, "evidence": "", "due_at": None,
                                      "source": "agent"}]), **over)
     db.add(t)

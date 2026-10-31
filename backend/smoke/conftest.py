@@ -17,7 +17,6 @@ else:
     os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/smoke.db"
     os.environ["APP_ENV"] = "test"
     os.environ.setdefault("SECRET_KEY", "smoke-secret-key-that-is-long-enough-1234567890")
-    os.environ["DEMO_USER_PASSWORD"] = ""
 
     from app.config import get_settings
 

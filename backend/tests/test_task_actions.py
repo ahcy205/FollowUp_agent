@@ -28,7 +28,7 @@ def _user(db, email="u@example.com") -> User:
 def _task(db, uid, **over) -> Task:
     n = next(_seq)
     fields = dict(user_id=uid, title="견적 요청", goal="견적서 송부", status=TaskStatus.ACTION_REQUIRED,
-                  origin="mail", agent_enabled=False, gmail_thread_id=f"thr-{n}", priority="NORMAL",
+                  origin="mail", gmail_thread_id=f"thr-{n}", priority="NORMAL",
                   plan=[{"id": 1, "title": "견적서 보내기", "done": False, "evidence": "", "due_at": None,
                          "source": "agent"},
                         {"id": 3, "title": "납기 회신", "done": False, "evidence": "", "due_at": None,

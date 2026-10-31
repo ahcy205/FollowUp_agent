@@ -30,7 +30,7 @@ def _setup(db, *, mail="TS-200 100개 단가 알려 주세요.", memo="", reques
     db.commit()
     db.add(GoogleAccount(user_id=u.id, google_email=ME, refresh_token_enc="enc", scopes=[]))
     t = Task(user_id=u.id, title="견적 요청", goal="견적서 송부", status=TaskStatus.ACTION_REQUIRED, origin="mail",
-             agent_enabled=False, gmail_thread_id="thr-1", priority="NORMAL",
+             gmail_thread_id="thr-1", priority="NORMAL",
              plan=[{"id": 1, "title": "단가 확인", "done": False, "evidence": memo, "due_at": None,
                     "source": "agent"}],
              brief={"analysis": "done", "summary": "TS-200 견적 요청", "needs_reply": True,

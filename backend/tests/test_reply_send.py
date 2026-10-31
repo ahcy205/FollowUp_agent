@@ -31,7 +31,7 @@ def _setup(db, uid: int, *, body=BODY, cc_selected=None, status="draft") -> tupl
         db.add(GoogleAccount(user_id=uid, google_email=ME, refresh_token_enc=encrypt_token("1//fake-refresh"),
                              scopes=["openid"], status=GoogleAccountStatus.CONNECTED))
     t = Task(user_id=uid, title="견적 요청", goal="견적서 송부", status=TaskStatus.ACTION_REQUIRED, origin="mail",
-             agent_enabled=False, gmail_thread_id="thr-1", priority="NORMAL",
+             gmail_thread_id="thr-1", priority="NORMAL",
              plan=[{"id": 1, "title": "단가 확인", "done": True, "evidence": "단가 1200원"},
                    {"id": 2, "title": "납기 회신", "done": False, "evidence": ""}],
              brief={"analysis": "done", "summary": "견적 요청", "needs_reply": True})

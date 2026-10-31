@@ -72,7 +72,7 @@ def _run_change(db, llm, case) -> dict:
     t = case["task"]
     thread = f"rs-thr-{next(_seq)}"
     task = Task(user_id=user.id, title=t["title"], goal="\n".join(t["requests"]), status=t["status"],
-                current_step="", origin="mail", agent_enabled=False, gmail_thread_id=thread,
+                current_step="", origin="mail", gmail_thread_id=thread,
                 plan=[{"id": i, "title": title, "done": done, "evidence": "", "due_at": None, "source": "agent"}
                       for i, (title, done) in enumerate(t["plan"], 1)],
                 brief={"analysis": "done", "summary": t["summary"], "requests": list(t["requests"]),
@@ -164,7 +164,7 @@ def _run_related(db, llm, case) -> dict:
         thread = f"rs-thr-{next(_seq)}"
         created = now - timedelta(days=c["days_ago"])
         cand = Task(user_id=user.id, title=c["title"], goal=c["summary"], status=c["status"], origin="mail",
-                    agent_enabled=False, gmail_thread_id=thread, plan=[], created_at=created,
+                    gmail_thread_id=thread, plan=[], created_at=created,
                     brief={"analysis": "done", "summary": c["summary"], "requests": [c["summary"]]})
         db.add(cand)
         db.flush()
@@ -174,7 +174,7 @@ def _run_related(db, llm, case) -> dict:
         ids[key] = cand.id
     thread = f"rs-thr-{next(_seq)}"
     task = Task(user_id=user.id, title=case["subject"], goal="메일 분석 대기 중", status=TaskStatus.PENDING,
-                current_step="메일 분석 대기", origin="mail", agent_enabled=False, gmail_thread_id=thread, plan=[],
+                current_step="메일 분석 대기", origin="mail", gmail_thread_id=thread, plan=[],
                 brief={"analysis": "pending", "attempts": 0}, created_at=now)
     db.add(task)
     db.flush()
@@ -217,7 +217,7 @@ def _run_draft(db, llm, case) -> dict:
     t = case["task"]
     thread = f"rs-thr-{next(_seq)}"
     task = Task(user_id=user.id, title=t["title"], goal="\n".join(t["requests"]), status=TaskStatus.ACTION_REQUIRED,
-                origin="mail", agent_enabled=False, gmail_thread_id=thread,
+                origin="mail", gmail_thread_id=thread,
                 plan=[{"id": i, "title": title, "done": False, "evidence": memo, "due_at": None, "source": "agent"}
                       for i, (title, memo) in enumerate(t["plan"], 1)],
                 brief={"analysis": "done", "summary": t["summary"], "requests": list(t["requests"]),

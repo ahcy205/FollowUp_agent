@@ -44,9 +44,12 @@ def test_merged_into_fk(client):
 
 
 def test_api_exposes(client):
-    register(client)
-    with SessionLocal() as db:
-        task_id = db.scalars(select(Task.id)).first()
+    me = register(client)
+    with SessionLocal() as db:  # 예전에는 데모 가상 업무를 썼다: 메일 업무를 직접 만든다
+        t = Task(user_id=me["id"], title="견적 요청", goal="견적서 송부", origin="mail")
+        db.add(t)
+        db.commit()
+        task_id = t.id
     r = client.get(f"/api/tasks/{task_id}")
     assert r.status_code == 200, r.text
     task = r.json()["task"]

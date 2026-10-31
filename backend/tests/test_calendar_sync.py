@@ -43,7 +43,7 @@ def setup(google_fake):
 
 def _task(db, uid, *, deadline=DEADLINE, all_day=True, state="none", event_id=None, origin="mail",
           status=TaskStatus.ACTION_REQUIRED) -> int:
-    t = Task(user_id=uid, title=SUMMARY, goal="견적서 송부", status=status, origin=origin, agent_enabled=False,
+    t = Task(user_id=uid, title=SUMMARY, goal="견적서 송부", status=status, origin=origin,
              plan=[{"id": 1, "title": "견적서 작성해 보내기", "done": False}],
              brief={"analysis": "done", "summary": SUMMARY,
                     "counterpart": {"name": NAME, "organization": "파트너"}, "requests": ["견적서 송부"]},
@@ -99,7 +99,7 @@ def test_creates_event_for_deadline_task(setup, google_fake):
         assert ev["start"] == {"date": "2026-10-30"} and ev["summary"] == f"[업무] {SUMMARY}"
         (log,) = _logs(db, tid, "CALENDAR_SYNCED")
         assert log.output_data == {"task_id": tid, "state": "synced", "created": True}
-        assert log.run_id is None and log.user_id == uid
+        assert log.user_id == uid
         # 다시 돌려도 아무 호출이 없다
         _sync(db, aid, google_fake)
         assert len(google_fake.calendar_calls) == 1

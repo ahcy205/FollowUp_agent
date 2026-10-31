@@ -96,7 +96,7 @@ def test_saved_fields(account, google_fake):
     assert e.attachments == ["견적서.pdf"]
     assert e.gmail_meta == {"labels": ["INBOX", "UNREAD"], "list_unsubscribe": True,
                             "precedence": "bulk", "sender_name": "홍길동"}
-    assert e.customer_id is None and e.task_id is None
+    assert e.task_id is None
 
 
 def test_receiver_truncated_to_255(account, google_fake):
@@ -421,17 +421,3 @@ def test_database_error_stops_cycle_without_advancing(account, google_fake):
     res2 = _run(account, google_fake)  # the lost insert is retried, not skipped forever
     assert res2.complete is True and res2.stored == 1
     assert sorted(e.gmail_message_id for e in _gmail_rows()) == sorted([first, locked])
-
-
-def test_demo_reset_keeps_gmail_mail_and_connection(client, account, google_fake):
-    mid = _mail(google_fake, "실제 메일")
-    _run(account, google_fake)
-    assert [r.gmail_message_id for r in _gmail_rows()] == [mid]
-    seed_count = len([e for e in client.get("/api/emails").json()]) - 1
-    assert client.post("/api/demo/reset").status_code == 204
-    assert [r.gmail_message_id for r in _gmail_rows()] == [mid]
-    acc = _acc(account)
-    assert acc is not None and acc.status == GoogleAccountStatus.CONNECTED and acc.history_id
-    with SessionLocal() as db:
-        seed_rows = list(db.scalars(select(Email).where(Email.gmail_message_id.is_(None))))
-    assert len(seed_rows) == seed_count == 8

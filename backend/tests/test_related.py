@@ -37,7 +37,7 @@ def _mail(uid, *, sender, thread=None, content=NEW_BODY, task_id=None, minutes=0
 def _job(db, uid, sender, *, created_at=None, status=TaskStatus.ACTION_REQUIRED, title="견적서 요청", **over) -> Task:
     """보낸 사람이 sender인 메일 업무 하나(원본 메일 포함)."""
     n = next(_seq)
-    t = Task(user_id=uid, title=title, goal="견적", status=status, origin="mail", agent_enabled=False,
+    t = Task(user_id=uid, title=title, goal="견적", status=status, origin="mail",
              gmail_thread_id=f"rel-job-{n}", plan=[], created_at=created_at or datetime.now(UTC) - timedelta(days=1),
              brief={"analysis": "done", "summary": f"{title} 요약", "requests": ["수량 100개 견적"],
                     "needs_reply": True}, **over)

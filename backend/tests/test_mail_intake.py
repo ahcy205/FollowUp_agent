@@ -105,7 +105,7 @@ def test_creates_task_from_work_mail():
         assert task.current_step == "메일 접수 · 할 일 2개"
         assert task.next_action == "견적서 작성해 보내기"
         assert task.priority == "HIGH"
-        assert task.origin == "mail" and task.agent_enabled is False and task.customer_id is None
+        assert task.origin == "mail"
         assert task.gmail_thread_id == "thr-a"
         assert task.brief["analysis"] == "done" and task.brief["email_id"] == mid
         assert task.brief["counterpart"] == {"name": "김대리", "organization": "파트너"}
@@ -114,7 +114,7 @@ def test_creates_task_from_work_mail():
         email = db.get(Email, mid)
         assert email.task_id == task.id and email.processed is True
         (log,) = _logs(db, task.id, "MAIL_INTAKE")
-        assert log.run_id is None and log.user_id == uid
+        assert log.user_id == uid
         assert log.output_data == {"email_id": mid, "summary": "파트너사가 견적서 송부를 요청함", "todo_count": 2,
                                    "deadline": None, "deadline_kind": "none"}
 
@@ -198,7 +198,7 @@ def test_same_thread_attaches_then_change_analysis():
     # 6단계(설계 6.1): 분석이 끝난 업무의 스레드 메일은 붙인 뒤 변경 분석 1회를 한다(접수 분석은 다시 하지 않는다).
     with SessionLocal() as db:
         uid = _user(db)
-        existing = Task(user_id=uid, title="기존", goal="기존 업무", origin="mail", agent_enabled=False,
+        existing = Task(user_id=uid, title="기존", goal="기존 업무", origin="mail",
                         gmail_thread_id="thr-x", brief={"analysis": "done", "email_id": 0})
         db.add(existing)
         db.commit()
@@ -398,7 +398,7 @@ def test_analyze_into_task_direct_returns_false_on_error():
     with SessionLocal() as db:
         uid = _user(db)
         (mid,) = _add(db, [_mail(uid)])
-        task = Task(user_id=uid, title="t", goal=PENDING_GOAL, origin="mail", agent_enabled=False,
+        task = Task(user_id=uid, title="t", goal=PENDING_GOAL, origin="mail",
                     brief={"analysis": "pending", "attempts": 0, "email_id": mid})
         db.add(task)
         db.commit()
@@ -436,7 +436,7 @@ def test_thread_race_integrity_error_attaches(monkeypatch):
     from app.mail import intake
     with SessionLocal() as db:
         uid = _user(db)
-        existing = Task(user_id=uid, title="기존", goal="기존 업무", origin="mail", agent_enabled=False,
+        existing = Task(user_id=uid, title="기존", goal="기존 업무", origin="mail",
                         gmail_thread_id="thr-r", brief={"analysis": "done", "email_id": 0})
         db.add(existing)
         db.commit()
