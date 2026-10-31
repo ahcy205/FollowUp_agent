@@ -1,48 +1,39 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom'
 import { startAlerts } from './alerts'
 import { api, setUnauthorizedHandler } from './api'
 import GoogleBanner from './components/GoogleBanner'
 import Icon, { BrandMark, type IconName } from './components/Icon'
-import ResetDialog from './components/ResetDialog'
-import Dashboard from './pages/Dashboard'
 import Inbox from './pages/Inbox'
 import Knowledge from './pages/Knowledge'
 import Login from './pages/Login'
 import Settings from './pages/Settings'
 import TaskDetailPage from './pages/TaskDetail'
-import Workspace from './pages/Workspace'
 import type { User } from './types'
 
 interface AuthState {
   user: User | null
   setUser: (u: User | null) => void
-  refreshKey: number
-  bumpRefresh: () => void
 }
 
 const AuthContext = createContext<AuthState>(null!)
 export const useAuth = () => useContext(AuthContext)
 
+const LINKS: { to: string; label: string; icon: IconName; end?: boolean }[] = [
+  { to: '/', label: '받은 업무', icon: 'inbox', end: true },
+  { to: '/knowledge', label: '자료실', icon: 'folder' },
+  { to: '/settings', label: '설정', icon: 'gear' },
+]
+
 function Shell({ children }: { children: React.ReactNode }) {
-  const { user, setUser, bumpRefresh } = useAuth()
-  const [resetOpen, setResetOpen] = useState(false)
+  const { user, setUser } = useAuth()
   const navigate = useNavigate()
-  const demo = user?.demo_mode === true
 
   const logout = async () => {
     await api.post('/auth/logout').catch(() => {})
     setUser(null)
     navigate('/login')
   }
-
-  const links: { to: string; label: string; icon: IconName; end?: boolean }[] = [
-    { to: '/', label: '받은 업무', icon: 'inbox', end: true },
-    { to: '/tasks', label: '전체 업무', icon: 'list', end: true },
-    ...(demo ? [{ to: '/workspace', label: '워크스페이스', icon: 'grid' as IconName }] : []),
-    { to: '/knowledge', label: '자료실', icon: 'folder' },
-    { to: '/settings', label: '설정', icon: 'gear' },
-  ]
 
   return (
     <div className="app">
@@ -55,7 +46,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             </span>
           </NavLink>
           <nav className="nav" aria-label="주 메뉴">
-            {links.map((l) => (
+            {LINKS.map((l) => (
               <NavLink key={l.to} to={l.to} end={l.end}>
                 <Icon name={l.icon} className="nav-icon" />
                 <span>{l.label}</span>
@@ -63,11 +54,6 @@ function Shell({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
           <div className="topbar-right">
-            {demo && (
-              <button className="btn btn-ghost btn-sm" onClick={() => setResetOpen(true)} title="데모 데이터를 초기 상태로 되돌립니다">
-                <Icon name="refresh" size={15} /> 데모 초기화
-              </button>
-            )}
             <span className="user-chip" title={user?.email}>
               {user?.email}
             </span>
@@ -80,16 +66,6 @@ function Shell({ children }: { children: React.ReactNode }) {
       </header>
       <GoogleBanner />
       <main className="container">{children}</main>
-      {demo && resetOpen && (
-        <ResetDialog
-          onClose={() => setResetOpen(false)}
-          onDone={() => {
-            setResetOpen(false)
-            bumpRefresh()
-            navigate('/tasks')
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -114,8 +90,6 @@ function Protected({ children }: { children: React.ReactNode }) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const bumpRefresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
   useEffect(() => {
     setUnauthorizedHandler(() => setUser(null))
@@ -135,20 +109,16 @@ export default function App() {
     )
 
   return (
-    <AuthContext.Provider value={{ user, setUser, refreshKey, bumpRefresh }}>
+    <AuthContext.Provider value={{ user, setUser }}>
       <BrowserRouter>
         {user && <AlertsRunner />}
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-          <Route path="/" element={<Protected><Inbox key={refreshKey} /></Protected>} />
-          <Route path="/tasks" element={<Protected><Dashboard key={refreshKey} /></Protected>} />
-          <Route path="/tasks/:id" element={<Protected><TaskDetailPage key={refreshKey} /></Protected>} />
-          <Route
-            path="/workspace"
-            element={user?.demo_mode ? <Protected><Workspace key={refreshKey} /></Protected> : <Navigate to="/" replace />}
-          />
+          <Route path="/" element={<Protected><Inbox /></Protected>} />
+          <Route path="/tasks/:id" element={<Protected><TaskDetailPage /></Protected>} />
           <Route path="/knowledge" element={<Protected><Knowledge /></Protected>} />
           <Route path="/settings" element={<Protected><Settings /></Protected>} />
+          {/* 예전 주소(전체 업무 · 워크스페이스)는 받은 업무로 */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

@@ -10,32 +10,6 @@ export const STATUS_META: Record<TaskStatus, { label: string; tone: string; shor
   CANCELLED: { label: '취소됨', short: '취소', tone: 'gray' },
 }
 
-export const TOOL_LABELS: Record<string, string> = {
-  plan_goal: '목표 분석 · 계획 수립',
-  search_customer: '고객 정보 조회',
-  search_document: '문서 · 견적서 조회',
-  draft_email: '이메일 초안 작성',
-  send_email: '이메일 발송',
-  check_email: '수신 메일 확인',
-  analyze_email: '고객 답변 분석',
-  create_followup_task: '후속 업무 생성',
-  complete_plan_step: '하위 목표 달성',
-  update_task_status: '업무 진행 상황 기록',
-}
-
-export const PERMISSIONS: Record<string, string> = {
-  plan_goal: 'WRITE · 현재 업무',
-  search_customer: 'READ',
-  search_document: 'READ',
-  draft_email: 'READ / CREATE',
-  send_email: 'WRITE + 승인 필요',
-  check_email: 'READ',
-  analyze_email: 'READ',
-  create_followup_task: 'WRITE',
-  complete_plan_step: 'WRITE · 현재 업무',
-  update_task_status: 'WRITE',
-}
-
 // The API returns UTC; SQLite drops the offset, so treat offset-less timestamps as UTC.
 export function parseDate(iso: string) {
   return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`)
@@ -55,10 +29,6 @@ export function relative(iso: string) {
   if (diff < 3600) return `${Math.floor(diff / 60)}분 전`
   if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`
   return `${Math.floor(diff / 86400)}일 전`
-}
-
-export function tokens(n: number | undefined) {
-  return (n ?? 0).toLocaleString('ko-KR')
 }
 
 const WEEKDAYS = '일월화수목금토'
