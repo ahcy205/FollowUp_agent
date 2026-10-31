@@ -221,7 +221,6 @@ components:
 ### Shadow Vocabulary
 - **용지** (`box-shadow: 0 1px 2px rgba(30,35,40,0.04), 0 4px 16px -6px rgba(30,35,40,0.06)`): 책상 위 시트 · 안내 용지에만. `sheet-stack` 안의 구획은 그림자를 지운다.
 - **떠 있는 판** (`box-shadow: 0 8px 24px -8px rgba(30,35,40,0.18)`): 제목 옆에서 열리는 업무 취소 확인 판처럼 내용 위에 겹치는 것.
-- **창** (`box-shadow: 0 24px 60px -12px rgba(30,35,40,0.3)`): 데모 초기화 창.
 
 ### Named Rules
 **The 용지 한 장 Rule.** 한 주제는 용지 한 장이다. 그 안의 구획은 `rule` 1px 선으로 나누고, 카드 안에 그림자 카드를 넣지 않는다.
