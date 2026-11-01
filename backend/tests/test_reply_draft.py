@@ -171,7 +171,7 @@ def test_injection_in_thread_is_warned():
 
 def test_unsupported_number_warned():
     w = rd.draft_warnings("단가는 1,500원이고 수량은 1,200개입니다.", "단가 1200원", "")
-    assert "1500" in w["unsupported"] and "1200" not in w["unsupported"]
+    assert "1,500원" in w["unsupported"] and "1,200개" not in w["unsupported"]
     w = rd.draft_warnings("납기는 10/30입니다.", "메모: 10/30까지", "")
     assert w["unsupported"] == []
 
@@ -363,7 +363,7 @@ def test_dates_normalized_both_ways():
 def test_number_commas_per_token():
     assert rd.draft_warnings("단가 1,500원", "메모: 1500원", "")["unsupported"] == []
     assert rd.draft_warnings("단가 1500원", "메모: 1,500원", "")["unsupported"] == []
-    assert rd.draft_warnings("수량 12개", "선택지 1,2", "")["unsupported"] == ["12"]
+    assert rd.draft_warnings("수량 12개", "선택지 1,2", "")["unsupported"] == ["12개"]
 
 
 def test_body_only_contacts_are_outside():

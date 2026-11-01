@@ -104,7 +104,7 @@ def test_doc_fact_wrong_chunk_or_line_dropped(chunk, line):
         facts = [{"text": "개당 12,000원", "source": "doc", "chunk": chunk, "line": line}]
         draft, _ = _generate(db, t, u, _answer(facts=facts))
         assert draft.sources["facts"] == []
-        assert "12000" in draft.warnings["unsupported"]  # 인용 줄이 없으니 근거도 없다
+        assert "12,000원" in draft.warnings["unsupported"]  # 인용 줄이 없으니 근거도 없다
 
 
 def test_doc_fact_number_not_in_line_dropped():
@@ -152,8 +152,8 @@ def test_only_cited_line_counts_as_evidence():
         body = "안녕하세요.\nTS-200 단가는 개당 12,000원이고, 묶음 할인은 5,000원입니다."
         draft, _ = _generate(db, t, u, _answer(body=body))
         assert len(draft.sources["facts"]) == 1
-        assert "5000" in draft.warnings["unsupported"]
-        assert "12000" not in draft.warnings["unsupported"]
+        assert "5,000원" in draft.warnings["unsupported"]
+        assert "12,000원" not in draft.warnings["unsupported"]
 
 
 def test_internal_value_warned_even_from_memo():
@@ -165,7 +165,7 @@ def test_internal_value_warned_even_from_memo():
                                                       "chunk": "", "line": 0}]))
         assert draft.warnings["internal_values"] == 1
         assert draft.sources["internal_values"] == [{"value": "8000원", "source_ids": [1], "titles": ["원가표.txt"]}]
-        assert "8000" not in draft.warnings["unsupported"]  # 메모에 있으니 근거는 있다
+        assert "8,000원" not in draft.warnings["unsupported"]  # 메모에 있으니 근거는 있다
 
 
 def test_internal_value_small_won_amount():
@@ -248,7 +248,7 @@ def test_edit_removes_stale_doc_fact():
                         cc_selected=[])
         db.commit()
         assert draft.sources["facts"] == []
-        assert "13000" in draft.warnings["unsupported"]
+        assert "13,000원" in draft.warnings["unsupported"]
         assert [c["ref"] for c in draft.sources["chunks"]] == ["D1-0"]  # 사본은 남는다
 
 
@@ -296,7 +296,7 @@ def test_refresh_draft_checks_uses_stored_copy(monkeypatch):
         draft.body = "안녕하세요.\nTS-200 단가는 개당 13,000원입니다."
         refresh_draft_checks(db, draft)
         assert draft.sources is not before  # 새 객체 대입(JSON 변경 감지)
-        assert draft.sources["facts"] == [] and "13000" in draft.warnings["unsupported"]
+        assert draft.sources["facts"] == [] and "13,000원" in draft.warnings["unsupported"]
         assert [c["ref"] for c in draft.sources["chunks"]] == ["D1-0"]
 
 
@@ -335,7 +335,7 @@ def test_switch_off_edit_stored_line_not_evidence(monkeypatch):
         rd.update_draft(draft, subject="Re: 견적 문의", body="안녕하세요.\nTS-200 단가는 개당 12,000원입니다.",
                         cc_selected=[])
         db.commit()
-        assert "12000" in draft.warnings["unsupported"]
+        assert "12,000원" in draft.warnings["unsupported"]
         assert [c["ref"] for c in draft.sources["chunks"]] == ["D1-0"]  # 표시용 사본은 그대로
         assert draft.warnings["internal_values"] == 0
 
@@ -348,7 +348,7 @@ def test_manual_fact_line_not_evidence():
         draft, _ = _generate(db, t, u, _answer(body="안녕하세요.\nTS-200은 무료 배송이고 반품비는 5,000원입니다.",
                                               facts=facts))
         assert draft.sources["facts"][0]["checked"] == "manual"
-        assert "5000" in draft.warnings["unsupported"]
+        assert "5,000원" in draft.warnings["unsupported"]
 
 
 def test_check_facts_day_only_matches_full_date_in_body():

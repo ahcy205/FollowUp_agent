@@ -145,6 +145,7 @@ def internal_values(db: Session, user_id: int, body: str, allowed_text: str) -> 
     for kind, key, shown, end in token_spans(body):
         if kind != "n":
             continue
+        shown = key  # 단위를 합친 값("8만 8천" → 88000). 화면이 천 단위 쉼표를 붙인다
         if _WON_RE.match(body or "", end):
             shown = f"{shown}원"
         if search.is_internal_candidate(key, shown):
