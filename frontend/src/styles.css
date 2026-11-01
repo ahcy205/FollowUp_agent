@@ -153,8 +153,9 @@ kbd { font-family: inherit; font-size: 0.82rem; font-weight: 600; padding: 0 5px
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary { background: var(--accent); color: #fff; box-shadow: var(--shadow-1); }
 .btn-primary:hover:not(:disabled) { background: var(--accent-600); }
-.btn-seal { background: var(--navy); color: #fff; }
-.btn-seal:hover:not(:disabled) { background: var(--navy-3); }
+.btn-send { background: var(--navy); color: #fff; padding: 10px 20px; font-size: 0.96rem; gap: 8px; }
+.btn-send:hover:not(:disabled) { background: var(--navy-3); }
+.btn-send:disabled { background: var(--surface-3); color: var(--text-3); border-color: var(--border); }
 .btn-ghost, .btn:not([class*='btn-']) { background: var(--surface); border-color: var(--border-2); color: var(--text); box-shadow: var(--shadow-1); }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-2); border-color: #c3c8d1; }
 .btn-danger { background: var(--surface); border-color: var(--red-100); color: var(--red); }
@@ -504,8 +505,8 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .confirm-warn dt { color: var(--amber); background: var(--amber-50); }
 .confirm-check { margin-top: 6px; color: var(--amber); font-weight: 650; }
 .sent-note { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--green-100); border-radius: var(--radius); padding: 14px 18px; }
-.stamp { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--green-50); color: var(--green); font-weight: 800; font-size: 0.82rem; flex: none; border: 1.5px solid var(--green); }
-.stamp-press { animation: pop 0.2s var(--ease) both; }
+.sent-mark { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--green-50); color: var(--green); font-weight: 800; font-size: 0.82rem; flex: none; border: 1.5px solid var(--green); }
+.sent-mark { animation: pop 0.2s var(--ease) both; }
 @keyframes pop { from { transform: scale(1.2); opacity: 0; } }
 
 /* ---------- 홈 */

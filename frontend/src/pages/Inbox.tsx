@@ -63,7 +63,7 @@ function followupGroups(d: InboxData): Group[] {
     { key: 'no-reply', label: '답이 없어요', tone: 'red', hint: '보낸 지 영업일 3일째', cards: take((c) => c.no_reply) },
     { key: 'changed', label: '상대가 내용을 바꿨어요', tone: 'blue', hint: '전후 비교 · 근거 · 되돌리기', cards: take((c) => c.changed_unseen) },
     { key: 'nudge', label: '아직 답장하지 않았어요', tone: 'amber', hint: '받은 지 며칠 지난 업무', cards: take((c) => c.nudge_days != null) },
-    { key: 'waiting', label: '답 기다리는 중', hint: '답장을 보낸 업무', cards: d.tabs.sent.filter((c) => !seen.has(c.task_id)) },
+    { key: 'waiting', label: '답 기다림', hint: '답장을 보내고 상대 답을 기다리는 업무', cards: d.tabs.sent.filter((c) => !seen.has(c.task_id)) },
   ]
 }
 
@@ -234,6 +234,7 @@ export default function Inbox({ mode }: { mode: Mode }) {
   const counts = data?.counts
   const errorFor = (key: string) => (rowError?.key === key ? <div className="alert alert-red small">{rowError.message}</div> : null)
   const followCount = mode === 'followup' ? groups.reduce((n, g) => n + (g.key === 'waiting' ? 0 : g.cards.length), 0) : 0
+  const waitCount = mode === 'followup' ? (groups.find((g) => g.key === 'waiting')?.cards.length ?? 0) : 0
 
   return (
     <div className={`split${id ? ' has-panel' : ''}`}>
@@ -242,8 +243,8 @@ export default function Inbox({ mode }: { mode: Mode }) {
           <div className="pane-title">
             <h1>{mode === 'followup' ? '후속 관리' : '받은 업무'}</h1>
             {mode === 'followup' ? (
-              <span className="muted small">
-                챙길 업무 <b className="num">{followCount}</b>건
+              <span className="muted small" title="챙길 업무: 무응답 · 내용 바뀜 · 답장 안 함. 사이드바 · 홈의 '후속 필요'와 같은 숫자예요.">
+                챙길 업무 <b className="num">{followCount}</b>건 · 답 기다림 <b className="num">{waitCount}</b>건
               </span>
             ) : (
               connected && (

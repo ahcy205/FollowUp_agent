@@ -281,7 +281,7 @@ export default function ReplyDraftCard({
     // 보낸 직후(답장 보냄 상태)에만 알린다. 상대가 다시 답장해 처리할 일로 오면 감춘다.
     return data.task.status === 'WAITING' ? (
       <div className="sent-note">
-        <span className="stamp stamp-press" aria-hidden="true">
+        <span className="sent-mark" aria-hidden="true">
           보냄
         </span>
         <div>
@@ -503,7 +503,7 @@ export default function ReplyDraftCard({
           <div className="draft-actions">
             <button
               type="button"
-              className="btn btn-seal"
+              className="btn btn-send"
               disabled={
                 !!busy || dirty || blanks.length > 0 || sentLater || sourcesChanged || (needsAck && !acked) || (needsUnsupportedAck && !uacked)
               }
@@ -536,7 +536,7 @@ export default function ReplyDraftCard({
         <div className="draft-actions edit-actions">
           <div className="send-bar">
           <span className={`send-bar-status is-${summary.tone}`}>{summary.text}</span>
-          <button type="button" className="btn btn-seal" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
+          <button type="button" className="btn btn-send" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
             <Icon name="reply" size={16} />
             {busy === 'save' ? '저장 중…' : '보내기'}
           </button>

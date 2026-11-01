@@ -84,7 +84,7 @@ components:
     backgroundColor: "{colors.navy}"
     textColor: "{colors.surface}"
     rounded: "{rounded.sm}"
-    padding: "8px 14px"
+    padding: "10px 20px"
   button-send-hover:
     backgroundColor: "{colors.navy-3}"
   button-ghost:
@@ -184,7 +184,7 @@ components:
 - **인디고-블루** (`accent`): 주 버튼(답장 초안 보기, Gmail 연결하기), 링크, 키보드 포커스 외곽선, 입력칸 포커스 테두리, 밑줄 탭 활성 막대, 분할 탭 활성 개수, 체크박스 채움, 안 읽은 변경 점, 선택된 목록 행 · 표 행 바탕(`accent-50`), 활성 사이드바 배지. hover · 눌림은 `accent-600`, 옅은 바탕 `accent-50`, 옅은 테두리 `accent-100`.
 
 ### Secondary
-- **딥 네이비** (`navy`): 사이드바 바탕, 보내기 버튼(되돌릴 수 없는 마지막 단계), 홈의 첫 숫자 칸("오늘 처리할 업무"), 보내기 확인 카드의 1.5px 테두리. 사이드바 hover는 `navy-2`, 활성 메뉴 · 보내기 hover · 아바타는 `navy-3`, 사이드바 글자는 `navy-text`.
+- **딥 네이비** (`navy`): 사이드바 바탕, 보내기 버튼(`.btn-send`, 되돌릴 수 없는 마지막 단계, 보내기 아이콘과 함께 한 단계 큰 크기. 막혀 있으면 회색), 홈의 첫 숫자 칸("오늘 처리할 업무"), 보내기 확인 카드의 1.5px 테두리. 사이드바 hover는 `navy-2`, 활성 메뉴 · 보내기 hover · 아바타는 `navy-3`, 사이드바 글자는 `navy-text`.
 
 ### Tertiary
 - **경고 빨강** (`red`): 기한 지남(D+n 지남), "지금 처리" 묶음 제목, 중요도 높음 막대, 발송 체크리스트의 막힘, 오류 띠, 위험 버튼(업무 취소 · 연결 끊기), 처리 기록의 위험 표시.
