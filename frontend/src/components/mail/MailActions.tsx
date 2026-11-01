@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { localDateValue, localTimeValue, withLocalOffset } from '../../format'
 import type { MailAct, ReplyDraft, Task } from '../../types'
 import CancelTaskPanel from '../CancelTaskPanel'
+import Icon from '../Icon'
 
 type Panel = 'none' | 'snooze' | 'close'
 
@@ -39,6 +40,7 @@ export default function MailActions({
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [custom, setCustom] = useState(false)
+  const [more, setMore] = useState(false)
   const [until, setUntil] = useState('')
   const [reason, setReason] = useState('')
   const [userInput, setUserInput] = useState('')
@@ -93,7 +95,7 @@ export default function MailActions({
 
   return (
     <section className="card mail-actions" id={draft && draft.status === 'draft' ? undefined : 'reply'}>
-      <div className="mail-action-row">
+      <div className={`mail-action-row${more ? ' more-open' : ''}`}>
         <span className="reply-draft">
           {draft?.status === 'draft' && !compose && canDraft && (
             <a href="#reply" className="btn btn-primary btn-sm">
@@ -117,15 +119,19 @@ export default function MailActions({
             </>
           )}
         </span>
+        <button type="button" className="btn btn-ghost btn-sm more-btn" aria-expanded={more} onClick={() => setMore(!more)}>
+          {more ? '접기' : '다른 동작'}
+          <Icon name={more ? 'up' : 'down'} size={15} />
+        </button>
         {isTodoTab(task) && (
-          <button type="button" className="btn btn-ghost btn-sm" aria-expanded={panel === 'snooze'} onClick={() => toggle('snooze')}>
+          <button type="button" className="btn btn-ghost btn-sm secondary-action" aria-expanded={panel === 'snooze'} onClick={() => toggle('snooze')}>
             나중에 보기
           </button>
         )}
-        <button type="button" className="btn btn-ghost btn-sm" aria-expanded={panel === 'close'} onClick={() => toggle('close')}>
+        <button type="button" className="btn btn-ghost btn-sm secondary-action" aria-expanded={panel === 'close'} onClick={() => toggle('close')}>
           답장 필요 없음으로 닫기
         </button>
-        <span className="mail-cancel">
+        <span className="mail-cancel secondary-action">
           <CancelTaskPanel taskId={task.id} onCancelled={onCancelled} />
         </span>
       </div>

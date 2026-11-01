@@ -35,7 +35,7 @@
       "display": { "displayName": "Display", "purpose": "홈 숫자 칸의 큰 숫자(고정폭). 로그인 첫 문장만 2.1rem." },
       "headline": { "displayName": "Headline", "purpose": "페이지 제목. 상세 패널 제목 1.35rem, 목록 판 제목 1.2rem." },
       "title": { "displayName": "Title", "purpose": "카드 제목." },
-      "body": { "displayName": "Body", "purpose": "본문 14px(휴대폰 15px). 목록 행 요약은 550 / 0.92rem 두 줄." },
+      "body": { "displayName": "Body", "purpose": "본문 15px(PC · 휴대폰 같음). 목록 행 요약은 550 / 0.92rem 두 줄." },
       "label": { "displayName": "Label", "purpose": "라벨 칸, 표 머리, 숫자 칸 이름, 표지 글자. 대문자 · 넓은 자간 없음." }
     },
     "shadows": [
