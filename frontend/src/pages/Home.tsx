@@ -21,7 +21,7 @@ function isDueSoon(c: Card) {
   return c.deadline_badge.late || t === '오늘' || t === '내일' || t === 'D-1'
 }
 
-/** 홈: 오늘 처리할 것 · 기한 임박 · 답 기다림 · 후속 필요 · 완료, AI 처리 상태, 새로 가져온 메일, 최근 업무 활동 */
+/** 홈: 오늘 처리할 것 · 기한 임박 · 답 기다림 · 후속 필요 · 완료, 자동 처리 상태, 새로 가져온 메일, 최근 업무 활동 */
 /** "이름 <주소>"에서 이름만. 이름이 없으면 주소. */
 function senderName(raw: string): string {
   const m = raw.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/)
@@ -82,7 +82,7 @@ export default function Home() {
   const tiles = [
     { label: '오늘 처리할 업무', value: inbox?.counts.now, to: '/inbox', tone: 'navy', note: '기한이 가깝거나 중요한 업무' },
     { label: '기한 임박', value: inbox ? dueSoon.length : undefined, to: '/inbox', tone: dueSoon.some((c) => c.deadline_badge.late) ? 'red' : 'plain', note: '지났거나 오늘 · 내일까지' },
-    { label: '답장 대기', value: inbox?.counts.sent, to: '/followup', tone: 'plain', note: '답장을 보내고 기다리는 중' },
+    { label: '답 기다림', value: inbox?.counts.sent, to: '/inbox?tab=sent', tone: 'plain', note: '답장을 보낸 뒤 기다리는 업무' },
     { label: '후속 필요', value: inbox ? followup.length : undefined, to: '/followup', tone: followup.length > 0 ? 'amber' : 'plain', note: '무응답 · 내용 바뀜 · 답장 안 함' },
     { label: '완료', value: inbox?.counts.done, to: '/inbox?tab=done', tone: 'plain', note: '완료 · 닫은 업무' },
   ]
@@ -148,7 +148,7 @@ export default function Home() {
 
         <section className="card" aria-labelledby="h-ai">
           <div className="card-head">
-            <h2 id="h-ai">AI 처리 상태</h2>
+            <h2 id="h-ai">자동 처리 상태</h2>
             {connected && (
               <button type="button" className="btn btn-ghost btn-sm" onClick={sync} disabled={syncing}>
                 <Icon name="refresh" size={14} className={syncing ? 'spin' : ''} />
