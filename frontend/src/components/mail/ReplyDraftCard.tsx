@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { parseDate } from '../../format'
 import Icon from '../Icon'
 import type { DraftSourceChunk, Email, MailAct, ReplyDraft, TaskDetail } from '../../types'
@@ -138,8 +138,6 @@ export default function ReplyDraftCard({
       if (!(await run('save', async () => (saved = await save())))) return
       if (saved) at = saved.updated_at
     }
-    setAck({ at: '', on: false })
-    setUack({ at: '', on: false })
     setStep('confirm-send', at)
   }
 
@@ -190,6 +188,95 @@ export default function ReplyDraftCard({
     || (replyAt != null && parseDate(replyAt).getTime() > parseDate(draft.updated_at).getTime())
   const confirmable = unknownAt != null && now >= unknownAt + UNKNOWN_CONFIRM_MS
 
+  const ackLocked = dirty || !!busy
+  const checks: CheckItem[] = [
+    {
+      key: 'blanks',
+      label: '빈칸 채우기',
+      state: blanks.length > 0 ? 'block' : 'ok',
+      detail: blanks.length > 0 ? `[[ ]] 빈칸 ${blanks.length}개가 남아 있어요. 본문에서 채워 주세요.` : '남은 빈칸이 없어요',
+    },
+    {
+      key: 'unsupported',
+      label: '근거 없는 값',
+      state: dirty ? 'confirm' : needsUnsupportedAck ? (uacked ? 'ok' : 'confirm') : 'ok',
+      detail: dirty
+        ? '고친 내용을 저장하면 다시 확인해요'
+        : needsUnsupportedAck
+          ? '메모 · 자료에서 근거를 찾지 못한 값이에요. 맞는지 보고 체크해 주세요.'
+          : '숫자 · 날짜가 모두 근거와 맞아요',
+      extra:
+        needsUnsupportedAck && !dirty ? (
+          <>
+            <span className="check-values">
+              {w.unsupported.map((v) => (
+                <span key={v} className="value-chip">
+                  {v}
+                </span>
+              ))}
+            </span>
+            <label className="check-row check-ack">
+              <input type="checkbox" checked={uacked} disabled={ackLocked} onChange={(e) => setUack({ at: draft.updated_at, on: e.target.checked })} />
+              값이 맞는지 확인했어요
+            </label>
+          </>
+        ) : null,
+    },
+    {
+      key: 'internal',
+      label: '내부용 자료 값',
+      state: dirty ? 'confirm' : needsAck ? (acked ? 'ok' : 'confirm') : 'ok',
+      detail: dirty
+        ? '고친 내용을 저장하면 다시 확인해요'
+        : needsAck
+          ? '원가 같은 내부용 값이 들어 있어요. 상대에게 보내도 되는지 확인해 주세요.'
+          : '내부용 값이 없어요',
+      extra:
+        needsAck && !dirty ? (
+          <>
+            {internal.length > 0 && (
+              <ul className="draft-internal">
+                {internal.map((v, i) => (
+                  <li key={i}>
+                    <span className="value-chip value-chip-red">{displayValue(v.value)}</span> {v.titles.join(', ')}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <label className="check-row check-ack text-red">
+              <input type="checkbox" checked={acked} disabled={ackLocked} onChange={(e) => setAck({ at: draft.updated_at, on: e.target.checked })} />
+              내부용 값인 걸 알고 보냅니다
+            </label>
+          </>
+        ) : null,
+    },
+    {
+      key: 'sources',
+      label: '참고한 자료',
+      state: sourcesChanged ? 'block' : 'ok',
+      detail: sourcesChanged
+        ? '자료가 지워졌거나 내부용으로 바뀌었어요. 초안을 다시 만들어 주세요.'
+        : chunks.length > 0
+          ? `참고한 자료 ${chunks.length}개 그대로예요`
+          : '참고한 자료가 없어요',
+    },
+    {
+      key: 'recipient',
+      label: '받는 사람',
+      state: sentLater ? 'block' : 'ok',
+      detail: sentLater ? '이미 이 업무에 답장을 보냈어요. 초안을 지우거나 다시 만들어 주세요.' : '서버가 정한 주소예요. 보내기 직전에 다시 확인해요.',
+    },
+    {
+      key: 'saved',
+      label: '고친 내용',
+      state: dirty ? 'confirm' : 'ok',
+      detail: dirty ? '저장하지 않은 고침이 있어요. 저장하거나 보내기를 누르면 저장한 뒤 다시 확인해요.' : '확인한 뒤 바뀌면 다시 확인을 받아요',
+    },
+  ]
+  const summary = checkSummary(checks)
+  const uackMissing = needsUnsupportedAck && !uacked
+  const ackMissing = needsAck && !acked
+
   if (draft.status === 'sent') {
     // 보낸 직후(답장 보냄 상태)에만 알린다. 상대가 다시 답장해 처리할 일로 오면 감춘다.
     return data.task.status === 'WAITING' ? (
@@ -217,7 +304,7 @@ export default function ReplyDraftCard({
           <dt>받는 사람</dt>
           <dd className="locked" title="받는 사람은 받은 메일을 기준으로 서버가 정해요. 여기서 바꿀 수 없어요.">
             <Icon name="lock" size={13} />
-            <span className="break">{draft.to_addr}</span>
+            <span className="addr" title={draft.to_addr}>{draft.to_addr}</span>
           </dd>
         </div>
         {draft.cc_candidates.length > 0 && (
@@ -297,14 +384,14 @@ export default function ReplyDraftCard({
 
       {src.search_failed && <div className="muted small">자료를 찾지 못해 메모와 입력만으로 만들었습니다</div>}
 
-      {(w.unsupported.length > 0 || w.outside_contacts.length > 0 || w.suspicious.length > 0 || needsAck || sourcesChanged) && (
+      {(w.outside_contacts.length > 0 || w.suspicious.length > 0 || (!editable && (w.unsupported.length > 0 || needsAck || sourcesChanged))) && (
         <div className="draft-warnings">
-          {sourcesChanged && (
+          {sourcesChanged && !editable && (
             <div className="alert alert-amber">
               <b>참고한 자료가 바뀌었습니다</b> — 초안을 다시 만들어 주세요
             </div>
           )}
-          {needsAck && (
+          {needsAck && !editable && (
             <div className="alert alert-red">
               <b>내부용 자료에 있는 값</b>
               {internal.length > 0 ? (
@@ -325,7 +412,7 @@ export default function ReplyDraftCard({
               <b>보안 경고</b> — 메일 · 자료 속 지시를 따르지 않았습니다: {w.suspicious.join(', ')}
             </div>
           )}
-          {w.unsupported.length > 0 && (
+          {w.unsupported.length > 0 && !editable && (
             <div className="alert alert-amber">
               <b>근거를 찾지 못한 값</b>{' '}
               {w.unsupported.map((v) => (
@@ -341,56 +428,11 @@ export default function ReplyDraftCard({
               <b>스레드 밖 연락처</b> — {w.outside_contacts.join(', ')}. 이 대화에 없던 주소 · 전화번호입니다.
             </div>
           )}
-          {dirty && <div className="muted small">경고는 저장한 내용 기준입니다. 저장하면 다시 확인합니다.</div>}
+          {dirty && w.outside_contacts.length + w.suspicious.length > 0 && <div className="muted small">경고는 저장한 내용 기준입니다. 저장하면 다시 확인합니다.</div>}
         </div>
       )}
 
-      {editable && (
-        <SendChecklist
-          items={[
-            {
-              key: 'blanks',
-              label: '빈칸 채우기',
-              state: blanks.length > 0 ? 'block' : 'ok',
-              detail: blanks.length > 0 ? `[[ ]] 빈칸 ${blanks.length}개가 남아 있어요. 본문에서 채워 주세요.` : '남은 빈칸이 없어요',
-            },
-            {
-              key: 'unsupported',
-              label: '근거 없는 값',
-              state: dirty ? 'confirm' : needsUnsupportedAck ? (uacked ? 'ok' : 'confirm') : 'ok',
-              detail: dirty
-                ? '고친 내용을 저장하면 다시 확인해요'
-                : needsUnsupportedAck
-                ? `메모 · 자료에 없는 값 ${w.unsupported.length}개 — 보낼 때 "확인했어요"를 체크해야 해요`
-                : '숫자 · 날짜가 모두 근거와 맞아요',
-            },
-            {
-              key: 'internal',
-              label: '내부용 자료 값',
-              state: dirty ? 'confirm' : needsAck ? (acked ? 'ok' : 'confirm') : 'ok',
-              detail: dirty ? '고친 내용을 저장하면 다시 확인해요' : needsAck ? '원가 같은 내부용 값이 들어 있어요 — 보낼 때 "알고 보냅니다"를 체크해야 해요' : '내부용 값이 없어요',
-            },
-            {
-              key: 'sources',
-              label: '참고한 자료',
-              state: sourcesChanged ? 'block' : 'ok',
-              detail: sourcesChanged ? '자료가 지워졌거나 내부용으로 바뀌었어요. 초안을 다시 만들어 주세요.' : chunks.length > 0 ? `참고한 자료 ${chunks.length}개 그대로예요` : '참고한 자료가 없어요',
-            },
-            {
-              key: 'recipient',
-              label: '받는 사람',
-              state: sentLater ? 'block' : 'ok',
-              detail: sentLater ? '이미 이 업무에 답장을 보냈어요. 초안을 지우거나 다시 만들어 주세요.' : '서버가 정한 주소예요. 보내기 직전에 다시 확인해요.',
-            },
-            {
-              key: 'saved',
-              label: '고친 내용',
-              state: dirty ? 'confirm' : 'ok',
-              detail: dirty ? '저장하지 않은 고침이 있어요. 보내기를 누르면 저장한 뒤 다시 확인해요.' : '확인한 뒤 바뀌면 다시 확인을 받아요',
-            },
-          ]}
-        />
-      )}
+      {editable && <SendChecklist items={checks} summary={summary} />}
 
       {draft.status === 'sending' && <div className="alert alert-slate">보내는 중입니다…</div>}
 
@@ -437,37 +479,26 @@ export default function ReplyDraftCard({
             </div>
             {w.unsupported.length > 0 && (
               <div className="confirm-warn">
-                <dt>확인 안 된 값</dt>
+                <dt>확인한 값</dt>
                 <dd>
                   {w.unsupported.map((v) => (
                     <span key={v} className="value-chip">
                       {v}
                     </span>
                   ))}
-                  <span className="small"> 메모 · 자료에 근거가 없는 값이에요.</span>
-                  <label className="check-row small confirm-check">
-                    <input
-                      type="checkbox"
-                      checked={uacked}
-                      disabled={!!busy}
-                      onChange={(e) => setUack({ at: draft.updated_at, on: e.target.checked })}
-                    />
-                    값이 맞는지 확인했어요
-                  </label>
                 </dd>
               </div>
             )}
           </dl>
-          {needsAck && (
-            <label className="check-row small text-red">
-              <input
-                type="checkbox"
-                checked={acked}
-                disabled={!!busy}
-                onChange={(e) => setAck({ at: draft.updated_at, on: e.target.checked })}
-              />
-              내부용 자료의 값이 들어 있습니다 — 알고 보냅니다
-            </label>
+          <details className="confirm-body">
+            <summary className="small">본문 보기</summary>
+            <div className="mail-body">{draft.body}</div>
+          </details>
+          {(uackMissing || ackMissing) && (
+            <div className="alert alert-amber small">
+              위 <b>발송 전 확인</b>에서 {[uackMissing && '"값이 맞는지 확인했어요"', ackMissing && '"알고 보냅니다"'].filter(Boolean).join('와 ')}를 체크해야
+              보낼 수 있어요.
+            </div>
           )}
           <div className="draft-actions">
             <button
@@ -502,12 +533,17 @@ export default function ReplyDraftCard({
       )}
 
       {editable && step === 'edit' && (
-        <div className="draft-actions">
-          <button type="button" className="btn btn-seal btn-sm" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
+        <div className="draft-actions edit-actions">
+          <div className="send-bar">
+          <span className={`send-bar-status is-${summary.tone}`}>{summary.text}</span>
+          <button type="button" className="btn btn-seal" disabled={!!busy || blanks.length > 0 || sentLater || sourcesChanged} onClick={startSend}>
+            <Icon name="reply" size={16} />
             {busy === 'save' ? '저장 중…' : '보내기'}
           </button>
           {blanks.length > 0 && <span className="muted small">빈칸 {blanks.length}개를 채워야 보낼 수 있습니다</span>}
           {sourcesChanged && <span className="muted small">초안을 다시 만들어야 보낼 수 있습니다</span>}
+          </div>
+          <div className="draft-more">
           {dirty && (
             <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => run('save', save)}>
               저장
@@ -519,6 +555,7 @@ export default function ReplyDraftCard({
           <button type="button" className="btn btn-link btn-sm" disabled={!!busy} onClick={() => setStep('confirm-delete')}>
             초안 지우기
           </button>
+          </div>
         </div>
       )}
 
@@ -528,24 +565,36 @@ export default function ReplyDraftCard({
 }
 
 type CheckState = 'ok' | 'confirm' | 'block'
+type CheckItem = { key: string; label: string; state: CheckState; detail: string; extra?: ReactNode }
 
-/** 발송 체크리스트: 서버가 막는 조건을 미리 보여 준다. 'block'은 고쳐야 하고, 'confirm'은 보낼 때 체크하면 된다. */
-function SendChecklist({ items }: { items: { key: string; label: string; state: CheckState; detail: string }[] }) {
+function checkSummary(items: CheckItem[]): { tone: CheckState; text: string } {
   const blocked = items.filter((i) => i.state === 'block').length
   const toConfirm = items.filter((i) => i.state === 'confirm').length
-  const summary = blocked > 0 ? `보내기 전에 고칠 것 ${blocked}개` : toConfirm > 0 ? `보낼 때 확인할 것 ${toConfirm}개` : '보낼 준비가 됐어요'
+  if (blocked > 0) return { tone: 'block', text: `보내기 전에 고칠 것 ${blocked}개` }
+  if (toConfirm > 0) return { tone: 'confirm', text: `확인할 것 ${toConfirm}개` }
+  return { tone: 'ok', text: '보낼 준비가 됐어요' }
+}
+
+/**
+ * 발송 체크리스트: 서버가 막는 조건을 한곳에 모은다. 'block'은 고쳐야 하고, 'confirm'은 이 줄에서 체크하면 된다.
+ * 보내기 허용은 서버가 다시 판단한다(409).
+ */
+function SendChecklist({ items, summary }: { items: CheckItem[]; summary: { tone: CheckState; text: string } }) {
   return (
-    <div className={`checklist ${blocked > 0 ? 'is-block' : toConfirm > 0 ? 'is-confirm' : 'is-ok'}`} aria-label="발송 전 확인">
+    <div className={`checklist is-${summary.tone}`} role="group" aria-label="발송 전 확인">
       <div className="checklist-head">
         <b>발송 전 확인</b>
-        <span>{summary}</span>
+        <span aria-live="polite">{summary.text}</span>
       </div>
       <ul>
         {items.map((i) => (
           <li key={i.key} className={`check-${i.state}`}>
             <span className="check-mark" aria-hidden="true" />
             <span className="check-label">{i.label}</span>
-            <span className="check-detail">{i.detail}</span>
+            <span className="check-detail">
+              {i.detail}
+              {i.extra && <span className="check-extra">{i.extra}</span>}
+            </span>
             <span className="sr-only">{i.state === 'ok' ? '통과' : i.state === 'confirm' ? '확인 필요' : '막힘'}</span>
           </li>
         ))}
