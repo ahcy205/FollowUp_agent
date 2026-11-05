@@ -89,15 +89,26 @@ export default function Home() {
 
   return (
     <div className="page">
-      <header className="page-head">
-        <div>
-          <h1>
-            오늘의 업무<span className="page-date num">{today}</span>
-          </h1>
+      <header className="page-head page-head-stack">
+        <div className="page-head-row">
+          <div>
+            <h1>
+              오늘의 업무<span className="page-date num">{today}</span>
+            </h1>
+          </div>
+          <Link to="/inbox" className="btn btn-primary">
+            받은 업무 열기
+          </Link>
         </div>
-        <Link to="/inbox" className="btn btn-primary">
-          받은 업무 열기
-        </Link>
+        <section className="tiles" aria-label="업무 현황">
+          {tiles.map((t) => (
+            <Link key={t.label} to={t.to} className={`tile tile-${t.tone}`}>
+              <span className="tile-label">{t.label}</span>
+              <span className="tile-value num">{t.value ?? '–'}</span>
+              <span className="tile-note">{t.note}</span>
+            </Link>
+          ))}
+        </section>
       </header>
 
       {error && (
@@ -108,16 +119,6 @@ export default function Home() {
           </button>
         </div>
       )}
-
-      <section className="tiles" aria-label="업무 현황">
-        {tiles.map((t) => (
-          <Link key={t.label} to={t.to} className={`tile tile-${t.tone}`}>
-            <span className="tile-label">{t.label}</span>
-            <span className="tile-value num">{t.value ?? '–'}</span>
-            <span className="tile-note">{t.note}</span>
-          </Link>
-        ))}
-      </section>
 
       <div className="home-grid">
         <section className="card" aria-labelledby="h-now">
