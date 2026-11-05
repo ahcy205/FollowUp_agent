@@ -198,6 +198,7 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-50); }
 .search input { border: 0; box-shadow: none !important; padding: 7px 0; background: none; }
 .search kbd { flex: none; }
+.search-wide input { padding: 9px 0; font-size: 0.96rem; }
 .shortcut-help { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); padding: 8px 6px 8px 12px; font-size: 0.84rem; color: var(--text-2); }
 .shortcut-help ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .shortcut-help kbd { margin-right: 2px; }
@@ -206,6 +207,8 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .locked svg { color: var(--text-3); flex: none; }
 .search.grow { flex: 1; }
 .search-row { display: flex; gap: 8px; align-items: center; }
+.split.has-panel .search-row { flex-wrap: wrap; }
+.split.has-panel .search-row .search { flex-basis: 100%; }
 
 /* 분할 버튼(탭) */
 .seg { display: flex; gap: 2px; background: var(--surface-3); padding: 3px; border-radius: 8px; border: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
@@ -673,7 +676,7 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 
 /* ---------- 넓은 화면: 목록이 전체 폭일 때는 칸으로, 홈 · 설정은 넓게 */
 @media (min-width: 1100px) {
-  .split:not(.has-panel):not(.split-knowledge) .pane-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 440px); align-items: center; gap: 14px 24px; }
+  .split:not(.has-panel):not(.split-knowledge) .pane-head { gap: 14px; }
   .split:not(.has-panel) .pane-head > .pane-title { min-width: 0; }
   .split:not(.has-panel) .pane-head > .shortcut-help, .split:not(.has-panel) .pane-head > .list-cols, .split:not(.has-panel) .pane-head > p,
   .split:not(.has-panel) .pane-head > .stat-strip, .split:not(.has-panel) .pane-head > .tabs { grid-column: 1 / -1; }
@@ -760,6 +763,9 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
   .content:not(.content-wide) { padding: 18px 14px 32px; }
   .pane-head { padding: 14px 14px 10px; }
   .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .search-row { flex-wrap: wrap; }
+  .search-row .search { flex-basis: 100%; }
+  .search-row .btn { flex: 1; }
   .stat { padding: 9px 12px; }
   .stat-value { font-size: 1.4rem; }
   .stat-note { display: none; }

@@ -283,12 +283,12 @@ export default function Inbox({ mode }: { mode: Mode }) {
               )
             )}
           </div>
-          <label className="search">
+          <StatStrip label={mode === 'followup' ? '후속 관리 현황' : '처리할 일 현황'} items={stats} active={mode === 'inbox' && tab !== 'todo' ? null : focus} onPick={pickStat} />
+          <label className="search search-wide">
             <Icon name="search" size={16} />
             <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="보낸 사람 · 내용 검색" aria-label="목록 검색" />
             <kbd>/</kbd>
           </label>
-          <StatStrip label={mode === 'followup' ? '후속 관리 현황' : '처리할 일 현황'} items={stats} active={mode === 'inbox' && tab !== 'todo' ? null : focus} onPick={pickStat} />
           {help && (
             <div className="shortcut-help" role="note" aria-label="단축키">
               <ul>
