@@ -298,7 +298,7 @@ function SourceDetail({
   )
 }
 
-function SearchTest({ enabled }: { enabled: boolean }) {
+function SearchTest({ enabled, onUpload, uploading }: { enabled: boolean; onUpload?: () => void; uploading: boolean }) {
   const [q, setQ] = useState('')
   const [hits, setHits] = useState<KnowledgeHit[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -323,7 +323,7 @@ function SearchTest({ enabled }: { enabled: boolean }) {
   return (
     <section className="card" aria-labelledby="search-title">
       <div className="card-head">
-        <h2 id="search-title">검색 시험</h2>
+        <h2 id="search-title">자료 검색</h2>
         <span className="muted small">답장 초안이 찾는 방식 그대로</span>
       </div>
       <form className="search-row" onSubmit={run}>
@@ -331,9 +331,14 @@ function SearchTest({ enabled }: { enabled: boolean }) {
           <Icon name="search" size={16} />
           <input id="search-test-input" value={q} maxLength={200} onChange={(e) => setQ(e.target.value)} placeholder="예: TS-200 단가" aria-label="검색어" disabled={!enabled} />
         </label>
-        <button type="submit" className="btn btn-primary btn-sm" disabled={!enabled || busy || !q.trim()}>
+        <button type="submit" className="btn btn-ghost" disabled={!enabled || busy || !q.trim()}>
           {busy ? '찾는 중…' : '찾기'}
         </button>
+        {onUpload && (
+          <button type="button" className="btn btn-primary" onClick={onUpload} aria-expanded={uploading}>
+            <Icon name="upload" size={16} /> 자료 올리기
+          </button>
+        )}
       </form>
       <p className="muted small">"답장에 써도 됨" 자료에서만 찾아요. 검색은 이 PC 안에서만 하고 검색어는 남기지 않아요.</p>
       {error && <div className="alert alert-red">{error}</div>}
@@ -362,7 +367,7 @@ function SearchTest({ enabled }: { enabled: boolean }) {
   )
 }
 
-/** 자료실: 목록(표) · 상세 패널 · 검색 시험. 스위치가 꺼져 있어도 목록 보기와 지우기는 된다(RAG 설계 3.4). */
+/** 자료실: 목록(표) · 상세 패널 · 자료 검색. 스위치가 꺼져 있어도 목록 보기와 지우기는 된다(RAG 설계 3.4). */
 export default function Knowledge() {
   const [list, setList] = useState<KnowledgeList | null>(null)
   const [loadError, setLoadError] = useState('')
@@ -413,26 +418,6 @@ export default function Knowledge() {
         <header className="pane-head">
           <div className="pane-title">
             <h1>자료실</h1>
-            <div className="pane-actions">
-              {list && list.sources.length > 0 && (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    const el = document.getElementById('search-test-input') as HTMLInputElement | null
-                    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-                    el?.focus({ preventScroll: true })
-                  }}
-                >
-                  <Icon name="search" size={15} /> 검색 시험
-                </button>
-              )}
-              {list?.enabled && (
-                <button type="button" className="btn btn-primary" onClick={() => setUploading((u) => !u)} aria-expanded={uploading}>
-                  <Icon name="upload" size={16} /> 자료 올리기
-                </button>
-              )}
-            </div>
           </div>
           <StatStrip label="자료 현황" items={stats} active={only ?? 'all'} onPick={(k) => setOnly(k === 'all' ? null : k)} />
           <p className="muted small pane-note">
@@ -449,6 +434,8 @@ export default function Knowledge() {
               </p>
             </div>
           )}
+
+          {list && <SearchTest enabled={list.enabled} uploading={uploading} onUpload={list.enabled ? () => setUploading((u) => !u) : undefined} />}
 
           {uploading && list?.enabled && <Uploader onUploaded={addMany} onClose={() => setUploading(false)} />}
 
@@ -514,7 +501,6 @@ export default function Knowledge() {
             </div>
           )}
 
-          {list && list.sources.length > 0 && <SearchTest enabled={list.enabled} />}
         </div>
       </section>
 
