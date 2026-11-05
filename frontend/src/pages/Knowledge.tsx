@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
 import Icon from '../components/Icon'
+import StatStrip, { type Stat } from '../components/StatStrip'
 import { dateTime, shortDate } from '../format'
 import type { KnowledgeDetail, KnowledgeHit, KnowledgeList, KnowledgeSource, KnowledgeUploadResult } from '../types'
 
@@ -328,7 +329,7 @@ function SearchTest({ enabled }: { enabled: boolean }) {
       <form className="search-row" onSubmit={run}>
         <label className="search grow">
           <Icon name="search" size={16} />
-          <input value={q} maxLength={200} onChange={(e) => setQ(e.target.value)} placeholder="예: TS-200 단가" aria-label="검색어" disabled={!enabled} />
+          <input id="search-test-input" value={q} maxLength={200} onChange={(e) => setQ(e.target.value)} placeholder="예: TS-200 단가" aria-label="검색어" disabled={!enabled} />
         </label>
         <button type="submit" className="btn btn-primary btn-sm" disabled={!enabled || busy || !q.trim()}>
           {busy ? '찾는 중…' : '찾기'}
@@ -366,6 +367,8 @@ export default function Knowledge() {
   const [list, setList] = useState<KnowledgeList | null>(null)
   const [loadError, setLoadError] = useState('')
   const [selected, setSelected] = useState<number | null>(null)
+  // 현황 칸으로 고른 자료만 보기: shareable · internal · check(확인 필요)
+  const [only, setOnly] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
 
   const load = useCallback(() => {
@@ -394,7 +397,15 @@ export default function Knowledge() {
       return { ...l, sources: [...[...added].reverse(), ...l.sources.filter((s) => !ids.has(s.id))] }
     })
 
-  const shareable = list?.sources.filter((s) => s.visibility === 'shareable').length ?? 0
+  const sources = list?.sources ?? []
+  const needsCheck = (s: KnowledgeSource) => s.status !== 'indexed'
+  const stats: Stat[] = [
+    { key: 'all', label: '전체 자료', value: list ? sources.length : undefined, note: '올린 자료' },
+    { key: 'shareable', label: '답장에 써도 됨', value: list ? sources.filter((s) => s.visibility === 'shareable').length : undefined, note: '초안에 쓸 수 있어요' },
+    { key: 'internal', label: '내부용', value: list ? sources.filter((s) => s.visibility === 'internal').length : undefined, note: '어디로도 보내지 않아요' },
+    { key: 'check', label: '확인 필요', value: list ? sources.filter(needsCheck).length : undefined, tone: 'amber', note: 'AI 지시 의심 · 읽기 실패' },
+  ]
+  const shown = sources.filter((s) => (only === 'check' ? needsCheck(s) : only ? s.visibility === only : true))
 
   return (
     <div className={`split split-knowledge${selected != null ? ' has-panel' : ''}`}>
@@ -402,13 +413,31 @@ export default function Knowledge() {
         <header className="pane-head">
           <div className="pane-title">
             <h1>자료실</h1>
-            {list?.enabled && (
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => setUploading((u) => !u)} aria-expanded={uploading}>
-                <Icon name="upload" size={15} /> 자료 올리기
-              </button>
-            )}
+            <div className="pane-actions">
+              {list && list.sources.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    const el = document.getElementById('search-test-input') as HTMLInputElement | null
+                    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                    el?.focus({ preventScroll: true })
+                  }}
+                >
+                  <Icon name="search" size={15} /> 검색 시험
+                </button>
+              )}
+              {list?.enabled && (
+                <button type="button" className="btn btn-primary" onClick={() => setUploading((u) => !u)} aria-expanded={uploading}>
+                  <Icon name="upload" size={16} /> 자료 올리기
+                </button>
+              )}
+            </div>
           </div>
-          <p className="muted small">단가표 · 안내문을 올려 두면 답장 초안을 만들 때 찾아서 씁니다. 원본 파일은 저장하지 않고 뽑아낸 글만 남겨요.</p>
+          <StatStrip label="자료 현황" items={stats} active={only ?? 'all'} onPick={(k) => setOnly(k === 'all' ? null : k)} />
+          <p className="muted small pane-note">
+            단가표 · 안내문을 올려 두면 답장 초안을 만들 때 찾아서 써요. 원본 파일은 저장하지 않고 뽑아낸 글만 남겨요. "답장에 써도 됨" 자료는 초안을 만들 때 찾은 부분만 초안용 LLM으로 보내고(Gemini 무료 등급이면 Google의 제품 개선에 쓰일 수 있어요), 내부용 자료는 어디로도 보내지 않아요.
+          </p>
         </header>
 
         <div className="list-scroll pad">
@@ -422,21 +451,6 @@ export default function Knowledge() {
           )}
 
           {uploading && list?.enabled && <Uploader onUploaded={addMany} onClose={() => setUploading(false)} />}
-
-          <dl className="share-table" aria-label="공유 등급별로 자료가 가는 곳">
-            <div>
-              <dt>
-                <span className="pill pill-blue">답장에 써도 됨</span> <span className="num">{shareable}</span>
-              </dt>
-              <dd>초안을 만들 때 검색된 부분만 초안용 LLM으로 보냅니다. Gemini 무료 등급이면 보낸 내용이 Google의 제품 개선에 쓰일 수 있어요.</dd>
-            </div>
-            <div>
-              <dt>
-                <span className="pill pill-gray">내부용</span> <span className="num">{(list?.sources.length ?? 0) - shareable}</span>
-              </dt>
-              <dd>어디로도 보내지 않습니다. 초안에 내부용 값이 들어가면 보내기 전에 확인을 받아요.</dd>
-            </div>
-          </dl>
 
           {!list ? (
             loadError ? (
@@ -476,7 +490,7 @@ export default function Knowledge() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.sources.map((s) => (
+                  {shown.map((s) => (
                     <tr key={s.id} className={selected === s.id ? 'active' : ''}>
                       <td>
                         <button type="button" className="cell-link" onClick={() => setSelected(s.id)}>
