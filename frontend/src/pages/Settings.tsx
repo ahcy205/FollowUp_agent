@@ -238,7 +238,7 @@ export default function Settings() {
   )
 
   return (
-    <div className="page page-narrow">
+    <div className="page page-settings">
       <header className="page-head">
         <div>
           <h1>설정</h1>
