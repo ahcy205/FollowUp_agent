@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import Icon from '../components/Icon'
 import InboxCard from '../components/InboxCard'
+import StatStrip, { type Stat } from '../components/StatStrip'
 import { openCards } from '../followup'
 import TaskPanel from '../components/TaskPanel'
 import { dateTime, relative } from '../format'
@@ -83,6 +84,12 @@ export default function Inbox({ mode }: { mode: Mode }) {
   const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const [help, setHelp] = useState(false)
+  // 현황 칸으로 고른 묶음(그것만 보기). 탭을 바꾸면 푼다
+  const [focus, setFocus] = useState<string | null>(null)
+  const pickTab = (t: Tab) => {
+    setTab(t)
+    setFocus(null)
+  }
 
   const load = useCallback(() => {
     api
@@ -135,7 +142,13 @@ export default function Inbox({ mode }: { mode: Mode }) {
   }, [data, mode, tab])
 
   const q = query.trim()
-  const visible: Group[] = groups.map((g) => ({ ...g, cards: g.cards.filter((c) => matches(c, q)) })).filter((g) => g.cards.length > 0)
+  const focused: Group[] =
+    focus == null || (mode === 'inbox' && tab !== 'todo')
+      ? groups
+      : focus === 'late'
+        ? groups.map((g) => ({ ...g, cards: g.cards.filter((c) => c.deadline_badge.late) }))
+        : groups.filter((g) => g.key === focus)
+  const visible: Group[] = focused.map((g) => ({ ...g, cards: g.cards.filter((c) => matches(c, q)) })).filter((g) => g.cards.length > 0)
   const order = visible.flatMap((g) => g.cards.map((c) => c.task_id))
   const orderKey = order.join(',')
   const inList = id ? order.indexOf(Number(id)) : -1
@@ -233,8 +246,26 @@ export default function Inbox({ mode }: { mode: Mode }) {
   const connected = google?.enabled && google.status === 'connected'
   const counts = data?.counts
   const errorFor = (key: string) => (rowError?.key === key ? <div className="alert alert-red small">{rowError.message}</div> : null)
-  const followCount = mode === 'followup' ? groups.reduce((n, g) => n + (g.key === 'waiting' ? 0 : g.cards.length), 0) : 0
-  const waitCount = mode === 'followup' ? (groups.find((g) => g.key === 'waiting')?.cards.length ?? 0) : 0
+  const todoCards = data ? [...data.tabs.todo.now, ...data.tabs.todo.week, ...data.tabs.todo.later] : []
+  const groupSize = (key: string) => (data ? groups.find((g) => g.key === key)?.cards.length ?? 0 : undefined)
+  const stats: Stat[] =
+    mode === 'followup'
+      ? [
+          { key: 'no-reply', label: '답이 없어요', value: groupSize('no-reply'), tone: 'red', note: '보낸 지 영업일 3일째' },
+          { key: 'changed', label: '내용 바뀜', value: groupSize('changed'), tone: 'blue', note: '상대가 내용을 바꿨어요' },
+          { key: 'nudge', label: '답장 안 함', value: groupSize('nudge'), tone: 'amber', note: '받은 지 며칠 지났어요' },
+          { key: 'waiting', label: '답 기다림', value: groupSize('waiting'), note: '답장을 보낸 업무' },
+        ]
+      : [
+          { key: 'now', label: '지금 처리', value: data?.tabs.todo.now.length, tone: 'red', note: '기한이 가깝거나 중요해요' },
+          { key: 'late', label: '기한 지남', value: data ? todoCards.filter((c) => c.deadline_badge.late).length : undefined, tone: 'red', note: '기한이 이미 지났어요' },
+          { key: 'week', label: '이번 주', value: data?.tabs.todo.week.length, note: '이번 주 안에 처리' },
+          { key: 'later', label: '나중에', value: data?.tabs.todo.later.length, note: '기한이 넉넉해요' },
+        ]
+  const pickStat = (key: string | null) => {
+    if (mode === 'inbox' && tab !== 'todo') setTab('todo')
+    setFocus(key)
+  }
 
   return (
     <div className={`split${id ? ' has-panel' : ''}`}>
@@ -242,11 +273,7 @@ export default function Inbox({ mode }: { mode: Mode }) {
         <header className="pane-head">
           <div className="pane-title">
             <h1>{mode === 'followup' ? '후속 관리' : '받은 업무'}</h1>
-            {mode === 'followup' ? (
-              <span className="muted small" title="챙길 업무: 무응답 · 내용 바뀜 · 답장 안 함. 사이드바 · 홈의 '후속 필요'와 같은 숫자예요.">
-                챙길 업무 <b className="num">{followCount}</b>건 · 답 기다림 <b className="num">{waitCount}</b>건
-              </span>
-            ) : (
+            {mode === 'inbox' && (
               connected && (
                 <button type="button" className="sync" onClick={sync} disabled={syncing} title="Gmail에서 새 메일 확인">
                   <span className="live-dot" aria-hidden="true" />
@@ -261,6 +288,7 @@ export default function Inbox({ mode }: { mode: Mode }) {
             <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="보낸 사람 · 내용 검색" aria-label="목록 검색" />
             <kbd>/</kbd>
           </label>
+          <StatStrip label={mode === 'followup' ? '후속 관리 현황' : '처리할 일 현황'} items={stats} active={mode === 'inbox' && tab !== 'todo' ? null : focus} onPick={pickStat} />
           {help && (
             <div className="shortcut-help" role="note" aria-label="단축키">
               <ul>
@@ -276,9 +304,9 @@ export default function Inbox({ mode }: { mode: Mode }) {
             </div>
           )}
           {mode === 'inbox' && (
-            <div className="seg" role="group" aria-label="업무 구분">
+            <div className="tabs" role="group" aria-label="업무 구분">
               {TABS.map((t) => (
-                <button key={t.key} type="button" aria-pressed={tab === t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
+                <button key={t.key} type="button" aria-pressed={tab === t.key} className={tab === t.key ? 'active' : ''} onClick={() => pickTab(t.key)}>
                   {t.label}
                   {counts && <span className="num">{counts[t.key]}</span>}
                 </button>
