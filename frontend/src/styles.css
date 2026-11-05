@@ -104,6 +104,8 @@ kbd { font-family: inherit; font-size: 0.82rem; font-weight: 600; padding: 0 5px
 .page-head-stack { flex-direction: column; align-items: stretch; gap: 18px; }
 .page-head-row { display: flex; justify-content: space-between; align-items: center; gap: 12px 24px; flex-wrap: wrap; min-height: 44px; }
 .split.has-panel .tabs button { padding: 9px 9px 10px; font-size: 0.9rem; gap: 5px; }
+/* 머리 띠와 본문 경계: 진한 선 + 아래로 옅은 그림자, 본문은 연회색 */
+.pane-head, .content > .page > .page-head:first-child { border-bottom: 1px solid var(--border-2); box-shadow: 0 8px 18px -10px rgba(14, 26, 51, 0.24); position: relative; z-index: 2; }
 .page-head h1, .pane-head h1 { font-size: 1.65rem; font-weight: 700; letter-spacing: -0.015em; }
 .page-sub { margin-top: 6px; color: var(--text-2); }
 .page-date { color: var(--text-3); font-size: 0.9rem; font-weight: 600; margin-left: 10px; }
@@ -236,7 +238,7 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .split.has-panel { grid-template-columns: minmax(340px, 440px) minmax(0, 1fr); }
 .split:not(.has-panel) .detail-pane { display: none; }
 .split:not(.has-panel) .list-pane { border-right: 0; }
-.list-pane { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--surface); }
+.list-pane { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg); }
 .split-knowledge .list-pane { background: var(--bg); }
 .pane-head { padding: 28px 36px 18px; display: flex; flex-direction: column; gap: 18px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .split.has-panel .pane-head { padding: 24px 22px 14px; gap: 14px; }
@@ -262,7 +264,7 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .group-head.tone-blue > span:first-child { color: var(--accent-600); }
 .group-hint { margin-left: auto; font-weight: 500; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.row { border-bottom: 1px solid var(--border); position: relative; }
+.row { border-bottom: 1px solid var(--border); position: relative; background: var(--surface); }
 .row-link { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 13px 22px; color: var(--text); text-decoration: none !important; transition: background 0.1s; }
 .row-link:hover { background: var(--surface-2); }
 .row.active .row-link { background: var(--accent-50); }
