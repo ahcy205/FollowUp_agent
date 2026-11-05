@@ -285,6 +285,16 @@ export default function Inbox({ mode }: { mode: Mode }) {
               ))}
             </div>
           )}
+          {!id && (
+            <div className="list-cols" aria-hidden="true">
+              <span />
+              <span>보낸 사람</span>
+              <span>요약</span>
+              <span>상황 · 할 일</span>
+              <span>받은 때</span>
+              <span>기한</span>
+            </div>
+          )}
         </header>
 
         <div className="list-scroll">
