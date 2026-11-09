@@ -1,152 +1,122 @@
-# FollowUp Agent — 업무 메일 후속조치 Agent
+# FollowUp Agent
 
-Gmail 받은편지함에서 **업무 메일만 골라 업무로 바꾸고, 끝날 때까지 챙기는** 개인용 웹 앱입니다.
-요약 · 상대가 원하는 것 · 할 일 · 기한(근거 문장 포함)을 정리해 기한은 Google 캘린더에 올리고, 근거 있는 값만 채운 답장 초안을 내가 확인해야만 보냅니다.
-보낸 뒤에는 상대가 답하지 않거나 내용을 바꾸면 알려 주고 업무를 고칩니다.
+**메일 한 통이 끝난 업무가 되기까지 챙기는 업무 메일 Agent.**
+Gmail 받은편지함에서 업무 메일만 골라 요약 · 할 일 · 기한으로 정리하고, 기한은 Google 캘린더에 올리고,
+근거가 있는 값만 채운 답장 초안을 **사람이 확인해야만** 보냅니다. 보낸 뒤에는 상대가 답하지 않거나 내용을 바꾸면 알려 줍니다.
 
-**기술 스택** · Python · FastAPI · SQLAlchemy · Alembic · PostgreSQL(로컬 SQLite) · React 19 · Vite · TypeScript · Gemini / Claude(구조화 출력) · SSE · Docker
+![홈 화면: 오늘 처리할 업무 · 기한 임박 · 답 기다림 · 후속 필요 숫자와 자동 처리 상태](docs/images/home.png)
 
-### 핵심 포인트
+`Python` `FastAPI` `SQLAlchemy` `Alembic` `PostgreSQL / SQLite` `React 19` `TypeScript` `Vite` `Gemini / Claude 구조화 출력` `Gmail · Calendar API` `SSE` `GitHub Actions`
 
-- **메일 한 통 → 끝난 업무** — 받은 뒤(판별 · 요약 · 할 일 · 기한 · 캘린더), 답장(근거 있는 초안 · 확인 후 발송), 보낸 뒤(무응답 · 재답장 반영)까지 한 흐름입니다.
-- **근거를 보입니다** — 기한 근거 문장, 바뀐 내용의 근거, 초안 값의 자료 줄. 근거가 없는 값은 빈칸 `[[ ]]`으로 남깁니다.
-- **되돌릴 수 없는 일은 사람이** — 답장은 화면 안 확인 단계를 거쳐야만 나가고, 받는 사람은 서버가 정합니다.
-- **외부 콘텐츠는 데이터로만** — 메일 · 자료 속 지시문은 격리 태그와 탐지 규칙으로 막고 보안 경고로 남깁니다.
-- **실제 데이터를 LLM에 보내는 기능은 기본 꺼짐** — `MAIL_TRIAGE_ENABLED`, `KNOWLEDGE_ENABLED`.
+> 개인 포트폴리오 프로젝트입니다. 화면의 데이터는 모두 가상 예시(`.example` 주소, 가상 회사 · 품번)이고, 실제 Gmail · 캘린더 연동은 단계마다 본인 계정으로 확인했습니다.
 
-**목차** · [진행 상황](#진행-상황) · [구조](#구조) · [보안](#보안) · [로컬 실행](#로컬-실행) · [Railway 배포](#railway-배포) · [범위 밖](#범위-밖-의도적으로-제외)
+---
 
-## 진행 상황
+## 해결하는 문제
 
-| 단계 | 상태 |
+견적 · 납기 · 샘플 메일을 하루 수십 통 주고받는 영업 · 구매 담당자는 **메일을 읽는 것보다 놓치지 않는 것**이 어렵습니다.
+누가 무엇을 언제까지 원하는지, 내가 답했는지, 상대가 답을 안 하는지, 중간에 수량을 바꾸지 않았는지를 사람이 기억해야 합니다.
+
+FollowUp Agent는 이 흐름을 한 줄로 이어 줍니다.
+
+```
+받은 메일 → 업무 판별 → 요약 · 할 일 · 기한(근거 문장) → 캘린더 → 답장 초안 → 발송 전 확인 → 보내기
+          → 답 기다림 → 상대가 바꾸면 근거와 함께 반영 · 영업일 3일 무응답이면 다시 연락
+```
+
+## 화면
+
+| 받은 업무: 고르기 전엔 전체 폭 목록 | 업무 상세: AI 판단과 근거 문장 |
 |---|---|
-| Gmail 연결 · 메일 동기화 (설계 1 · 2단계) | 완료 (로컬 기준) |
-| 업무 메일 판별과 접수 (설계 3단계) | 완료 (실제 계정 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-mail-triage-and-intake.md) |
-| Google 캘린더 연동 (설계 4단계) | 완료 (실제 캘린더 확인) — [구현 계획](docs/superpowers/plans/2026-10-26-calendar-sync.md) |
-| 받은 업무 화면 (설계 5단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-26-inbox-screen-design.md) · [구현 계획](docs/superpowers/plans/2026-10-26-inbox-screen.md) |
-| 답장과 수명주기 (설계 6단계) | 완료 (실제 계정 확인) — [설계](docs/superpowers/specs/2026-10-27-reply-and-lifecycle-design.md) · [구현 계획](docs/superpowers/plans/2026-10-27-reply-and-lifecycle.md) · [정확도 측정](docs/evals/2026-10-27-reply-lifecycle.md) |
-| RAG 1단계: 내 자료로 답장 초안 채우기 | 완료 (로컬 점검, 가상 자료) — [설계](docs/superpowers/specs/2026-10-29-rag-documents-design.md) · [구현 계획](docs/superpowers/plans/2026-10-29-rag-documents.md) · [정확도 측정](docs/evals/2026-10-29-rag-documents.md) |
-| 화면 전면 개편 (견적서 · 거래명세서 양식) | 대체됨 (프리미엄 SaaS 리디자인) — [설계](docs/superpowers/specs/2026-10-31-ui-redesign-design.md) · [디자인 체계](DESIGN.md) |
-| 프리미엄 SaaS 리디자인 (사이드바 · 상세 패널 · 홈 · 후속 관리 · 발송 체크리스트) | 완료 (가상 데이터 점검) — [설계](docs/superpowers/specs/2026-10-31-saas-redesign-design.md) · [구현 계획](docs/superpowers/plans/2026-10-31-saas-redesign.md) · [디자인 체계](DESIGN.md) |
-| 데모 모드 · 목표 입력 Agent 제거 | 완료 — [설계](docs/superpowers/specs/2026-10-31-remove-demo-and-goal-agent-design.md) · [구현 계획](docs/superpowers/plans/2026-10-31-remove-demo-and-goal-agent.md) |
-| 정리 (설계 7단계: 로그 · 유출 경고 · 데모 분리 · contacts) | 완료 — [설계](docs/superpowers/specs/2026-11-09-cleanup-stage7-design.md) · [구현 계획](docs/superpowers/plans/2026-11-09-cleanup-stage7.md) |
-| RAG 다음 단계 (업무 요약 · 메일 색인 · 문체, 의미 검색) | 예정 — [상위 설계](docs/superpowers/specs/2026-10-26-rag-design.md) |
+| ![받은 업무 목록](docs/images/inbox.png) | ![업무 상세](docs/images/task-detail.png) |
+| **발송 전 확인: 근거 없는 값 · 내부용 값 · 받는 사람** | **자료실: 답장에 써도 됨 / 내부용** |
+| ![발송 전 확인](docs/images/send-check.png) | ![자료실](docs/images/knowledge.png) |
 
-해커톤 PoC(목표 입력 → Agent 도구 실행 → 승인 → 재개, 가상 메일 데모)는 2026-10-31에 지웠습니다. 기록은 git 이력과 [변경 이력](CHANGELOG.md)에 있습니다.
+<details>
+<summary>후속 관리 · 휴대폰 화면</summary>
 
-**문서** · [변경 이력](CHANGELOG.md) · [결정 기록](docs/decisions.md) · [데이터 · 개인정보 흐름](docs/privacy.md) · [문제 해결](docs/troubleshooting.md) · [설계 문서 · 구현 계획](docs/superpowers/) · [제품 기준](PRODUCT.md) · [디자인 체계](DESIGN.md)
+![후속 관리: 답이 없어요 · 내용 바뀜 · 답장 안 함 · 답 기다림](docs/images/followup.png)
+
+<img src="docs/images/mobile-detail.png" alt="휴대폰 업무 상세" width="320">
+</details>
+
+## 주요 기능
+
+- **업무 메일 판별:** 이미 업무인 스레드 → 규칙 필터(광고 · 자동 알림) → LLM 순으로 걸러 비용과 오판을 줄입니다.
+- **업무 정리:** 한 줄 요약 · 상대가 원하는 것 · 할 일 · 기한. 기한 옆에 메일의 근거 문장을 붙이고, "이번 주 금요일" 같은 상대 날짜는 코드가 사용자 시간대로 다시 계산합니다.
+- **AI 값과 사람 값 구분:** AI가 정한 값은 "AI 판단", 사용자가 고친 기한 · 중요도는 "직접 정함"으로 표시하고, 다시 분석해도 덮어쓰지 않습니다.
+- **캘린더:** 기한을 비공개 일정으로 올리고, 바뀌면 고치고, 끝나면 표시합니다.
+- **답장 초안 + 발송 전 확인:** 메모 · 입력 · 스레드 메일 · "답장에 써도 됨" 자료에 있는 값만 쓰고, 근거가 없으면 `[[ ]]` 빈칸으로 남깁니다.
+- **후속 관리:** 영업일 3일 무응답, 받고 48시간 답장 안 함, 상대가 내용을 바꿈을 모아 보여 주고 다시 연락 초안을 만듭니다.
+- **재답장 반영:** 상대가 "수량을 100개로"라고 다시 보내면 80개 → 100개를 근거와 함께 보여 주고 반영 · 되돌리기를 고르게 합니다.
+- **자료실(RAG 1단계):** 단가표 · 정책 문서를 올리면 초안을 만들 때 관련 줄만 찾아 쓰고, 초안이 인용한 줄과 숫자를 코드로 다시 확인합니다.
+- **실시간 · 키보드:** 업무 상세는 SSE로 실시간 갱신, `j` `k` `Esc` `/` `?` 단축키, 휴대폰 대응.
+
+## 안전 설계: 되돌릴 수 없는 일은 사람이, 확인은 서버가
+
+메일 발송은 되돌릴 수 없어서, 화면의 확인과 서버의 검사를 **같은 규칙으로 두 번** 합니다.
+
+| 위험 | 막는 방법 |
+|---|---|
+| AI가 받는 사람을 바꾼다 | 받는 사람은 LLM이 아니라 서버가 그 스레드의 메일 기록에서 정하고, 보내기 직전에 다시 계산해 다르면 거절(409) |
+| 근거 없는 숫자 · 날짜가 나간다 | 초안 속 숫자 · 날짜를 근거 글과 토큰 단위로 비교. "30만 원" = "300,000원"처럼 단위까지 맞춰 비교하고, 근거가 없으면 "값이 맞는지 확인했어요"를 체크해야 보냄 |
+| 내부 원가가 새어 나간다 | 내부용 자료의 값이 초안에 있으면(“8만 8천 원”처럼 써도) "알고 보냅니다"를 체크해야 보냄. 내부용 자료는 LLM으로 보내지 않음 |
+| 확인한 뒤 초안이 바뀐다 | 확인 체크를 초안 버전(`updated_at`)에 묶어, 그사이 바뀌면 거절하고 다시 확인 |
+| 메일 속 지시문(프롬프트 주입) | 메일 · 자료 본문은 격리 태그로 감싸 데이터로만 보내고, 정규식으로 탐지해 보안 경고로 남김. 의심 덩어리는 검색에서 제외 |
+| 두 번 보내기 | 보내는 중 · 결과 불분명 상태를 따로 두고, 불분명하면 5분 뒤 보낸편지함 확인을 물음. 이미 답장했으면 거절 |
+| 개인정보가 로그에 남는다 | 로그 · 처리 기록에는 메일 번호 · 건수 · 예외 이름만. DB 오류 메시지에서도 값을 숨김(`hide_parameters`). 전 과정을 돌려 확인하는 테스트 |
+| 실제 메일이 의도치 않게 LLM으로 | 실제 메일을 LLM에 보내는 기능은 모두 스위치(`MAIL_TRIAGE_ENABLED`, `KNOWLEDGE_ENABLED`) 뒤, 기본 꺼짐 |
+
+그 밖에 사용자별 데이터 격리(남의 업무는 존재 여부도 404), CSRF 헤더 검사, 외부 호출 API 호출 제한, Google 갱신 토큰 AES-GCM 암호화를 적용했습니다.
 
 ## 구조
 
+```mermaid
+flowchart LR
+  B["React 19 · TypeScript<br/>Vite"] -->|"/api · SSE"| API["FastAPI<br/>인증 · CSRF · 호출 제한"]
+  API --> DB[("PostgreSQL / SQLite<br/>SQLAlchemy · Alembic")]
+  WK["백그라운드 작업<br/>90초 주기"] --> DB
+  WK --> GM["Gmail API"]
+  WK --> GC["Calendar API"]
+  WK --> LLM["LLM 구조화 출력<br/>판별 · 분석 · 바뀐 내용"]
+  API --> LLM
+  API --> GM
 ```
-React (Vite, TS)  ──same-origin cookie──▶  FastAPI   (업무 상세는 SSE `/api/tasks/{id}/events`로 실시간 수신)
-                                             ├─ api/        auth · inbox · tasks(메일 업무 동작) · google · knowledge
-                                             ├─ google/     OAuth · Gmail · 캘린더 클라이언트
-                                             ├─ mail/       동기화 · 판별 · 접수 · 재답장 · 합치기 · 답장 초안 · 발송 · 캘린더 반영
-                                             ├─ knowledge/  자료 글 뽑기 · 덩어리 · 키워드 검색 · 초안 출처 확인
-                                             ├─ agent/      llm.py · gemini_llm.py (구조화 출력 호출) · guard.py (외부 콘텐츠 격리 · 주입 탐지) · audit.py (처리 기록)
-                                             └─ models.py  SQLAlchemy → PostgreSQL (로컬: SQLite) · Alembic
-```
 
-### 실시간 갱신 (SSE)
-업무 상세 화면은 폴링 대신 `GET /api/tasks/{id}/events`에 EventSource로 붙습니다. 서버는 연결 직후 전체 업무 상세를 1회 보내고,
-이후 0.4초 간격으로 변경 지문(업무 updated_at · 마지막 기록 id 등)을 확인해 바뀐 경우에만 `event: task`로 다시 보냅니다.
-변화가 없으면 15초마다 주석 줄로 연결만 유지합니다. 인증은 기존 쿠키, 소유권 검사는 스트림 시작 전에 수행(남의 업무 404)합니다.
+- **백엔드 모듈:** `mail/`(동기화 · 판별 · 접수 · 재답장 · 합치기 · 초안 · 발송 · 캘린더), `knowledge/`(글 뽑기 · 덩어리 · 검색 · 출처 확인), `google/`(OAuth · 클라이언트 · 토큰 암호화), `agent/`(LLM 호출 · 주입 탐지 · 처리 기록)
+- **LLM 결과는 믿지 않습니다.** 판별 · 분석 · 초안은 JSON 스키마 구조화 출력 1회 호출이고, 날짜 · 근거 문장 · 숫자는 코드가 다시 확인합니다. 형식이 틀린 응답만 횟수를 세고, 제공자 장애는 다음 주기에 다시 합니다.
+- **외부 서비스는 프로토콜 뒤에.** 테스트는 가짜 Gmail · 가짜 LLM으로 네트워크 없이 돕니다.
 
-### LLM
-`LLM_PROVIDER`로 Gemini/Claude를 선택합니다. 판별 · 분석 · 재답장 · 답장 초안은 모두 구조화 출력(JSON 스키마) 1회 호출이고, 결과는 코드가 다시 확인합니다(날짜 · 근거 문장 · 숫자). 무료 등급 분당 한도는 `LLM_RPM_LIMIT`로 간격을 둡니다.
+## 품질
 
-## 보안
-- **인증**: bcrypt 해시, HttpOnly + SameSite=Lax(+ 운영 Secure) JWT 쿠키, 로그인/가입 rate limit.
-- **데이터 격리**: 모든 조회는 `user_id` 조건 포함. 남의 ID는 404(존재 여부 비노출). 테스트로 검증.
-- **CSRF**: 상태 변경 API는 `X-Requested-With` 헤더 + Origin 허용 목록 필수.
-- **Prompt Injection**: 메일 · 자료는 데이터로만 취급(태그 격리 + 정규식 탐지 + 보안 경고 기록). 받는 사람은 LLM이 아니라 서버가 정합니다.
-- **헤더**: CSP, X-Frame-Options DENY, nosniff, HSTS(운영), API `no-store`. 운영에서 TrustedHost, `/api/docs` 비활성화.
-- **Secret**: 전부 환경변수. `.env`는 `.gitignore`. 운영에서 `SECRET_KEY` 32자 미만·SQLite 사용 시 기동 거부.
+- **백엔드 테스트 747개**(48개 파일), GitHub Actions CI에서 백엔드 테스트와 프론트 빌드 · lint를 돌립니다.
+- **실제 LLM 스모크 테스트**는 가상 데이터로 opt-in(`RUN_LLM_SMOKE=1`).
+- **정확도 측정:** [답장 · 업무 생애](docs/evals/2026-10-27-reply-lifecycle.md), [자료 검색 · 자료로 채운 초안](docs/evals/2026-10-29-rag-documents.md)(키워드 검색 recall@5 0.81).
+- **설계 → 계획 → 구현:** 기능마다 [설계 문서와 구현 계획](docs/superpowers/)을 쓰고, 계획과 달라진 점은 계획 문서의 변경 이력 표에 남겼습니다.
+
+## 판단 기록에서 몇 가지
+
+전체는 [docs/decisions.md](docs/decisions.md)에 있습니다.
+
+- **답장은 앱에서 승인해야 발송.** 자동 발송은 범위에서 뺐습니다. 편의보다 "사람이 누르지 않으면 아무것도 나가지 않는다"를 택했습니다.
+- **근거 없는 값은 확인해야 보낸다.** 처음 설계는 경고만 했지만, 사용성 검토에서 "근거 없는 숫자가 거래처로 나가는 것"을 가장 심각한 문제(P0)로 꼽아 확인 체크를 해야 보내도록 바꿨습니다. 숫자 형식 차이로 생기는 오탐이 있을 수 있어 완전 차단 대신 확인으로 풀 수 있게 했습니다.
+- **임베딩 대신 키워드 검색부터.** 품번 중심 자료에서 키워드 검색을 측정(recall@5 0.81)해 보고, 의미 검색은 측정 결과와 비용(무료 등급 데이터 정책)을 보고 정하기로 했습니다.
+- **메일 상대 주소록(`contacts`)은 만들지 않음.** 답장 받는 사람은 메일 기록에서 정하므로, 주소를 한 번 더 저장해 개인정보만 늘리는 테이블은 빼기로 했습니다.
 
 ## 로컬 실행
 
 ```bash
-# Backend
-python -m venv .venv && .venv/Scripts/pip install -r backend/requirements-dev.txt   # (mac/linux: .venv/bin/pip)
-cp .env.example backend/.env    # LLM_PROVIDER, LLM_API_KEY, SECRET_KEY 입력
-cd backend && ../.venv/Scripts/uvicorn app.main:app --reload --port 8000
-
-# Frontend (개발 서버, /api는 8000으로 프록시)
-cd frontend && npm install && npm run dev        # http://localhost:5173
-# 또는 npm run build → backend/static 으로 빌드되어 http://localhost:8000 에서 함께 서빙
-
-# 스키마가 바뀐 뒤 기존 dev.db를 계속 쓰려면 (로컬 SQLite는 create_all이라 컬럼 추가를 반영하지 않음)
-cd backend && ../.venv/Scripts/alembic upgrade head       # 또는 backend/dev.db 삭제 후 재기동
-
-# Tests (LLM은 스크립트된 가짜 클라이언트로 대체)
-cd backend && ../.venv/Scripts/python -m pytest -q
-
-# 실 LLM 스모크 테스트 (opt-in, 공급자 쿼터 사용 · backend/.env의 LLM_API_KEY 필요, 약 30초~3분)
-cd backend && RUN_LLM_SMOKE=1 ../.venv/Scripts/python -m pytest smoke -v -s
+python -m venv .venv && .venv/Scripts/pip install -r backend/requirements-dev.txt   # mac/linux: .venv/bin/pip
+cp .env.example backend/.env                                                          # LLM 키 · SECRET_KEY 입력
+cd backend && ../.venv/Scripts/alembic upgrade head && ../.venv/Scripts/uvicorn app.main:app --port 8000
+cd frontend && npm install && npm run build                                           # http://localhost:8000
+cd backend && ../.venv/Scripts/python -m pytest -q                                    # 테스트(오프라인)
 ```
 
-### Google 연결 준비 (로컬)
+Google 연결(OAuth 클라이언트 만들기), 기능 스위치, 자료실 사용법, 배포 방법은 [개발 기록과 실행 가이드](docs/development.md)에 있습니다.
 
-Gmail을 연결하려면 본인 Google Cloud 프로젝트에 OAuth 클라이언트를 만들어야 합니다. 설정하지 않으면 Google 기능만 꺼지고 나머지는 그대로 동작합니다.
+## 문서
 
-1. [Google Cloud Console](https://console.cloud.google.com/)에서 새 프로젝트를 만들고 **Gmail API**와 **Google Calendar API**를 사용 설정합니다.
-2. Google Auth Platform → **대상(Audience)**: 사용자 유형 **외부**, 게시 상태 **테스트**로 두고, 테스트 사용자에 본인 Gmail 주소를 추가합니다.
-3. **데이터 액세스**에 다음 권한을 추가합니다.
-   - `.../auth/gmail.readonly`
-   - `.../auth/gmail.send`
-   - `.../auth/calendar.events`
-   - `openid`
-   - `.../auth/userinfo.email`
-4. **클라이언트** → 클라이언트 만들기 → 유형 **웹 애플리케이션**. 승인된 리디렉션 URI에 다음 두 개를 넣습니다.
-   - `http://localhost:5173/api/google/callback`
-   - `http://localhost:8000/api/google/callback`
-5. `backend/.env`에 값을 넣습니다. 비밀값이므로 커밋하지 마세요.
-   ```
-   GOOGLE_CLIENT_ID=...
-   GOOGLE_CLIENT_SECRET=...
-   GOOGLE_TOKEN_KEY=...   # python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
-   PUBLIC_URL=http://localhost:5173   # 빌드본을 8000에서 볼 때는 http://localhost:8000
-   ```
-6. `alembic upgrade head` 후 서버를 다시 띄우고, 앱의 **설정** 화면에서 "Google 계정 연결"을 누릅니다. 연결되면 최근 3일치 받은편지함 메일을 가져오고, 이후 90초마다 새 메일을 확인합니다.
+[개발 기록과 실행 가이드](docs/development.md) · [판단 기록](docs/decisions.md) · [데이터 · 개인정보 흐름](docs/privacy.md) · [변경 이력](CHANGELOG.md) · [설계 · 구현 계획](docs/superpowers/) · [제품 기준](PRODUCT.md) · [디자인 체계](DESIGN.md) · [문제 해결](docs/troubleshooting.md)
 
-- 브라우저 주소는 `PUBLIC_URL`과 같은 호스트(`localhost`)로 여세요. `127.0.0.1`로 열면 로그인 쿠키가 달라 연결이 실패합니다.
-- 테스트 상태 앱은 Google 정책상 갱신 토큰이 **7일 뒤 만료**됩니다. 만료되면 앱 상단 빨간 배너에서 다시 연결하세요.
-- 연결만 하면 메일을 가져와 저장하는 데까지 동작합니다. 업무 판별 · 요약 · 답장 초안은 아래 "업무 메일 자동 판별 켜기"로 스위치를 켜야 동작합니다. 기한이 있는 업무는 캘린더 일정으로 들어갑니다.
-- 답장은 업무 상세의 초안 카드에서 사용자가 확인하고 보내기를 눌렀을 때만 원래 Gmail 스레드로 나갑니다. Gmail에서 직접 보낸 답장도 감지해 "답 기다림"으로 옮깁니다.
-
-### 업무 메일 자동 판별 켜기
-
-`backend/.env`에 `MAIL_TRIAGE_ENABLED=true`를 넣고 서버를 재시작하면, 가져온 메일에서 업무 메일을 골라 요약 · 할 일 · 기한이 담긴 업무를 자동으로 만듭니다. 기본값은 꺼짐입니다.
-같은 스위치로 재답장 분석(상대가 바꾼 내용 반영), 다른 스레드 수정 요청 판단, 답장 초안 만들기도 켜집니다.
-켜면 메일의 보낸 사람 · 제목 · 본문 일부가 LLM 공급자로 전송됩니다. 전송 범위와 무료 등급 주의 사항은 [데이터 · 개인정보 흐름](docs/privacy.md)을 보세요.
-
-### 내 자료로 답장 초안 채우기 (RAG 1단계)
-
-`backend/.env`에 `KNOWLEDGE_ENABLED=true`를 넣고 서버를 재시작하면 왼쪽 메뉴 **자료실**에서 단가표 · 정책 문서 등을 올릴 수 있습니다(xlsx · csv · txt · md · pdf · docx). 기본값은 꺼짐이고, 답장 초안을 만들려면 위 판별 스위치도 켜져 있어야 합니다.
-- 올린 자료는 기본이 **내부용**입니다. 답장에 쓰려면 **답장에 써도 됨**으로 바꿉니다. 그 자료 중 검색된 부분(최대 5덩어리)만 초안을 만들 때 LLM으로 갑니다. 내부용 자료는 밖으로 나가지 않습니다.
-- 초안 카드에 "자료에서 가져온 내용"과 그 자료 줄이 보입니다. 내부용 자료의 값(예: 원가)이 초안에 들어 있으면 빨간 경고가 뜨고, "알고 보냅니다"를 체크해야 보낼 수 있습니다.
-- 검색은 내 PC 안에서 키워드로 합니다. 품번 같은 낱말이 메일 · 메모에 있어야 잘 찾습니다. 문제가 생기면 [문제 해결](docs/troubleshooting.md#자료실--자료로-채운-답장-rag-1단계)을 보세요.
-
-## Railway 배포
-
-1. GitHub에 push → Railway에서 **New Project → Deploy from GitHub repo** (루트의 `Dockerfile`, `railway.json` 사용).
-2. 같은 프로젝트에 **PostgreSQL** 추가 → 앱 서비스 Variables에 `DATABASE_URL=${{Postgres.DATABASE_URL}}`.
-3. Variables:
-
-| 변수 | 값 |
-|---|---|
-| `APP_ENV` | `production` (Dockerfile 기본값) |
-| `SECRET_KEY` | `python -c "import secrets;print(secrets.token_urlsafe(48))"` |
-| `LLM_PROVIDER` | `gemini` (기본) 또는 `anthropic` |
-| `LLM_API_KEY` | Gemini: Google AI Studio 키 / Anthropic: Console API 키 |
-| `LLM_MODEL` | 비우면 기본값 (`gemini-3.6-flash` / `claude-opus-5`) |
-| `LLM_RPM_LIMIT` | 분당 LLM 호출 상한. Gemini 무료 등급은 `5` (결제 활성화 시 `0`=해제) |
-
-4. Settings → Networking → **Generate Domain**. Railway가 주입하는 `RAILWAY_PUBLIC_DOMAIN`으로 허용 호스트/Origin이 자동 설정됩니다(커스텀 도메인은 `PUBLIC_URL`, `ALLOWED_HOSTS` 추가).
-5. 컨테이너 시작 시 `alembic upgrade head` 후 uvicorn 기동. 헬스체크 `/api/health`.
-
-## 범위 밖 (의도적으로 제외)
-기업 메일(Gmail 외) 연동, 자동 발송(사용자 승인 없이 나가는 메일), 모델 학습/파인튜닝, Multi-Agent, 결제, 모바일 앱.
-
-설계 문서: [Gmail · Google 캘린더 연동](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) · [Agent 전체 구조와 RAG](docs/superpowers/specs/2026-10-26-rag-design.md)
+**범위 밖(의도적으로 제외):** 회사 메일(Gmail 외) 연동, 사용자 승인 없는 자동 발송, 모델 학습, 결제, 모바일 앱.
