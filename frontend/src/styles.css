@@ -488,6 +488,9 @@ label input:not([type='checkbox']):not([type='radio']), label textarea { font-si
 .check-ok .check-mark::after { content: ''; width: 3px; height: 7px; border-right: 1.6px solid var(--green); border-bottom: 1.6px solid var(--green); transform: rotate(45deg) translate(-1px, -1px); }
 .check-confirm .check-mark { border: 1.5px solid var(--amber); background: var(--amber-50); }
 .check-confirm .check-mark::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+.check-warn .check-mark { border: 1.5px solid var(--amber); background: var(--surface); }
+.check-warn .check-mark::after { content: '!'; font-size: 0.7rem; font-weight: 800; line-height: 1; color: var(--amber); }
+.check-warn .check-label { color: var(--amber); }
 .check-block .check-mark { border: 1.5px solid var(--red); background: var(--red-50); }
 .check-block .check-mark::after { content: ''; width: 7px; height: 1.6px; background: var(--red); }
 .check-label { font-weight: 650; }

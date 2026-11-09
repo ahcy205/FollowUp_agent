@@ -29,7 +29,7 @@ Gmail 받은편지함에서 **업무 메일만 골라 업무로 바꾸고, 끝�
 | 화면 전면 개편 (견적서 · 거래명세서 양식) | 대체됨 (프리미엄 SaaS 리디자인) — [설계](docs/superpowers/specs/2026-10-31-ui-redesign-design.md) · [디자인 체계](DESIGN.md) |
 | 프리미엄 SaaS 리디자인 (사이드바 · 상세 패널 · 홈 · 후속 관리 · 발송 체크리스트) | 완료 (가상 데이터 점검) — [설계](docs/superpowers/specs/2026-10-31-saas-redesign-design.md) · [구현 계획](docs/superpowers/plans/2026-10-31-saas-redesign.md) · [디자인 체계](DESIGN.md) |
 | 데모 모드 · 목표 입력 Agent 제거 | 완료 — [설계](docs/superpowers/specs/2026-10-31-remove-demo-and-goal-agent-design.md) · [구현 계획](docs/superpowers/plans/2026-10-31-remove-demo-and-goal-agent.md) |
-| 정리 (설계 7단계) | 예정 — [설계 문서](docs/superpowers/specs/2026-10-10-gmail-calendar-design.md) |
+| 정리 (설계 7단계: 로그 · 유출 경고 · 데모 분리 · contacts) | 완료 — [설계](docs/superpowers/specs/2026-11-09-cleanup-stage7-design.md) · [구현 계획](docs/superpowers/plans/2026-11-09-cleanup-stage7.md) |
 | RAG 다음 단계 (업무 요약 · 메일 색인 · 문체, 의미 검색) | 예정 — [상위 설계](docs/superpowers/specs/2026-10-26-rag-design.md) |
 
 해커톤 PoC(목표 입력 → Agent 도구 실행 → 승인 → 재개, 가상 메일 데모)는 2026-10-31에 지웠습니다. 기록은 git 이력과 [변경 이력](CHANGELOG.md)에 있습니다.

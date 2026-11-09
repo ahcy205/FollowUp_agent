@@ -267,6 +267,27 @@ export default function ReplyDraftCard({
       detail: sentLater ? '이미 이 업무에 답장을 보냈어요. 초안을 지우거나 다시 만들어 주세요.' : '서버가 정한 주소예요. 보내기 직전에 다시 확인해요.',
     },
     {
+      // 유출 경고(상위 설계 6절): 경고만 하고 보내기를 막지 않는다
+      key: 'outside',
+      label: '스레드 밖 연락처',
+      state: w.outside_contacts.length > 0 ? 'warn' : 'ok',
+      detail: dirty && w.outside_contacts.length > 0
+        ? '고친 내용을 저장하면 다시 확인해요'
+        : w.outside_contacts.length > 0
+          ? '이 대화에 없던 주소 · 전화번호예요. 보내도 되는 연락처인지 살펴봐 주세요.'
+          : '이 대화에 없던 주소 · 전화번호가 없어요',
+      extra:
+        w.outside_contacts.length > 0 && !dirty ? (
+          <span className="check-values">
+            {w.outside_contacts.map((c) => (
+              <span key={c} className="value-chip">
+                {c}
+              </span>
+            ))}
+          </span>
+        ) : null,
+    },
+    {
       key: 'saved',
       label: '고친 내용',
       state: dirty ? 'confirm' : 'ok',
@@ -384,7 +405,7 @@ export default function ReplyDraftCard({
 
       {src.search_failed && <div className="muted small">자료를 찾지 못해 메모와 입력만으로 만들었습니다</div>}
 
-      {(w.outside_contacts.length > 0 || w.suspicious.length > 0 || (!editable && (w.unsupported.length > 0 || needsAck || sourcesChanged))) && (
+      {(w.suspicious.length > 0 || (!editable && (w.outside_contacts.length > 0 || w.unsupported.length > 0 || needsAck || sourcesChanged))) && (
         <div className="draft-warnings">
           {sourcesChanged && !editable && (
             <div className="alert alert-amber">
@@ -423,12 +444,12 @@ export default function ReplyDraftCard({
               메모나 자료에 없는 값이에요. 맞는지 확인해 주세요.
             </div>
           )}
-          {w.outside_contacts.length > 0 && (
+          {w.outside_contacts.length > 0 && !editable && (
             <div className="alert alert-amber">
               <b>스레드 밖 연락처</b> — {w.outside_contacts.join(', ')}. 이 대화에 없던 주소 · 전화번호입니다.
             </div>
           )}
-          {dirty && w.outside_contacts.length + w.suspicious.length > 0 && <div className="muted small">경고는 저장한 내용 기준입니다. 저장하면 다시 확인합니다.</div>}
+          {dirty && w.suspicious.length > 0 && <div className="muted small">경고는 저장한 내용 기준입니다. 저장하면 다시 확인합니다.</div>}
         </div>
       )}
 
@@ -564,7 +585,8 @@ export default function ReplyDraftCard({
   )
 }
 
-type CheckState = 'ok' | 'confirm' | 'block'
+/** ok 통과 · confirm 체크해야 보냄 · block 고쳐야 보냄 · warn 살펴보기만(보내기를 막지 않음) */
+type CheckState = 'ok' | 'confirm' | 'block' | 'warn'
 type CheckItem = { key: string; label: string; state: CheckState; detail: string; extra?: ReactNode }
 
 function checkSummary(items: CheckItem[]): { tone: CheckState; text: string } {
@@ -572,7 +594,8 @@ function checkSummary(items: CheckItem[]): { tone: CheckState; text: string } {
   const toConfirm = items.filter((i) => i.state === 'confirm').length
   if (blocked > 0) return { tone: 'block', text: `보내기 전에 고칠 것 ${blocked}개` }
   if (toConfirm > 0) return { tone: 'confirm', text: `확인할 것 ${toConfirm}개` }
-  return { tone: 'ok', text: '보낼 준비가 됐어요' }
+  const warned = items.filter((i) => i.state === 'warn').length
+  return { tone: 'ok', text: warned > 0 ? `보낼 준비가 됐어요 · 살펴볼 것 ${warned}개` : '보낼 준비가 됐어요' }
 }
 
 /**
@@ -595,7 +618,7 @@ function SendChecklist({ items, summary }: { items: CheckItem[]; summary: { tone
               {i.detail}
               {i.extra && <span className="check-extra">{i.extra}</span>}
             </span>
-            <span className="sr-only">{i.state === 'ok' ? '통과' : i.state === 'confirm' ? '확인 필요' : '막힘'}</span>
+            <span className="sr-only">{i.state === 'ok' ? '통과' : i.state === 'confirm' ? '확인 필요' : i.state === 'warn' ? '살펴보기' : '막힘'}</span>
           </li>
         ))}
       </ul>

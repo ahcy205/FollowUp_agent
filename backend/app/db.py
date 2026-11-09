@@ -12,8 +12,9 @@ class Base(DeclarativeBase):
 
 def _make_engine():
     url = get_settings().database_url
+    # hide_parameters: DB 오류 메시지에 저장하려던 값(메일 본문 · 주소)을 붙이지 않는다. 오류 로그로 새지 않게(7단계 정리).
     if url.startswith("sqlite"):
-        engine = create_engine(url, connect_args={"check_same_thread": False})
+        engine = create_engine(url, connect_args={"check_same_thread": False}, hide_parameters=True)
 
         @event.listens_for(engine, "connect")
         def _sqlite_pragmas(dbapi_conn, _):
@@ -23,7 +24,7 @@ def _make_engine():
             cur.close()
 
         return engine
-    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5, hide_parameters=True)
 
 
 engine = _make_engine()
