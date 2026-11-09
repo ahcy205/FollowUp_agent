@@ -3,6 +3,12 @@
 이 프로젝트의 주요 변경을 날짜별로 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따릅니다.
 세부 판단과 이유는 [`docs/decisions.md`](docs/decisions.md), 설계와 구현 계획은 [`docs/superpowers/`](docs/superpowers/)에 있습니다.
 
+## 2026-11-09 — README를 포트폴리오용으로
+
+### 변경
+- README를 처음 보는 사람 기준으로 다시 썼다: 한 줄 소개와 화면 7장(가상 데이터), 해결하는 문제, 주요 기능, 안전 설계 표, 트러블슈팅(실제로 고친 문제 2가지 · 설계로 막은 위험 3가지), 구조도, 품질, 판단 기록, 짧은 로컬 실행.
+- 단계별 진행 상황 · 자세한 실행 · Google 연결 · 배포 안내는 [docs/development.md](docs/development.md)로 옮겼다(내용 그대로).
+
 ## 2026-11-09 — 7단계 정리: 로그 · 유출 경고
 
 [설계](docs/superpowers/specs/2026-11-09-cleanup-stage7-design.md) · [구현 계획](docs/superpowers/plans/2026-11-09-cleanup-stage7.md) · [판단 기록](docs/decisions.md#7단계-정리-2026-11-09)
